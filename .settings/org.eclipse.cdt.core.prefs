@@ -1,0 +1,9 @@
+eclipse.preferences.version=1
+environment/project/org.eclipse.linuxtools.cdt.autotools.core.toolChain.154224984/RTE_SDK/delimiter=\:
+environment/project/org.eclipse.linuxtools.cdt.autotools.core.toolChain.154224984/RTE_SDK/operation=append
+environment/project/org.eclipse.linuxtools.cdt.autotools.core.toolChain.154224984/RTE_SDK/value=/home/yonch/src/DPDK
+environment/project/org.eclipse.linuxtools.cdt.autotools.core.toolChain.154224984/RTE_TARGET/delimiter=\:
+environment/project/org.eclipse.linuxtools.cdt.autotools.core.toolChain.154224984/RTE_TARGET/operation=append
+environment/project/org.eclipse.linuxtools.cdt.autotools.core.toolChain.154224984/RTE_TARGET/value=x86_64-default-linuxapp-gcc
+environment/project/org.eclipse.linuxtools.cdt.autotools.core.toolChain.154224984/append=true
+environment/project/org.eclipse.linuxtools.cdt.autotools.core.toolChain.154224984/appendContributed=true

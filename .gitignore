@@ -17,5 +17,14 @@
 MANIFEST
 .sconsign.dblite
 
-src/build/
-src/dist/
+aclocal.m4
+config.h.in
+configure
+Makefile.in
+MANIFEST.in
+autom4te.cache
+build-aux
+install-sh
+missing
+py-compile
+release/

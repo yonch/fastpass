@@ -27,7 +27,7 @@
 							<tool id="org.eclipse.linuxtools.cdt.autotools.core.toolchain.tool.autogen.1739416118" name="autogen.sh" superClass="org.eclipse.linuxtools.cdt.autotools.core.toolchain.tool.autogen"/>
 							<tool id="org.eclipse.linuxtools.cdt.autotools.core.toolchain.tool.gcc.143878991" name="GCC C Compiler" superClass="org.eclipse.linuxtools.cdt.autotools.core.toolchain.tool.gcc">
 								<option id="gnu.c.compiler.option.include.paths.389414187" name="Include paths (-I)" superClass="gnu.c.compiler.option.include.paths" valueType="includePath">
-									<listOptionValue builtIn="false" value="&quot;${workspace_loc:/home/yonch/src/DPDK/x86_64-default-linuxapp-gcc/include}&quot;"/>
+									<listOptionValue builtIn="false" value="/home/yonch/src/DPDK/x86_64-default-linuxapp-gcc/include"/>
 								</option>
 								<inputType id="cdt.managedbuild.tool.gnu.c.compiler.input.156491460" superClass="cdt.managedbuild.tool.gnu.c.compiler.input"/>
 							</tool>

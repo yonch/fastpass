@@ -16,7 +16,13 @@
 #include <string.h>
 #include <unistd.h>
  
-int run_tcp_receiver()
+void tcp_receiver_init(struct tcp_receiver *receiver, uint32_t id, uint32_t num_machines)
+{
+  receiver->id = id;
+  receiver->num_machines = num_machines;
+}
+
+int run_tcp_receiver(struct tcp_receiver *receiver)
 {
   struct sockaddr_in sock_addr;
 
@@ -25,7 +31,7 @@ int run_tcp_receiver()
   printf("created a socket!\n");
   if(sock_fd == -1)
   {
-    printf("can not create socket");
+    printf("can not create socket\n");
     return 0;
   }
  
@@ -38,7 +44,7 @@ int run_tcp_receiver()
   // Bind the address to the socket
   if(bind(sock_fd,(struct sockaddr *)&sock_addr, sizeof(sock_addr)) == -1)
   {
-    printf("error bind failed");
+    printf("error bind failed\n");
     close(sock_fd);
     return 0;
   }
@@ -47,7 +53,7 @@ int run_tcp_receiver()
   // Listen for incoming connections
   if(listen(sock_fd, 10) == -1)
   {
-    printf("error listen failed");
+    printf("error listen failed\n");
     close(sock_fd);
     return 0;
   }
@@ -61,7 +67,7 @@ int run_tcp_receiver()
 
     if(connect_fd < 0)
     {
-      printf("error accept failed");
+      printf("error accept failed\n");
       close(sock_fd);
       return 0;
     }
@@ -73,7 +79,7 @@ int run_tcp_receiver()
  
     if (shutdown(connect_fd, SHUT_RDWR) == -1)
     {
-      printf("can not shutdown socket");
+      printf("can not shutdown socket\n");
       close(connect_fd);
       close(sock_fd);
       return 0;
@@ -87,5 +93,8 @@ int run_tcp_receiver()
 
 int main(void)
 {
-  run_tcp_receiver();
+  struct tcp_receiver receiver;
+
+  tcp_receiver_init(&receiver, 2, 8);
+  run_tcp_receiver(&receiver);
 }

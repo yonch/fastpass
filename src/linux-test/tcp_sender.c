@@ -106,15 +106,23 @@ int run_tcp_sender(struct tcp_sender *sender, uint64_t duration)
   return 1;
 }
 
-int main(void)
+int main(int argc, char** argv)
 {
   struct generator gen;
   struct tcp_sender sender;
 
+  int id;
+  if (argc > 1)
+    sscanf(argv[1], "%d", &id);
+  else
+    printf("usage: tcp_sender [node_id]");
+
+  printf("id: %d\n", id);
+
   printf("time: %"PRIu64"\n", get_time());
 
-  gen_init(&gen, POISSON, UNIFORM, 100000, 20, 5, 8);
-  tcp_sender_init(&sender, &gen, 5);
+  gen_init(&gen, POISSON, UNIFORM, 100000, 20, id, 8);
+  tcp_sender_init(&sender, &gen, id);
   
   if (run_tcp_sender(&sender, 10000000000LL) == 0)
     printf("error\n");

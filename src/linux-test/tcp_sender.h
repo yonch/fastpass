@@ -15,12 +15,14 @@
 struct tcp_sender {
   struct generator *gen;
   uint32_t id;
+  uint64_t start_time;
+  uint64_t duration;  // How long to send for
 };
 
 // Inits a tcp sender.
-void tcp_sender_init(struct tcp_sender *sender, struct generator *gen, uint32_t id);
+void tcp_sender_init(struct tcp_sender *sender, struct generator *gen, uint32_t id, uint64_t start_time, uint64_t duration);
 
-// Runs one TCP sender. Returns 1 on success or 0 on failure.
-int run_tcp_sender(struct tcp_sender *sender, uint64_t duration);
+// Runs one TCP sender.
+void *run_tcp_sender(void *sender);
 
 #endif /* TCP_SENDER_H_ */

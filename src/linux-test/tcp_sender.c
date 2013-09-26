@@ -20,11 +20,14 @@
 #include <errno.h>
 #include <string.h>
 #include <inttypes.h>
+#include <assert.h>
  
-void tcp_sender_init(struct tcp_sender *sender, struct generator *gen, uint32_t id)
+void tcp_sender_init(struct tcp_sender *sender, struct generator *gen, uint32_t id, uint64_t start_time, uint64_t duration)
 {
   sender->gen = gen;
   sender->id = id;
+  sender->start_time = start_time;
+  sender->duration = duration;
 }
 
 int send_flow(struct packet *outgoing) {
@@ -34,11 +37,7 @@ int send_flow(struct packet *outgoing) {
 
   // Create a socket
   int sock_fd = socket(PF_INET, SOCK_STREAM, IPPROTO_TCP);
-  if (sock_fd == -1)
-  {
-    printf("cannot create socket\n");
-    return 0;
-  }
+  assert(sock_fd != -1);
  
   // Initialize destination address
   memset(&sock_addr, 0, sizeof(sock_addr));
@@ -46,27 +45,17 @@ int send_flow(struct packet *outgoing) {
   sock_addr.sin_port = htons(PORT);
   // TODO: choose IP that correspond to a randomly chosen core router
   result = inet_pton(AF_INET, "10.0.2.15", &sock_addr.sin_addr);
-  if (result <= 0)
-  {
-    printf("error: invalid address\n");
-    close(sock_fd);
-    return 0;
-  }
+  assert(result > 0);
  
   // Connect to the receiver
-  if (connect(sock_fd, (struct sockaddr *)&sock_addr, sizeof(sock_addr)) == -1)
-  {
-    printf("connect failed\n");
-    close(sock_fd);
-    return 0;
-  }
+  assert(connect(sock_fd, (struct sockaddr *)&sock_addr, sizeof(sock_addr)) != -1);
 
   int size_in_bytes = outgoing->size * MTU_SIZE;
   char *buffer = malloc(size_in_bytes);
   bcopy((void *) outgoing, buffer, sizeof(struct packet));
  
   int ret = send(sock_fd, buffer, size_in_bytes, 0);
-  printf("sent %d mtus (%d bytes) to %d at time %"PRIu64"\n", outgoing->size, size_in_bytes, outgoing->receiver, outgoing->send_time);
+  printf("sent, \t\t%d, %d, %d, %"PRIu64", %d\n", outgoing->size, outgoing->sender, outgoing->receiver, outgoing->send_time, outgoing->id);
   
   /* shutdown when done */
   (void) shutdown(sock_fd, SHUT_RDWR);
@@ -76,18 +65,20 @@ int send_flow(struct packet *outgoing) {
   return 1;
 }
 
-int run_tcp_sender(struct tcp_sender *sender, uint64_t duration)
+void *run_tcp_sender(void *arg)
 {
+  struct tcp_sender *sender = (struct tcp_sender *) arg;
   struct packet outgoing;
   struct gen_packet packet;
+  int count = 0;
 
-  uint64_t start_time = get_time();
-  uint64_t end_time = start_time + duration;
+  uint64_t start_time = sender->start_time;
+  uint64_t end_time = start_time + sender->duration;
   uint64_t next_send_time = start_time;
-  printf("start time: %"PRIu64"\n", start_time);
-  printf("end time: %"PRIu64"\n", end_time);
 
-  while (get_time() < end_time)
+  while (current_time() < start_time);
+
+  while (current_time() < end_time)
     {
       gen_next_packet(sender->gen, &packet);
       next_send_time += packet.time;
@@ -96,34 +87,11 @@ int run_tcp_sender(struct tcp_sender *sender, uint64_t duration)
       outgoing.receiver = packet.dest;
       outgoing.send_time = next_send_time;
       outgoing.size = packet.size;
+      outgoing.id = count++;
 
-      while (get_time() < next_send_time);
+      while (current_time() < next_send_time);
 
-      if (send_flow(&outgoing) == 0)
-	return 0;
+      assert(send_flow(&outgoing) != 0);
     }
 
-  return 1;
-}
-
-int main(int argc, char** argv)
-{
-  struct generator gen;
-  struct tcp_sender sender;
-
-  int id;
-  if (argc > 1)
-    sscanf(argv[1], "%d", &id);
-  else
-    printf("usage: tcp_sender [node_id]");
-
-  printf("id: %d\n", id);
-
-  printf("time: %"PRIu64"\n", get_time());
-
-  gen_init(&gen, POISSON, UNIFORM, 100000, 20, id, 8);
-  tcp_sender_init(&sender, &gen, id);
-  
-  if (run_tcp_sender(&sender, 10000000000LL) == 0)
-    printf("error\n");
 }

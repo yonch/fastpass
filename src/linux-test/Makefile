@@ -1,19 +1,16 @@
 # Macros
 CC = gcc
-CCFLAGS = -g -lm
+CCFLAGS = -g -lm -pthread
 
 # Pattern rule
 %.o: %.c
 	$(CC) $(CCFLAGS) -c $<
 
 # Dependency rules for non-file targets
-all: tcp_sender tcp_receiver
+all: tcp_experiment
 clean:
-	rm -f tcp_sender tcp_receiver *.o *~
+	rm -f tcp_experiment *.o *~
 
 # Dependency rules for file target
-tcp_sender: tcp_sender.o generate_packets.o
-	$(CC) $(CCFLAGS) $< generate_packets.o -o $@
-
-tcp_receiver: tcp_receiver.o generate_packets.o
-	$(CC) $(CCFLAGS) $< generate_packets.o -o $@
+tcp_experiment: tcp_experiment.o tcp_sender.o tcp_receiver.o generate_packets.o
+	$(CC) $(CCFLAGS) $< tcp_sender.o tcp_receiver.o generate_packets.o -o $@

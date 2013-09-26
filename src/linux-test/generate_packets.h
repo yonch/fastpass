@@ -15,7 +15,8 @@ enum time_distribution {
 };
 
 enum size_distribution {
-  ONE_SIZE  // size_param is size
+  ONE_SIZE,  // size_param is size
+  UNIFORM   // uniform in (1, size_param)
 };
 
 struct generator {

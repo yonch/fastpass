@@ -22,7 +22,7 @@ void gen_init(struct generator *generator, enum time_distribution time_dist,
 	      uint32_t size_param, uint32_t id, uint32_t num_machines)
 {
   assert(time_dist == POISSON);
-  assert(size_dist == ONE_SIZE);
+  assert(size_dist == ONE_SIZE || size_dist == UNIFORM);
 
   generator->time_dist = time_dist;
   generator->size_dist = size_dist;
@@ -40,7 +40,17 @@ void gen_next_packet(struct generator *generator, struct gen_packet *out)
   out->dest = (rand() >> 10) % (generator->num_machines - 1);
   if (out->dest >= generator->id) // skip my id
     out->dest++;
-  out->size = generator->size_param;
+
+  switch (generator->size_dist) {
+    case ONE_SIZE:
+      out->size = generator->size_param;
+      break;
+    case UNIFORM:
+      out->size = 1 + rand() / ((double) RAND_MAX) * (generator->size_param - 1);
+      break;
+    default:
+      assert(0);  // Invalid size distribution
+  }
 }
 
 // Based on a method suggested by wikipedia

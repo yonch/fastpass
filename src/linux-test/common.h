@@ -8,7 +8,7 @@
 #include <stdint.h>
 
 #define PORT 1100
-#define MTU_SIZE 1500
+#define MTU_SIZE 1456
 
 #ifndef COMMON_H_
 #define COMMON_H_

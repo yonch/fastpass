@@ -61,11 +61,12 @@ int send_flow(struct packet *outgoing) {
     return 0;
   }
 
-  char *buffer = malloc(outgoing->size);
+  int size_in_bytes = outgoing->size * MTU_SIZE;
+  char *buffer = malloc(size_in_bytes);
   bcopy((void *) outgoing, buffer, sizeof(struct packet));
  
-  int ret = send(sock_fd, buffer, outgoing->size, 0);
-  printf("sent data at time %"PRIu64"\n", outgoing->send_time);
+  int ret = send(sock_fd, buffer, size_in_bytes, 0);
+  printf("sent %d mtus (%d bytes) to %d at time %"PRIu64"\n", outgoing->size, size_in_bytes, outgoing->receiver, outgoing->send_time);
   
   /* shutdown when done */
   (void) shutdown(sock_fd, SHUT_RDWR);
@@ -112,7 +113,7 @@ int main(void)
 
   printf("time: %"PRIu64"\n", get_time());
 
-  gen_init(&gen, POISSON, ONE_SIZE, 100000, 152, 5, 8);
+  gen_init(&gen, POISSON, UNIFORM, 100000, 20, 5, 8);
   tcp_sender_init(&sender, &gen, 5);
   
   if (run_tcp_sender(&sender, 10000000000LL) == 0)

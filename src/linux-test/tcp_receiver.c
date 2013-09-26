@@ -72,11 +72,22 @@ int run_tcp_receiver(struct tcp_receiver *receiver)
     }
  
     /* perform read write operations ... */
+    struct packet incoming;
+    int bytes = read(connect_fd, &incoming, sizeof(struct packet));
+    printf("%d bytes intially\n", bytes);
+    assert(bytes == sizeof(struct packet));
+    int bytes_to_read = incoming.size * MTU_SIZE - sizeof(struct packet);
+
     char buf[MTU_SIZE];
-    int bytes = read(connect_fd, buf, sizeof(buf));
-    struct packet *incoming = (struct packet *) buf;
-    assert(bytes == incoming->size);
-    printf("received data of size %d from %d to %d. times:%"PRIu64", %"PRIu64"\n", incoming->size, incoming->sender, incoming->receiver, incoming->send_time, get_time());
+    while(bytes_to_read > 0)
+      {
+	int count = bytes_to_read < MTU_SIZE ? bytes_to_read : MTU_SIZE;
+	bytes = read(connect_fd, buf, count);
+	bytes_to_read -= bytes;
+	printf("%d more bytes read\n", bytes);
+      }
+    assert(bytes_to_read == 0);
+    printf("received data of size %d from %d to %d. times:%"PRIu64", %"PRIu64"\n", incoming.size, incoming.sender, incoming.receiver, incoming.send_time, get_time());
  
     if (shutdown(connect_fd, SHUT_RDWR) == -1)
     {

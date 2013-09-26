@@ -7,12 +7,17 @@
 
 #include <stdint.h>
 
+#define PORT 1100
+#define MTU_SIZE 1500
+
 #ifndef COMMON_H_
 #define COMMON_H_
 
 // Struct for storing packet data
 struct packet {
-  uint64_t creation_time;
+  uint32_t sender;
+  uint32_t receiver;
+  uint64_t send_time;
   uint32_t size;
 };
 

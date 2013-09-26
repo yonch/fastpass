@@ -5,6 +5,7 @@
  *      Author: aousterh
  */
 
+#include "common.h"
 #include "tcp_receiver.h" 
  
 #include <sys/types.h>
@@ -15,6 +16,8 @@
 #include <stdlib.h>
 #include <string.h>
 #include <unistd.h>
+#include <inttypes.h>
+#include <assert.h>
  
 void tcp_receiver_init(struct tcp_receiver *receiver, uint32_t id, uint32_t num_machines)
 {
@@ -28,7 +31,6 @@ int run_tcp_receiver(struct tcp_receiver *receiver)
 
   // Create a socket
   int sock_fd = socket(PF_INET, SOCK_STREAM, IPPROTO_TCP);
-  printf("created a socket!\n");
   if(sock_fd == -1)
   {
     printf("can not create socket\n");
@@ -38,7 +40,7 @@ int run_tcp_receiver(struct tcp_receiver *receiver)
   // Initialize socket address
   memset(&sock_addr, 0, sizeof(sock_addr));
   sock_addr.sin_family = AF_INET;
-  sock_addr.sin_port = htons(1100);
+  sock_addr.sin_port = htons(PORT);
   sock_addr.sin_addr.s_addr = htonl(INADDR_ANY);
  
   // Bind the address to the socket
@@ -48,7 +50,6 @@ int run_tcp_receiver(struct tcp_receiver *receiver)
     close(sock_fd);
     return 0;
   }
-  printf("bound\n");
  
   // Listen for incoming connections
   if(listen(sock_fd, 10) == -1)
@@ -57,13 +58,11 @@ int run_tcp_receiver(struct tcp_receiver *receiver)
     close(sock_fd);
     return 0;
   }
-  printf("listen\n");
  
   // Accept incoming connections
   for(;;)
   {
     int connect_fd = accept(sock_fd, NULL, NULL);
-    printf("accepted connection!\n");
 
     if(connect_fd < 0)
     {
@@ -73,9 +72,11 @@ int run_tcp_receiver(struct tcp_receiver *receiver)
     }
  
     /* perform read write operations ... */
-    char buf[15];
+    char buf[MTU_SIZE];
     int bytes = read(connect_fd, buf, sizeof(buf));
-    printf("read data: %s, %d bytes\n", buf, bytes);
+    struct packet *incoming = (struct packet *) buf;
+    assert(bytes == incoming->size);
+    printf("received data of size %d from %d to %d. times:%"PRIu64", %"PRIu64"\n", incoming->size, incoming->sender, incoming->receiver, incoming->send_time, get_time());
  
     if (shutdown(connect_fd, SHUT_RDWR) == -1)
     {

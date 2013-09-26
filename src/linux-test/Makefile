@@ -1,6 +1,6 @@
 # Macros
 CC = gcc
-CCFLAGS = -g
+CCFLAGS = -g -lm
 
 # Pattern rule
 %.o: %.c
@@ -12,8 +12,8 @@ clean:
 	rm -f tcp_sender tcp_receiver *.o *~
 
 # Dependency rules for file target
-tcp_sender: tcp_sender.o
-	$(CC) $(CCFLAGS) $< -o $@
+tcp_sender: tcp_sender.o generate_packets.o
+	$(CC) $(CCFLAGS) $< generate_packets.o -o $@
 
-tcp_receiver: tcp_receiver.o
-	$(CC) $(CCFLAGS) $< -o $@
+tcp_receiver: tcp_receiver.o generate_packets.o
+	$(CC) $(CCFLAGS) $< generate_packets.o -o $@

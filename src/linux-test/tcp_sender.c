@@ -21,6 +21,8 @@
 #include <string.h>
 #include <inttypes.h>
 #include <assert.h>
+
+#define NUM_CORES 4
  
 void tcp_sender_init(struct tcp_sender *sender, struct generator *gen, uint32_t id, uint64_t start_time, uint64_t duration)
 {
@@ -28,6 +30,67 @@ void tcp_sender_init(struct tcp_sender *sender, struct generator *gen, uint32_t 
   sender->id = id;
   sender->start_time = start_time;
   sender->duration = duration;
+}
+
+void choose_IP(uint32_t receiver_id, char *ip_addr) {
+  int index = 0;
+
+  int core = rand() / ((double) RAND_MAX) * NUM_CORES + 1;
+  switch(core)
+    {
+    case (1):
+      ip_addr[index++] = '1';
+      break;
+    case (2):
+      ip_addr[index++] = '2';
+      break;
+    case (3):
+      ip_addr[index++] = '3';
+      break;
+    case (4):
+      ip_addr[index++] = '4';
+      break;
+    default:
+      assert(0);
+  }
+  
+  ip_addr[index++] = '.';
+  ip_addr[index++] = '1';
+  ip_addr[index++] = '.';
+
+  switch(receiver_id >> 1)
+    {
+    case (0):
+      ip_addr[index++] = '1';
+      break;
+    case (1):
+      ip_addr[index++] = '2';
+      break;
+    case (2):
+      ip_addr[index++] = '3';
+      break;
+    case (3):
+      ip_addr[index++] = '4';
+      break;
+    default:
+      assert(0);
+  }
+
+  ip_addr[index++] = '.';
+
+  switch(receiver_id % 2)
+    {
+    case (0):
+      ip_addr[index++] = '1';
+      break;
+    case (1):
+      ip_addr[index++] = '2';
+      break;
+    default:
+      assert(0);
+  }
+  
+  ip_addr[index++] = '\0';
 }
 
 int send_flow(struct packet *outgoing) {
@@ -43,8 +106,11 @@ int send_flow(struct packet *outgoing) {
   memset(&sock_addr, 0, sizeof(sock_addr));
   sock_addr.sin_family = AF_INET;
   sock_addr.sin_port = htons(PORT);
-  // TODO: choose IP that correspond to a randomly chosen core router
-  result = inet_pton(AF_INET, "10.0.2.15", &sock_addr.sin_addr);
+  // Choose the IP that corresponds to a randomly chosen core router
+  char ip_addr[12];
+  choose_IP(outgoing->receiver, ip_addr);
+  printf("chosen IP %s for receiver %d\n", ip_addr, outgoing->receiver);
+  result = inet_pton(AF_INET, ip_addr, &sock_addr.sin_addr);
   assert(result > 0);
  
   // Connect to the receiver

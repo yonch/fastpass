@@ -20,13 +20,27 @@
 #include <assert.h>
 #include <sys/time.h>
 #include <stdbool.h>
+#include <fcntl.h>
 
 const int MAX_CONNECTIONS = 256;
 
-void *run_tcp_receiver()
+void tcp_receiver_init(struct tcp_receiver *receiver, uint64_t start_time, uint64_t duration)
+{
+  receiver->start_time = start_time;
+  receiver->duration = duration;
+}
+
+void *run_tcp_receiver(void *arg)
 {
   int i;
   struct sockaddr_in sock_addr;
+  struct tcp_receiver *receiver = (struct tcp_receiver *) arg;
+  uint32_t flows_received = 0;
+  uint64_t total_latency = 0;
+  struct timeval tv;
+
+  tv.tv_sec = 1;
+  tv.tv_usec = 0;
 
   // Create a socket
   int sock_fd = socket(PF_INET, SOCK_STREAM, IPPROTO_TCP);
@@ -53,7 +67,8 @@ void *run_tcp_receiver()
   fd_set rfds;
   FD_ZERO(&rfds);
 
-  for(;;)
+  uint64_t end_time = receiver->start_time + receiver->duration;
+  while(current_time() < end_time + 2000000000LL)	
   {
     int i;
     char buf[MTU_SIZE];
@@ -71,8 +86,9 @@ void *run_tcp_receiver()
     }
 
     // Wait for a socket to have data to read or a new connection
-    int retval = select(max + 1, &rfds, NULL, NULL, NULL);
-    assert(retval > 0);
+    int retval = select(max + 1, &rfds, NULL, NULL, &tv);
+    if (retval < 0)
+      break;
     
     if (FD_ISSET(sock_fd, &rfds))
       {
@@ -117,6 +133,7 @@ void *run_tcp_receiver()
 	  int count = bytes_left[ready_index] < MTU_SIZE ? bytes_left[ready_index] : MTU_SIZE;
 	  int bytes = read(ready_fd, buf, count);
 	  bytes_left[ready_index] -= bytes;
+	  uint64_t time_now = current_time();
 
 	  if (bytes_left[ready_index] == 0)
 	    {
@@ -124,7 +141,12 @@ void *run_tcp_receiver()
 	      struct packet *incoming = &packets[ready_index];
 	      printf("received,\t%d, %d, %d, %"PRIu64", %d, %"PRIu64"\n",
 		     incoming->size, incoming->sender, incoming->receiver,
-		     incoming->send_time, incoming->id, current_time());
+		     incoming->send_time, incoming->id, time_now);
+
+	      if (incoming->send_time < end_time) {
+		total_latency += (time_now - incoming->send_time);
+		flows_received++;
+	      }
  
 	      assert(shutdown(ready_fd, SHUT_RDWR) != -1);
 	      close(ready_fd);
@@ -136,7 +158,11 @@ void *run_tcp_receiver()
 	}
       }
 
-  }  
- 
+  }
+
+  printf("receiver finished at %"PRIu64"\n", current_time());
+  uint64_t avg_flow_time = total_latency / flows_received;
+  printf("received %d flows with average flow completion time %"PRIu64"\n",
+	 flows_received, avg_flow_time);
   close(sock_fd);
 }

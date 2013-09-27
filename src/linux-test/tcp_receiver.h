@@ -10,7 +10,15 @@
 #ifndef TCP_RECEIVER_H_
 #define TCP_RECEIVER_H_
 
+struct tcp_receiver {
+  uint64_t start_time;
+  uint64_t duration;  // How long to send for
+};
+
+// Inits a tcp receiver.
+void tcp_receiver_init(struct tcp_receiver *receiver, uint64_t start_time, uint64_t duration);
+
 // Runs one TCP receiver.
-void *run_tcp_receiver();
+void *run_tcp_receiver(void *);
 
 #endif /* TCP_RECEIVER_H_ */

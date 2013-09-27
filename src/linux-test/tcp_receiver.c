@@ -68,7 +68,7 @@ void *run_tcp_receiver(void *arg)
   FD_ZERO(&rfds);
 
   uint64_t end_time = receiver->start_time + receiver->duration;
-  while(current_time() < end_time + 2000000000LL)	
+  while(current_time() < end_time + 1*1000*1000*1000uLL)
   {
     int i;
     char buf[MTU_SIZE];

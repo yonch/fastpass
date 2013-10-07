@@ -161,8 +161,12 @@ void *run_tcp_receiver(void *arg)
   }
 
   printf("receiver finished at %"PRIu64"\n", current_time());
-  uint64_t avg_flow_time = total_latency / flows_received;
-  printf("received %d flows with average flow completion time %"PRIu64"\n",
-	 flows_received, avg_flow_time);
+  if (flows_received == 0)
+     printf("received 0 flows\n");
+  else {
+    uint64_t avg_flow_time = total_latency / flows_received;
+    printf("received %d flows with average flow completion time %"PRIu64"\n",
+	   flows_received, avg_flow_time);
+  }
   close(sock_fd);
 }

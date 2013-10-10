@@ -79,7 +79,7 @@ class kapoor_rizzi(object):
             # okay, got a matching
             matchings.append(g)
         
-        self._print_degrees(matchings + [g] + list(reversed(work_list)))
+        self._print_degrees(matchings)
         
         return [x.g for x in matchings]
             

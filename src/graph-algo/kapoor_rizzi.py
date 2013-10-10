@@ -23,7 +23,8 @@ class kapoor_rizzi(object):
     def almost_solve(self, d, g):
         print "Normalize:"
         bins = self._normalize(bin_graph(d,g))
-        print "After normalize", bins
+        print "After normalize"
+        self._print_degrees(bins)
         
         a = bins[0]
         b = bins[1]
@@ -38,7 +39,7 @@ class kapoor_rizzi(object):
                 
             self._print_degrees([a,b,c] + T)
             
-            if (a != b):
+            if (a.degree != b.degree):
                 a,b,c = self._hit_even(a, b, c)
                 self._print_degrees([a,b,c] + T)
         
@@ -85,14 +86,16 @@ class kapoor_rizzi(object):
     
     def _split_even(self, d):
         print "Split-even(%d)" % d.degree 
-        g1,g2 = self.euler_split.split(d.g)
+        #g1,g2 = self.euler_split.split(d.g)
+        g1,g2 = None, None
         return bin_graph(d.degree/2, g1), bin_graph(d.degree/2, g2)
     
     def _split_odd(self, d1, d2):
         print "Split-odd(%d,%d)" % (d1.degree,d2.degree)
         d1.g.add_edges_from(d2.g.edges())
         d1.degree += d2.degree
-        g_a, g_b = self.euler_split.split(d1.g)
+        #g_a, g_b = self.euler_split.split(d1.g)
+        g_a, g_b = None, None
         return (d1.degree / 2, g_a), (d1.degree / 2, g_b)
     
     def _slice_one(self, d):

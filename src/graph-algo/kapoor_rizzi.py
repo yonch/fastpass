@@ -80,6 +80,8 @@ class kapoor_rizzi(object):
             matchings.append(g)
         
         self._print_degrees(matchings + [g] + list(reversed(work_list)))
+        
+        return [x.g for x in matchings]
             
     
     def _normalize(self, d):
@@ -137,16 +139,14 @@ class kapoor_rizzi(object):
     
     def _split_even(self, d):
         print "Split-even(%d)" % d.degree 
-        #g1,g2 = self.euler_split.split(d.g)
-        g1,g2 = None, None
+        g1,g2 = self.euler_split.split(d.g)
         return bin_graph(d.degree/2, g1), bin_graph(d.degree/2, g2)
     
     def _split_odd(self, d1, d2):
         print "Split-odd(%d,%d)" % (d1.degree,d2.degree)
-        #d1.g.add_edges_from(d2.g.edges())
+        d1.g.add_edges_from(d2.g.edges())
         d1.degree += d2.degree
-        #g_a, g_b = self.euler_split.split(d1.g)
-        g_a, g_b = None, None
+        g_a, g_b = self.euler_split.split(d1.g)
         return bin_graph(d1.degree / 2, g_a), bin_graph(d1.degree / 2, g_b)
     
     def _slice_one(self, d):

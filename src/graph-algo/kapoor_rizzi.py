@@ -20,9 +20,21 @@ class kapoor_rizzi(object):
     def __init__(self):
         self.euler_split = euler_split()
 
-    def almost_solve(self, d, g):
+    def almost_solve(self, d, g, arbitrary_matchings = []):
+        '''
+        Performs ALMOST-SOLVE(delta).
+        @param d: degree of each node (g is regular)
+        @param g: regular graph with degrees d
+        @param arbitrary_matchings: a list of arbitrary permutations to use instead
+            of SLICE-ONE. If d is even, one is needed; if odd, two.
+        '''
         print "Normalize:"
-        bins = self._normalize(bin_graph(d,g))
+        if (len(arbitrary_matchings) == 0):
+            bins = self._normalize(bin_graph(d,g))
+        else:
+            # use the arbitrary matchings
+            bins = self._approx_normalize(
+                bin_graph(d,g), [bin_graph(1,x) for x in arbitrary_matchings])
         print "After normalize"
         self._print_degrees(bins)
         
@@ -44,6 +56,31 @@ class kapoor_rizzi(object):
                 self._print_degrees([a,b,c] + T)
         
         return [a,b,c] + T
+    
+    def solve(self, d, g, arbitrary_matchings = []):
+        bins = self.almost_solve(d, g, arbitrary_matchings)
+        
+        matchings = []
+        work_list = bins
+        work_list.reverse() # want to use pop and append, so need to reverse
+
+        while (len(work_list) > 0):
+            g = work_list.pop()
+            while (g.degree != 1):
+                self._print_degrees(matchings + [g] + list(reversed(work_list)))
+                if (g.degree % 2 == 1):
+                    # add a matching, and split
+                    g, g1 = self._split_odd(g, matchings.pop())
+                else:
+                    # just split
+                    g, g1 = self._split_even(g)
+                # save g1 for later
+                work_list.append(g1)
+            # okay, got a matching
+            matchings.append(g)
+        
+        self._print_degrees(matchings + [g] + list(reversed(work_list)))
+            
     
     def _normalize(self, d):
         bins = []
@@ -68,6 +105,20 @@ class kapoor_rizzi(object):
         d2, d3 = self._split_even(d)
         return [d1, d2, d3] + bins
     
+    def _approx_normalize(self, d, arbitrary_matchings):
+        # sanity check
+        if (len(arbitrary_matchings) != ((d.degree % 2) + 1)):
+            raise RuntimeError, "wrong number of arbitrary matchings for d=%d, (got %d, need exactly %d)" % \
+                (d, len(arbitrary_matchings), ((d.degree % 2) + 1))
+        
+        # use the arbitrary matchings
+        if (d.degree % 2 == 1):
+            g1, g2 = self._split_odd(d, arbitrary_matchings[1]) 
+        else:
+            g1, g2 = self._split_even(d)
+        
+        return [arbitrary_matchings[0], g1, g2]
+
     def _hit_even(self, a, b, c):
         '''
         perform HIT-EVEN on (a,b,b)
@@ -92,15 +143,16 @@ class kapoor_rizzi(object):
     
     def _split_odd(self, d1, d2):
         print "Split-odd(%d,%d)" % (d1.degree,d2.degree)
-        d1.g.add_edges_from(d2.g.edges())
+        #d1.g.add_edges_from(d2.g.edges())
         d1.degree += d2.degree
         #g_a, g_b = self.euler_split.split(d1.g)
         g_a, g_b = None, None
-        return (d1.degree / 2, g_a), (d1.degree / 2, g_b)
+        return bin_graph(d1.degree / 2, g_a), bin_graph(d1.degree / 2, g_b)
     
     def _slice_one(self, d):
         print "Slice-one(%d)" % d.degree
-        return bin_graph(1, None), bin_graph(d.degree - 1, None)
+        raise RuntimeError, "Slice-one not currently implemented, try the approximation version"
+        #return bin_graph(1, None), bin_graph(d.degree - 1, None)
     
     def _print_degrees(self, L):
         print ", ".join(repr(x.degree) for x in L)

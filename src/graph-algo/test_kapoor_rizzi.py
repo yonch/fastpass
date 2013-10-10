@@ -10,10 +10,14 @@ from graph_util import graph_util
 if __name__ == '__main__':
     KR = kapoor_rizzi()
     
-    degree = 72
+    degree = 33
     partition_n_nodes = 5
     
+    # generate random graph
     g = graph_util().generate_random_regular_bipartite(partition_n_nodes, degree)
     
-    KR.almost_solve(degree, g)
+    # generate arbitrary partitions for approximation algo
+    arbitrary = [graph_util().generate_random_regular_bipartite(partition_n_nodes, 1) for i in xrange((degree % 2) + 1)]
+    
+    KR.solve(degree, g, arbitrary)
     

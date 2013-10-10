@@ -133,6 +133,8 @@ class kapoor_rizzi(object):
         assert(b.degree == c.degree)
         
         while b.degree % 2 == 1:
+            # todo: the first parameter to split_odd should be the higher
+            #     degree graph, to pay less for merging..
             (a, (b, c)) = (c, self._split_odd(a, b)) 
         
         return a, b, c

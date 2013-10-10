@@ -62,41 +62,42 @@ class kapoor_rizzi(object):
             d,d1 = self._split_even(d)
             bins = [d1] + bins
             
-        assert(d >= 3)
-        print "Slice-one(%d)" % d
-        print "Split-even(%d)" % (d - 1)
-        return [1, d/2, d/2] + bins
+        assert(d.degree >= 3)
+        d1, d = self._slice_one(d)
+        d2, d3 = self._split_even(d)
+        return [d1, d2, d3] + bins
     
-    def _hit_even(self, g0, g1, g2):
+    def _hit_even(self, a, b, c):
         '''
         perform HIT-EVEN on (a,b,b)
         '''
-        a = g0[0]
-        b = g1[0]
-        print "Hit-even(%d,%d,%d)" % (a,b,b)
+        print "Hit-even(%d,%d,%d)" % (a.degree,b.degree,c.degree)
         
-        assert(a % 2 == 1)
-        assert(b % 2 == 1)
-        assert(a != b)
-        assert(g2[0] == b)
+        assert(a.degree % 2 == 1)
+        assert(b.degree % 2 == 1)
+        assert(a.degree != b.degree)
+        assert(b.degree == c.degree)
         
-        while g2[0] % 2 == 1:
-            (g0, (g1, g2)) = (g2, self._split_odd(g0, g1)) 
-            (a,b) = (b, ((a + b) / 2))
+        while b.degree % 2 == 1:
+            (a, (b, c)) = (c, self._split_odd(a, b)) 
         
-        return a,b,g0,g1,g2
+        return a, b, c
     
     def _split_even(self, d):
         print "Split-even(%d)" % d.degree 
         g1,g2 = self.euler_split.split(d.g)
         return bin_graph(d.degree/2, g1), bin_graph(d.degree/2, g2)
     
-    def _split_odd(self, g1, g2):
-        print "Split-odd(%d,%d)" % (g1.degree,d2.degree)
-        g1[1].add_edges_from(g2[1].edges())
-        d1 += d2
-        g_a, g_b = self.euler_split.split(g1[1])
-        return (d1/2, g_a), (d1/2, g_b)
+    def _split_odd(self, d1, d2):
+        print "Split-odd(%d,%d)" % (d1.degree,d2.degree)
+        d1.g.add_edges_from(d2.g.edges())
+        d1.degree += d2.degree
+        g_a, g_b = self.euler_split.split(d1.g)
+        return (d1.degree / 2, g_a), (d1.degree / 2, g_b)
+    
+    def _slice_one(self, d):
+        print "Slice-one(%d)" % d.degree
+        return bin_graph(1, None), bin_graph(d.degree - 1, None)
     
     def _print_degrees(self, L):
         print ", ".join(repr(x.degree) for x in L)

@@ -22,12 +22,22 @@
 #include <stdbool.h>
 #include <fcntl.h>
 
-const int MAX_CONNECTIONS = 256;
+# define MAX_CONNECTIONS 128
+
+// State to track which packets we have received
+int start_index = 0;
+int first_outstanding_id = 0;
+bool packets_received[MAX_CONNECTIONS];
 
 void tcp_receiver_init(struct tcp_receiver *receiver, uint64_t start_time, uint64_t duration)
 {
+  int i;
+
   receiver->start_time = start_time;
   receiver->duration = duration;
+
+  for (i = 0; i < MAX_CONNECTIONS; i++)
+    packets_received[i] = 0;
 }
 
 void *run_tcp_receiver(void *arg)
@@ -56,7 +66,7 @@ void *run_tcp_receiver(void *arg)
   assert(bind(sock_fd,(struct sockaddr *)&sock_addr, sizeof(sock_addr)) != -1);
  
   // Listen for incoming connections
-  assert(listen(sock_fd, 10) != -1);
+  assert(listen(sock_fd, MAX_CONNECTIONS) != -1);
 
   int connected_fds[MAX_CONNECTIONS];
   int bytes_left[MAX_CONNECTIONS];
@@ -146,6 +156,18 @@ void *run_tcp_receiver(void *arg)
 	      if (incoming->send_time < end_time) {
 		total_latency += (time_now - incoming->send_time);
 		flows_received++;
+
+		// Check to make sure that all packets are received
+		printf("first outstanding: %d\n", first_outstanding_id);
+		int index = incoming->id - first_outstanding_id;
+		assert(index < MAX_CONNECTIONS);
+		index = (index + start_index) % MAX_CONNECTIONS;
+		packets_received[index] = 1;
+		while (packets_received[start_index] == 1) {
+		  packets_received[start_index] = 0;
+		  start_index = (start_index + 1) % MAX_CONNECTIONS;
+		  first_outstanding_id++;
+		}
 	      }
  
 	      assert(shutdown(ready_fd, SHUT_RDWR) != -1);

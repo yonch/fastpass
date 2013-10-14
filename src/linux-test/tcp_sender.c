@@ -27,8 +27,24 @@
 #define NUM_CORES 4
 
 const int MAX_SOCKETS = 128;
+
+enum state {
+  INVALID,
+  CONNECTING,
+  SENDING
+};
+
+struct connection {
+  enum state status;
+  int sock_fd;
+  int return_val;
+  int bytes_left;
+  char *buffer;
+};
  
-void tcp_sender_init(struct tcp_sender *sender, struct generator *gen, uint32_t id, uint64_t start_time, uint64_t duration, float clock_freq)
+void tcp_sender_init(struct tcp_sender *sender, struct generator *gen,
+		     uint32_t id, uint64_t start_time, uint64_t duration,
+		     float clock_freq)
 {
   sender->gen = gen;
   sender->id = id;
@@ -113,16 +129,13 @@ void *run_tcp_sender(void *arg)
   uint64_t end_time = start_time + sender->duration;
   uint64_t next_send_time = start_time;
 
-  int socket_fds[MAX_SOCKETS];
-  int return_vals[MAX_SOCKETS];
-  int bytes_left[MAX_SOCKETS];
-  char *buffers[MAX_SOCKETS];
+  // Info about connections
+  struct connection connections[MAX_SOCKETS];
   for (i = 0; i < MAX_SOCKETS; i++)
-    socket_fds[i] = -1;
+    connections[i].status = INVALID;
 
-  fd_set wfds, efds;
+  fd_set wfds;
   FD_ZERO(&wfds);
-  FD_ZERO(&efds);
 
   // Generate the first outgoing packet
   gen_next_packet(sender->gen, &packet);
@@ -149,26 +162,21 @@ void *run_tcp_sender(void *arg)
       printf("nsec time diff goal: %ld\n", ts.tv_nsec);
 
       // Add fds to set and compute max
-      // Add connecting fds to both sets
       FD_ZERO(&wfds);
-      FD_ZERO(&efds);
       int max = 0;
       for (i = 0; i < MAX_SOCKETS; i++) {
-	if (socket_fds[i] == -1)
+	if (connections[i].status == INVALID)
 	  continue;
 
-	FD_SET(socket_fds[i], &wfds);
-	FD_SET(socket_fds[i], &efds);
-	if (socket_fds[i] > max)
-	  max = socket_fds[i];
+	FD_SET(connections[i].sock_fd, &wfds);
+	if (connections[i].sock_fd > max)
+	  max = connections[i].sock_fd;
       }
 
       // Wait for a socket to be ready or for it to be time to start a new connection
-      int retval = pselect(max + 1, NULL, &wfds, &efds, &ts, NULL);
+      int retval = pselect(max + 1, NULL, &wfds, NULL, &ts, NULL);
       if (retval < 0)
 	break;
-
-      printf("pselect returned: %"PRIu64"\n", current_time());
 
       if (current_time() >= next_send_time) {
 	// Open a new connection
@@ -176,10 +184,10 @@ void *run_tcp_sender(void *arg)
 	// Find an index to use
 	int index = -1;
 	for (i = 0; i < MAX_SOCKETS; i++) {
-	  if (socket_fds[i] == -1)
+	  if (connections[i].status == INVALID)
 	    {
+	      connections[i].status = CONNECTING;
 	      index = i;
-	      bytes_left[index] = -1;
 	      break;
 	    }
 	}
@@ -187,12 +195,11 @@ void *run_tcp_sender(void *arg)
 
 	struct sockaddr_in sock_addr;
 	struct sockaddr_in src_addr;
-	int result;
 
 	// Create a socket, set to non-blocking
-	socket_fds[index] = socket(PF_INET, SOCK_STREAM, IPPROTO_TCP);
-	assert(socket_fds[index] != -1);
-	assert(fcntl(socket_fds[index], F_SETFL, O_NONBLOCK) != -1);
+	connections[index].sock_fd = socket(PF_INET, SOCK_STREAM, IPPROTO_TCP);
+	assert(connections[index].sock_fd != -1);
+	assert(fcntl(connections[index].sock_fd, F_SETFL, O_NONBLOCK) != -1);
  
 	// Initialize destination address
 	memset(&sock_addr, 0, sizeof(sock_addr));
@@ -203,17 +210,23 @@ void *run_tcp_sender(void *arg)
 	//choose_IP(outgoing.receiver, ip_addr);
 	//printf("chosen IP %s for receiver %d\n", ip_addr, outgoing.receiver);
 	const char *ip_addr = "10.0.2.15";
-	result = inet_pton(AF_INET, ip_addr, &sock_addr.sin_addr);
-	assert(result > 0);
+	assert(inet_pton(AF_INET, ip_addr, &sock_addr.sin_addr) > 0);
  
 	// Connect to the receiver
-	printf("about to connect fd %d packet %d\n", socket_fds[index], outgoing.id);
-	return_vals[index] = connect(socket_fds[index], (struct sockaddr *)&sock_addr, sizeof(sock_addr));
-	assert(return_vals[index] >= 0 || errno == EINPROGRESS);
+	printf("about to connect fd %d packet %d\n", connections[index].sock_fd, outgoing.id);
+	connections[index].return_val = connect(connections[index].sock_fd,
+						(struct sockaddr *)&sock_addr,
+						sizeof(sock_addr));
+	if (connections[index].return_val < 0 && errno != EINPROGRESS) {
+	  printf("error %d: %s\n", errno, strerror(errno));
+	  assert(current_time() > end_time);
+	  return;
+	}
 
 	int size_in_bytes = outgoing.size * MTU_SIZE;
-	buffers[index] = malloc(size_in_bytes);
-	bcopy((void *) &outgoing, buffers[index], sizeof(struct packet));
+	connections[index].buffer = malloc(size_in_bytes);
+	bcopy((void *) &outgoing, connections[index].buffer,
+	      sizeof(struct packet));
 
 	// Generate the next outgoing packet
 	gen_next_packet(sender->gen, &packet);
@@ -232,40 +245,44 @@ void *run_tcp_sender(void *arg)
 	  int result;
 	  socklen_t result_len = sizeof(result);
 
-	  if (socket_fds[i] == -1 || !FD_ISSET(socket_fds[i], &wfds))
+	  if (connections[i].status == INVALID || !FD_ISSET(connections[i].sock_fd, &wfds))
 	    continue;  // This fd is invalid or not ready
 
-	  if (bytes_left[i] == -1) {
+	  if (connections[i].status == CONNECTING) {
 	    // check that connect was successful
-	    assert(getsockopt(socket_fds[i], SOL_SOCKET, SO_ERROR,
+	    assert(getsockopt(connections[i].sock_fd, SOL_SOCKET, SO_ERROR,
 			      &result, &result_len) == 0);
 	    assert(result == 0);
 
 	    // send data
-	    struct packet *outgoing_data = (struct packet *) buffers[i];
-	    bytes_left[i] = outgoing_data->size * MTU_SIZE;
-	    return_vals[i] = send(socket_fds[i], buffers[i], bytes_left[i], 0);
-	    /*	    printf("sent, \t\t%d, %d, %d, %"PRIu64", %d\n", bytes_left[i],
+	    struct packet *outgoing_data = (struct packet *) connections[i].buffer;
+	    connections[i].bytes_left = outgoing_data->size * MTU_SIZE;
+	    connections[i].return_val = send(connections[i].sock_fd,
+					     connections[i].buffer,
+					     connections[i].bytes_left, 0);
+	    connections[i].status = SENDING;
+	    /*	    printf("sent, \t\t%d, %d, %d, %"PRIu64", %d\n",
+		   connections[i].bytes_left,
 		   outgoing_data->sender, outgoing_data->receiver,
 		   outgoing_data->send_time, outgoing_data->id);*/
 
-	    printf("sent on fd %d packet %d\n", socket_fds[i], outgoing_data->id);
+	    printf("sent on fd %d packet %d\n", connections[i].sock_fd,
+		   outgoing_data->id);
 	  }
 	  else {
-	    printf("about to shutdown fd %d\n", socket_fds[i]);
+	    printf("about to shutdown fd %d\n", connections[i].sock_fd);
 	    // check that send was succsessful
-	    assert(return_vals[i] == bytes_left[i]);
+	    assert(connections[i].return_val == connections[i].bytes_left);
 
 	    // close socket
-	    (void) shutdown(socket_fds[i], SHUT_RDWR);
-	    close(socket_fds[i]);
+	    (void) shutdown(connections[i].sock_fd, SHUT_RDWR);
+	    close(connections[i].sock_fd);
 
 	    // clean up state
-	    socket_fds[i] = -1;
-	    free(buffers[i]);
+	    free(connections[i].buffer);
+	    connections[i].status = INVALID;
 	  }
-      }
-
+	}
     }
 
 }

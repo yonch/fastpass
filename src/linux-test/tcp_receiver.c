@@ -22,22 +22,12 @@
 #include <stdbool.h>
 #include <fcntl.h>
 
-# define MAX_CONNECTIONS 128
-
-// State to track which packets we have received
-int start_index = 0;
-int first_outstanding_id = 0;
-bool packets_received[MAX_CONNECTIONS];
-
 void tcp_receiver_init(struct tcp_receiver *receiver, uint64_t start_time, uint64_t duration)
 {
   int i;
 
   receiver->start_time = start_time;
   receiver->duration = duration;
-
-  for (i = 0; i < MAX_CONNECTIONS; i++)
-    packets_received[i] = 0;
 }
 
 void *run_tcp_receiver(void *arg)
@@ -46,6 +36,7 @@ void *run_tcp_receiver(void *arg)
   struct sockaddr_in sock_addr;
   struct tcp_receiver *receiver = (struct tcp_receiver *) arg;
   uint32_t flows_received = 0;
+  uint32_t bytes_received = 0;
   uint64_t total_latency = 0;
   struct timeval tv;
 
@@ -150,24 +141,13 @@ void *run_tcp_receiver(void *arg)
 	      // This flow is done!
 	      struct packet *incoming = &packets[ready_index];
 	      printf("received,\t%d, %d, %d, %"PRIu64", %d, %"PRIu64"\n",
-		     incoming->size, incoming->sender, incoming->receiver,
+		     incoming->sender, incoming->receiver, incoming->size,
 		     incoming->send_time, incoming->id, time_now);
 
 	      if (incoming->send_time < end_time) {
 		total_latency += (time_now - incoming->send_time);
 		flows_received++;
-
-		// Check to make sure that all packets are received
-		printf("first outstanding: %d\n", first_outstanding_id);
-		int index = incoming->id - first_outstanding_id;
-		assert(index < MAX_CONNECTIONS);
-		index = (index + start_index) % MAX_CONNECTIONS;
-		packets_received[index] = 1;
-		while (packets_received[start_index] == 1) {
-		  packets_received[start_index] = 0;
-		  start_index = (start_index + 1) % MAX_CONNECTIONS;
-		  first_outstanding_id++;
-		}
+		bytes_received += incoming->size * MTU_SIZE;
 	      }
  
 	      assert(shutdown(ready_fd, SHUT_RDWR) != -1);
@@ -187,8 +167,8 @@ void *run_tcp_receiver(void *arg)
      printf("received 0 flows\n");
   else {
     uint64_t avg_flow_time = total_latency / flows_received;
-    printf("received %d flows with average flow completion time %"PRIu64"\n",
-	   flows_received, avg_flow_time);
+    printf("received %d flows (%d total bytes) with average flow completion time %"PRIu64"\n",
+	   flows_received, bytes_received, avg_flow_time);
   }
   close(sock_fd);
 }

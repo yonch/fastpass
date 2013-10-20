@@ -26,8 +26,6 @@
 
 #define NUM_CORES 4
 
-const int MAX_SOCKETS = 128;
-
 enum state {
   INVALID,
   CONNECTING,
@@ -53,6 +51,9 @@ void tcp_sender_init(struct tcp_sender *sender, struct generator *gen,
   sender->clock_freq = clock_freq;
 }
 
+// Selects the IP that corresponds to the receiver id
+// Note that this only works for the original 8-machine testbed topology
+// Will need to be rewritten for different topologies
 void choose_IP(uint32_t receiver_id, char *ip_addr) {
   int index = 0;
 
@@ -122,6 +123,7 @@ void *run_tcp_sender(void *arg)
   int count = 0;
   int i;
   struct timespec ts;
+  uint32_t flows_sent = 0;
 
   ts.tv_sec = 0;
 
@@ -130,8 +132,8 @@ void *run_tcp_sender(void *arg)
   uint64_t next_send_time = start_time;
 
   // Info about connections
-  struct connection connections[MAX_SOCKETS];
-  for (i = 0; i < MAX_SOCKETS; i++)
+  struct connection connections[MAX_CONNECTIONS];
+  for (i = 0; i < MAX_CONNECTIONS; i++)
     connections[i].status = INVALID;
 
   fd_set wfds;
@@ -154,17 +156,15 @@ void *run_tcp_sender(void *arg)
       // Set timeout for when next packet should be sent
       uint64_t time_now = current_time();
       uint64_t time_diff = 0;
-      printf("time now: %"PRIu64", next send time: %"PRIu64"\n", time_now, next_send_time);
       if (next_send_time > time_now)
 	time_diff = (next_send_time < end_time ? next_send_time : end_time) - time_now;
       assert(time_diff / sender->clock_freq < 1000 * 1000 * 1000);
       ts.tv_nsec = time_diff / sender->clock_freq;
-      printf("nsec time diff goal: %ld\n", ts.tv_nsec);
 
       // Add fds to set and compute max
       FD_ZERO(&wfds);
       int max = 0;
-      for (i = 0; i < MAX_SOCKETS; i++) {
+      for (i = 0; i < MAX_CONNECTIONS; i++) {
 	if (connections[i].status == INVALID)
 	  continue;
 
@@ -183,7 +183,7 @@ void *run_tcp_sender(void *arg)
 
 	// Find an index to use
 	int index = -1;
-	for (i = 0; i < MAX_SOCKETS; i++) {
+	for (i = 0; i < MAX_CONNECTIONS; i++) {
 	  if (connections[i].status == INVALID)
 	    {
 	      connections[i].status = CONNECTING;
@@ -206,19 +206,16 @@ void *run_tcp_sender(void *arg)
 	sock_addr.sin_family = AF_INET;
 	sock_addr.sin_port = htons(PORT);
 	// Choose the IP that corresponds to a randomly chosen core router
-	//     char ip_addr[12];
-	//choose_IP(outgoing.receiver, ip_addr);
+	char ip_addr[12];
+	choose_IP(outgoing.receiver, ip_addr);
 	//printf("chosen IP %s for receiver %d\n", ip_addr, outgoing.receiver);
-	const char *ip_addr = "10.0.2.15";
 	assert(inet_pton(AF_INET, ip_addr, &sock_addr.sin_addr) > 0);
  
 	// Connect to the receiver
-	printf("about to connect fd %d packet %d\n", connections[index].sock_fd, outgoing.id);
 	connections[index].return_val = connect(connections[index].sock_fd,
 						(struct sockaddr *)&sock_addr,
 						sizeof(sock_addr));
 	if (connections[index].return_val < 0 && errno != EINPROGRESS) {
-	  printf("error %d: %s\n", errno, strerror(errno));
 	  assert(current_time() > end_time);
 	  return;
 	}
@@ -240,7 +237,7 @@ void *run_tcp_sender(void *arg)
       }
       
       // Handle all existing connections that are ready
-      for (i = 0; i < MAX_SOCKETS; i++)
+      for (i = 0; i < MAX_CONNECTIONS; i++)
         {
 	  int result;
 	  socklen_t result_len = sizeof(result);
@@ -261,16 +258,13 @@ void *run_tcp_sender(void *arg)
 					     connections[i].buffer,
 					     connections[i].bytes_left, 0);
 	    connections[i].status = SENDING;
-	    /*	    printf("sent, \t\t%d, %d, %d, %"PRIu64", %d\n",
-		   connections[i].bytes_left,
+	    printf("sent, \t\t%d, %d, %d, %"PRIu64", %d, %"PRIu64"\n",
 		   outgoing_data->sender, outgoing_data->receiver,
-		   outgoing_data->send_time, outgoing_data->id);*/
-
-	    printf("sent on fd %d packet %d\n", connections[i].sock_fd,
-		   outgoing_data->id);
+		   outgoing_data->size, outgoing_data->send_time,
+		   outgoing_data->id, current_time());
+	    flows_sent++;
 	  }
 	  else {
-	    printf("about to shutdown fd %d\n", connections[i].sock_fd);
 	    // check that send was succsessful
 	    assert(connections[i].return_val == connections[i].bytes_left);
 
@@ -284,5 +278,7 @@ void *run_tcp_sender(void *arg)
 	  }
 	}
     }
+
+  printf("sent %d flows\n", flows_sent);
 
 }

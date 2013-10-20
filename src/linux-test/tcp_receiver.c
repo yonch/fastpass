@@ -22,10 +22,10 @@
 #include <stdbool.h>
 #include <fcntl.h>
 
-const int MAX_CONNECTIONS = 256;
-
 void tcp_receiver_init(struct tcp_receiver *receiver, uint64_t start_time, uint64_t duration)
 {
+  int i;
+
   receiver->start_time = start_time;
   receiver->duration = duration;
 }
@@ -36,6 +36,7 @@ void *run_tcp_receiver(void *arg)
   struct sockaddr_in sock_addr;
   struct tcp_receiver *receiver = (struct tcp_receiver *) arg;
   uint32_t flows_received = 0;
+  uint32_t bytes_received = 0;
   uint64_t total_latency = 0;
   struct timeval tv;
 
@@ -56,7 +57,7 @@ void *run_tcp_receiver(void *arg)
   assert(bind(sock_fd,(struct sockaddr *)&sock_addr, sizeof(sock_addr)) != -1);
  
   // Listen for incoming connections
-  assert(listen(sock_fd, 10) != -1);
+  assert(listen(sock_fd, MAX_CONNECTIONS) != -1);
 
   int connected_fds[MAX_CONNECTIONS];
   int bytes_left[MAX_CONNECTIONS];
@@ -140,12 +141,13 @@ void *run_tcp_receiver(void *arg)
 	      // This flow is done!
 	      struct packet *incoming = &packets[ready_index];
 	      printf("received,\t%d, %d, %d, %"PRIu64", %d, %"PRIu64"\n",
-		     incoming->size, incoming->sender, incoming->receiver,
+		     incoming->sender, incoming->receiver, incoming->size,
 		     incoming->send_time, incoming->id, time_now);
 
 	      if (incoming->send_time < end_time) {
 		total_latency += (time_now - incoming->send_time);
 		flows_received++;
+		bytes_received += incoming->size * MTU_SIZE;
 	      }
  
 	      assert(shutdown(ready_fd, SHUT_RDWR) != -1);
@@ -161,8 +163,12 @@ void *run_tcp_receiver(void *arg)
   }
 
   printf("receiver finished at %"PRIu64"\n", current_time());
-  uint64_t avg_flow_time = total_latency / flows_received;
-  printf("received %d flows with average flow completion time %"PRIu64"\n",
-	 flows_received, avg_flow_time);
+  if (flows_received == 0)
+     printf("received 0 flows\n");
+  else {
+    uint64_t avg_flow_time = total_latency / flows_received;
+    printf("received %d flows (%d total bytes) with average flow completion time %"PRIu64"\n",
+	   flows_received, bytes_received, avg_flow_time);
+  }
   close(sock_fd);
 }

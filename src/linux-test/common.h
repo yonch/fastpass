@@ -7,11 +7,12 @@
 
 #include <stdint.h>
 
-#define PORT 1100
-#define MTU_SIZE 1456
-
 #ifndef COMMON_H_
 #define COMMON_H_
+
+#define PORT 1100
+#define MTU_SIZE 1456
+#define MAX_CONNECTIONS 256
 
 // Struct for storing packet data
 struct packet {

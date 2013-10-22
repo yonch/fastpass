@@ -115,10 +115,16 @@ void remove_edge(struct graph *graph, uint8_t u, uint8_t v) {
     // must have one left and one right vertex
     assert((u < n && v >= n) || (v < n && u >= n));
 
-    if (u < n)
+    if (u < n) {
+        assert(graph->edges[u][v - n] > 0);
+
         graph->edges[u][v - n] -= 1;
-    else
+    }
+    else {
+        assert(graph->edges[v][u - n] > 0);
+
         graph->edges[v][u - n] -= 1;
+    }
 }
 
 // Adds the edges from graph_2 to graph_1
@@ -135,6 +141,22 @@ void add_graph(struct graph *graph_1, struct graph *graph_2) {
             graph_1->edges[i][j] += graph_2->edges[i][j];
         }
     }
+}
+
+// Helper methods for testing in python
+static inline
+struct graph *create_graph_test(uint8_t degree, uint8_t n) {
+    struct graph *graph_out = malloc(sizeof(struct graph));
+    graph_init(graph_out, degree, n);
+
+    return graph_out;
+}
+
+static inline
+void destroy_graph_test(struct graph * graph) {
+    assert(graph != NULL);
+
+    free(graph);
 }
 
 #endif /* GRAPH_H_ */

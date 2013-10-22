@@ -11,10 +11,11 @@
 int main(void) {
     struct graph g, g1, g2;
 
-    int max_degree = 10;
-    graph_init(&g, max_degree);
-    graph_init(&g1, max_degree / 2);
-    graph_init(&g2, max_degree / 2);
+    int n = 10;
+    int max_degree = 4;
+    graph_init(&g, max_degree, n);
+    graph_init(&g1, max_degree / 2, n);
+    graph_init(&g2, max_degree / 2, n);
 
     split(&g, &g1, &g2);
 }

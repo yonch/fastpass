@@ -1,7 +1,7 @@
 # Macros
 CC = gcc
 CCFLAGS = -g
-LDFLAGS = -lm
+LDFLAGS =
 
 # Pattern rule
 %.o: %.c

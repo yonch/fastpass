@@ -17,14 +17,15 @@ void split(struct graph *graph_in, struct graph *graph_1,
     short int path_index [MAX_NODES];
     uint8_t path_node [MAX_NODES];
     uint8_t path_len = 0;
+    uint8_t n = graph_in->n;
 
     // Initialize path_index to empty
     int i, j;
-    for (i = 0; i < MAX_NODES; i++)
+    for (i = 0; i < 2 * n; i++)
         path_index[i] = NOT_IN_PATH;
 
     uint8_t node, cur_node;
-    for (node = 0; node < MAX_NODES; node++) {
+    for (node = 0; node < 2 * n; node++) {
         cur_node = node;
 
         while (path_len > 0 || get_degree(graph_in, node) > 0) {

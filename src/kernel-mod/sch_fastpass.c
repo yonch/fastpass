@@ -732,7 +732,7 @@ static int fp_dump_stats(struct Qdisc *sch, struct gnet_dump *d)
 {
 	struct fp_sched_data *q = qdisc_priv(sch);
 	u64 now = ktime_to_ns(ktime_get());
-	struct tc_fp_qd_stats st = {
+	struct tc_fastpass_qd_stats st = {
 		.gc_flows		= q->stat_gc_flows,
 		.highprio_packets	= q->stat_internal_packets,
 		.tcp_retrans		= q->stat_tcp_retrans,

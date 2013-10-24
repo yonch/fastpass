@@ -30,6 +30,31 @@ class Test(unittest.TestCase):
                 
         pass
 
+    def test_irregular_graphs(self):
+        ES = euler_split()
+        generator = graph_util()
+
+        for max_deg in xrange(2, 11, 2):
+            for n_side in xrange(2 * max_deg + 4, 33, 7):
+                for e in xrange(4, n_side * max_deg - 4, 10):
+                
+                    g = generator.generate_random_even_degree_bipartite(n_side, max_deg, e)
+                    g1, g2 = ES.split(g.copy())
+        
+                    # Add nodes, since they might have degree 0
+                    for x in g.nodes():
+                        g1.add_node(x)
+                        g2.add_node(x)
+
+                    self.assertEqual(g1.number_of_nodes(), g.number_of_nodes())
+                    self.assertEqual(g2.number_of_nodes(), g.number_of_nodes())
+                    self.assertEqual(len(g.edges()), 2 * len(g1.edges()))
+                    self.assertEqual(len(g.edges()), 2 * len(g2.edges()))
+                    self.assertEquals(sorted(g.edges()), sorted(g1.edges() + g2.edges()))
+                    self.assertEquals([g1.degree(x) + g2.degree(x) for x in g.nodes()],
+                                      [g.degree(x) for x in g.nodes()])
+                
+        pass
 
 if __name__ == "__main__":
     #import sys;sys.argv = ['', 'Test.test_keeps_edge_set']

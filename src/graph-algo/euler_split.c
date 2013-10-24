@@ -13,11 +13,12 @@
 // Splits graph_in into graph_1 and graph_2
 void split(struct graph *graph_in, struct graph *graph_1,
            struct graph *graph_2) {
-
-    short int path_index [MAX_NODES];
-    uint8_t path_node [MAX_NODES];
+    short int path_index [2 * MAX_NODES];
+    uint8_t path_node [2 * MAX_NODES];
     uint8_t path_len = 0;
     uint8_t n = graph_in->n;
+    uint8_t start_degree;
+    assert((start_degree = get_max_degree(graph_in)) > 1);
 
     // Initialize path_index to empty
     int i, j;
@@ -58,5 +59,7 @@ void split(struct graph *graph_in, struct graph *graph_1,
             }
         }
     }
-    
+
+    assert(get_max_degree(graph_1) <= start_degree / 2);
+    assert(get_max_degree(graph_2) <= start_degree / 2);
 }

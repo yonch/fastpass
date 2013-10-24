@@ -23,12 +23,13 @@ class Test(unittest.TestCase):
             for n_side in xrange(2*deg+4,33,7):
                 g_p = generator.generate_random_regular_bipartite(n_side, deg)
 
-                g_c = graph.create_graph_test(deg, n_side)
+                g_c = graph.create_graph_test(n_side)
                 
                 # Create the graph in C
                 # first n vertices are on left, second n are on right
                 for edge in g_p.edges_iter():
                     graph.add_edge(g_c, edge[0], edge[1])
+                self.assertEqual(deg, graph.get_max_degree(g_c))
                     
                 # Check that graph in C matches the graph in Python
                 for node in xrange(2 * n_side):
@@ -41,6 +42,8 @@ class Test(unittest.TestCase):
                 
                 graph.destroy_graph_test(g_c)
         pass
+
+        # TODO: could write more tests
                         
 
 if __name__ == "__main__":

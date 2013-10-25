@@ -28,24 +28,27 @@
 #include <net/sock.h>
 #include <net/tcp_states.h>
 
+#define FASTPASS_HORIZON 256
+
 /*
  * Per flow structure, dynamically allocated
  */
 struct fp_flow {
-	struct sk_buff	*head;		/* list of skbs for this flow : first skb */
-	union {
-		struct sk_buff *tail;	/* last skb in the list */
-		unsigned long  age;	/* jiffies when flow was emptied, for gc */
-	};
-	struct rb_node	fp_node; 	/* anchor in fp_root[] trees */
-	struct sock	*sk;
-	int		qlen;		/* number of packets in flow queue */
-	int		credit;
-	u32		socket_hash;	/* sk_hash */
-	struct fp_flow *next;		/* next pointer in RR lists, or &detached */
+	struct sock	*sk;		/* flow identifier */
+	u32		socket_hash;	/* sk_hash, detect reuse of sk after free+alloc */
 
-	struct rb_node  rate_node;	/* anchor in q->delayed tree */
-	u64		time_next_packet;
+	struct rb_node	fp_node; 	/* anchor in fp_root[] trees */
+
+	/* queued buffers: */
+	struct sk_buff	*head;		/* list of skbs for this flow : first skb */
+	struct sk_buff	*sch_tail;	/* last skb that had been scheduled */
+	struct sk_buff *tail;		/* last skb in the list */
+	int		sch_credit;			/* credit remaining in the last scheduled tslot */
+	int		qlen;				/* number of packets in flow queue */
+
+	int		credit;
+	int		sch_tslots;			/* number of scheduled tslots that have not ended */
+	u64		last_sch_tslot;		/* last slot that had been allocated to flow */
 };
 
 struct fp_flow_head {
@@ -54,9 +57,7 @@ struct fp_flow_head {
 };
 
 struct fp_sched_data {
-	struct fp_flow_head new_flows;
-
-	struct fp_flow_head old_flows;
+	struct fp_flow_head unsch_flows; /* flows with unscheduled packets */
 
 	struct rb_root	delayed;	/* for rate limited flows */
 	u64		time_next_delayed_flow;
@@ -64,12 +65,13 @@ struct fp_sched_data {
 	struct fp_flow	internal;	/* for non classified or high prio packets */
 	u32		quantum;
 	u32		initial_quantum;
-	u32		flow_default_rate;/* rate per flow : bytes per second */
-	u32		flow_max_rate;	/* optional max rate per flow */
 	u32		flow_plimit;	/* max packets per flow */
-	struct rb_root	*fp_root;
-	u8		rate_enable;
+	struct rb_root	*flow_hash_tbl;
 	u8		fp_trees_log;
+
+	struct fp_flow *schedule[FASTPASS_HORIZON];
+	u64		cur_tslot;
+	u64		next_tslot_time;
 
 	u32		flows;
 	u32		inactive_flows;
@@ -87,6 +89,15 @@ struct fp_sched_data {
 
 /* special value to mark a detached flow (not on old/new list) */
 static struct fp_flow detached, throttled;
+
+/**
+ * Flow 'f' is now allowed to use time slot 'tslot'
+ */
+static void fp_schedule_tslot(struct fp_sched_data *q, u64 tslot,
+		struct fp_flow *f);
+
+
+
 
 static void fp_flow_set_detached(struct fp_flow *f)
 {
@@ -209,7 +220,7 @@ static struct fp_flow *fp_classify(struct sk_buff *skb, struct fp_sched_data *q)
 		sk = (struct sock *)(skb_get_rxhash(skb) | 1L);
 	}
 
-	root = &q->fp_root[hash_32((u32)(long)sk, q->fp_trees_log)];
+	root = &q->flow_hash_tbl[hash_32((u32)(long)sk, q->fp_trees_log)];
 
 	if (q->flows >= (2U << q->fp_trees_log) &&
 	    q->inactive_flows > q->flows/2)
@@ -492,11 +503,11 @@ static void fp_reset(struct Qdisc *sch)
 	while ((skb = fp_dequeue_head(sch, &q->internal)) != NULL)
 		kfree_skb(skb);
 
-	if (!q->fp_root)
+	if (!q->flow_hash_tbl)
 		return;
 
 	for (idx = 0; idx < (1U << q->fp_trees_log); idx++) {
-		root = &q->fp_root[idx];
+		root = &q->flow_hash_tbl[idx];
 		while ((p = rb_first(root)) != NULL) {
 			f = container_of(p, struct fp_flow, fp_node);
 			rb_erase(p, root);
@@ -565,7 +576,7 @@ static int fp_resize(struct fp_sched_data *q, u32 log)
 	struct rb_root *array;
 	u32 idx;
 
-	if (q->fp_root && log == q->fp_trees_log)
+	if (q->flow_hash_tbl && log == q->fp_trees_log)
 		return 0;
 
 	array = kmalloc(sizeof(struct rb_root) << log, GFP_KERNEL);
@@ -575,11 +586,11 @@ static int fp_resize(struct fp_sched_data *q, u32 log)
 	for (idx = 0; idx < (1U << log); idx++)
 		array[idx] = RB_ROOT;
 
-	if (q->fp_root) {
-		fp_rehash(q, q->fp_root, q->fp_trees_log, array, log);
-		kfree(q->fp_root);
+	if (q->flow_hash_tbl) {
+		fp_rehash(q, q->flow_hash_tbl, q->fp_trees_log, array, log);
+		kfree(q->flow_hash_tbl);
 	}
-	q->fp_root = array;
+	q->flow_hash_tbl = array;
 	q->fp_trees_log = log;
 
 	return 0;
@@ -671,7 +682,7 @@ static void fp_destroy(struct Qdisc *sch)
 	struct fp_sched_data *q = qdisc_priv(sch);
 
 	fp_reset(sch);
-	kfree(q->fp_root);
+	kfree(q->flow_hash_tbl);
 	qdisc_watchdog_cancel(&q->watchdog);
 }
 
@@ -690,7 +701,7 @@ static int fp_init(struct Qdisc *sch, struct nlattr *opt)
 	q->new_flows.first	= NULL;
 	q->old_flows.first	= NULL;
 	q->delayed		= RB_ROOT;
-	q->fp_root		= NULL;
+	q->flow_hash_tbl		= NULL;
 	q->fp_trees_log		= ilog2(1024);
 	qdisc_watchdog_init(&q->watchdog, sch);
 

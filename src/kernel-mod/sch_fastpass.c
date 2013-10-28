@@ -29,6 +29,19 @@
 #include <net/pkt_sched.h>
 #include <net/sock.h>
 #include <net/tcp_states.h>
+#include <net/sch_generic.h>
+
+/*
+ * FastPass client qdisc
+ *
+ * Invariants:
+ *  - If a flow has unreq_tslots > 0, then it is linked to q->unreq_flows,
+ *      otherwise flow->next is NULL.
+ *
+ *  	An exception is if flow->next == &do_not_schedule (which is used for
+ *  	q->internal), then it is not linked to q->unreq_flows.
+ *
+ */
 
 #define FASTPASS_HORIZON		64
 #define FASTPASS_TSLOT_NSEC		13000
@@ -46,13 +59,13 @@ struct fp_flow {
 	u32		socket_hash;	/* sk_hash, detect reuse of sk after free+alloc */
 
 	struct rb_node	fp_node; 	/* anchor in fp_root[] trees */
-	struct fp_flow	*next;		/* singly linked pointer into q->unsch_flows */
+	struct fp_flow	*next;		/* singly linked pointer into q->unreq_flows */
 
 	/* queued buffers: */
 	struct sk_buff	*head;		/* list of skbs for this flow : first skb */
 	struct sk_buff	*sch_tail;	/* last skb that had been scheduled */
 	struct sk_buff *tail;		/* last skb in the list */
-	int		slots_pending_sch;		/* number of unscheduled timeslots */
+	int		unreq_tslots;		/* number of unscheduled timeslots */
 	int		qlen;				/* number of packets in flow queue */
 
 	s64		credit;				/* time remaining in the last scheduled timeslot */
@@ -73,7 +86,7 @@ struct fp_timeslot_horizon {
 struct fp_sched_data {
 	struct rb_root	*flow_hash_tbl;		/* table of rb-trees of flows */
 
-	struct fp_flow_head unsch_flows; /* flows with unscheduled packets */
+	struct fp_flow_head unreq_flows; /* flows with unscheduled packets */
 
 	struct fp_flow *schedule[FASTPASS_HORIZON];	/* flows scheduled in the next time slots: */
 												/* slot x at [x % FASTPASS_HORIZON] */
@@ -89,12 +102,13 @@ struct fp_sched_data {
 	u32		initial_quantum;
 	u32		flow_plimit;	/* max packets per flow */
 	u8		fp_trees_log;
+	struct psched_ratecfg rate;
 
 
 	u32		flows;
 	u32		inactive_flows;
-	u32		flows_pending_sch;
-	u32		slots_pending_sch;
+	u32		n_unreq_flows;
+	u32		unreq_tslots;
 
 	u64		stat_gc_flows;
 	u64		stat_internal_packets;
@@ -149,11 +163,11 @@ static void fp_schedule_tslot(struct fp_sched_data *q, u64 tslot,
 
 
 
-static bool fp_gc_candidate(const struct fp_flow *f,
-		const struct fp_sched_data *q)
+static bool fp_gc_candidate(const struct fp_sched_data *q,
+		const struct fp_flow *f)
 {
 	return f->qlen == 0 &&
-	       time_after(jiffies, f->last_sch_tslot + FP_GC_AGE);
+	       time_after64(q->horizon.timeslot, f->last_sch_tslot + FP_GC_AGE);
 }
 
 static void fp_gc(struct fp_sched_data *q,
@@ -173,7 +187,7 @@ static void fp_gc(struct fp_sched_data *q,
 		if (f->sk == sk)
 			break;
 
-		if (fp_gc_candidate(f)) {
+		if (fp_gc_candidate(q, f)) {
 			tofree[fcnt++] = f;
 			if (fcnt == FP_GC_MAX)
 				break;
@@ -286,17 +300,17 @@ static struct sk_buff *flow_dequeue_skb(struct Qdisc *sch, struct fp_flow *flow)
 	return skb;
 }
 
-static void flow_inc_unscheduled(struct fp_sched_data *q,
+static void flow_inc_unrequested(struct fp_sched_data *q,
 		struct fp_flow *flow)
 {
-	if (flow->slots_pending_sch == 0 && f->next != &do_not_schedule) {
+	if (flow->unreq_tslots == 0 && flow->next != &do_not_schedule) {
 		/* flow not on scheduling queue yet, enqueue */
-		BUG_ON(f->next != NULL);
-		fp_flow_add_tail(&q->unsch_flows, f);
-		q->flows_pending_sch++;
+		BUG_ON(flow->next != NULL);
+		fp_flow_add_tail(&q->unreq_flows, flow);
+		q->n_unreq_flows++;
 	}
-	flow->slots_pending_sch++;
-	q->slots_pending_sch++;
+	flow->unreq_tslots++;
+	q->unreq_tslots++;
 }
 
 /* add skb to flow queue */
@@ -304,8 +318,8 @@ static void flow_enqueue_skb(struct Qdisc *sch, struct fp_flow *flow,
 		struct sk_buff *skb)
 {
 	struct fp_sched_data *q = qdisc_priv(sch);
-	struct sk_buff *prev, *head = flow->head;
-	s64 cost = (s64) psched_l2t_ns(q->rate, qdisc_pkt_len(skb))
+	struct sk_buff *head = flow->head;
+	s64 cost = (s64) psched_l2t_ns(q->rate, qdisc_pkt_len(skb));
 
 	skb->next = NULL;
 	if (!head) {
@@ -316,9 +330,13 @@ static void flow_enqueue_skb(struct Qdisc *sch, struct fp_flow *flow,
 		flow->tail = skb;
 	}
 
+	/* if credit relates to an old slot, discard it */
+	if (unlikely(flow->unreq_tslots == 0 && flow->last_sch_tslot <= q->horizon.timeslot))
+		flow->credit = 0;
+
 	/* check if need to request a new slot */
 	if (cost > flow->credit) {
-		flow_inc_unscheduled(q, flow);
+		flow_inc_unrequested(q, flow);
 		flow->credit = FASTPASS_TSLOT_NSEC;
 	}
 
@@ -326,8 +344,6 @@ static void flow_enqueue_skb(struct Qdisc *sch, struct fp_flow *flow,
 	flow->qlen++;
 	sch->q.qlen++;
 	sch->qstats.backlog += qdisc_pkt_len(skb);
-	if (skb_is_retransmit(skb))
-		q->stat_tcp_retrans++;
 }
 
 static int fp_enqueue(struct sk_buff *skb, struct Qdisc *sch)
@@ -383,7 +399,6 @@ static void fp_move_timeslot(struct Qdisc *sch, struct psched_ratecfg *rate,
 static void fp_update_timeslot(struct Qdisc *sch, u64 now)
 {
 	struct fp_sched_data *q = qdisc_priv(sch);
-	struct fp_flow_head *head;
 	struct fp_flow *f;
 	int next_slot;
 	u64 next_slot_start;
@@ -412,12 +427,12 @@ begin:
 	q->tslot_start_time = next_slot_start;
 
 	/* get the scheduled flow */
-	f = q->schedule[now & FASTPASS_HORIZON];
+	f = q->schedule[q->horizon.timeslot & FASTPASS_HORIZON];
 	BUG_ON(f == NULL);
 
 	/* did we encounter a scheduled slot that is in the past */
 	if (unlikely(time_after_eq64(now, q->tslot_start_time + FASTPASS_TSLOT_NSEC))) {
-
+		flow_inc_unrequested(q, f); /* flow will need to re-request */
 		q->stat_missed_timeslots++;
 		goto begin;
 	}
@@ -506,7 +521,7 @@ static void fp_rehash(struct fp_sched_data *q,
 		while ((op = rb_first(oroot)) != NULL) {
 			rb_erase(op, oroot);
 			of = container_of(op, struct fp_flow, fp_node);
-			if (fp_gc_candidate(of)) {
+			if (fp_gc_candidate(q, of)) {
 				fcnt++;
 				kmem_cache_free(fp_flow_cachep, of);
 				continue;

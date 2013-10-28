@@ -85,35 +85,37 @@ struct fp_timeslot_horizon {
 };
 
 struct fp_sched_data {
-	struct rb_root	*flow_hash_tbl;		/* table of rb-trees of flows */
-
-	struct fp_flow_head unreq_flows; /* flows with unscheduled packets */
-
-	struct fp_flow *schedule[FASTPASS_HORIZON];	/* flows scheduled in the next time slots: */
-												/* slot x at [x % FASTPASS_HORIZON] */
-	struct fp_timeslot_horizon	horizon;
-	u64		tslot_start_time;
-
-	u64		time_next_req;
-	u64		time_next_sch_packet;
-
-
-	struct fp_flow	internal;	/* for non classified or high prio packets */
-	u32		quantum;
-	u32		initial_quantum;
-	u32		flow_plimit;	/* max packets per flow */
-	u8		fp_trees_log;
+	/* configuration paramters */
+	u32		flow_plimit;				/* max packets per flow */
+	u8		hash_tbl_log;				/* log number of hash buckets */
 	struct psched_ratecfg data_rate;	/* rate of payload packets */
 	u64		req_cost;					/* cost, in tokens, of a request */
 	u32		req_bucketlen;				/* the max number of tokens to burst */
 
-	u64		req_t;						/* time when credits were zero */
+	/* state */
+	struct rb_root	*flow_hash_tbl;		/* table of rb-trees of flows */
 
+	struct fp_flow	internal;		/* for non classified or high prio packets */
+
+	struct fp_flow_head unreq_flows; 	/* flows with unscheduled packets */
+
+	u64		tslot_start_time;			/* current time slot start time */
+	struct fp_timeslot_horizon	horizon;/* which slots have been allocated */
+	struct fp_flow *schedule[FASTPASS_HORIZON];	/* flows scheduled in the next time slots: */
+												/* slot x at [x % FASTPASS_HORIZON] */
+
+	u64		req_t;						/* time when request credits = zero */
+	u64		time_next_req;				/* time to send next request */
+
+	struct qdisc_watchdog watchdog;
+
+	/* counters */
 	u32		flows;
 	u32		inactive_flows;
 	u32		n_unreq_flows;
 	u32		unreq_tslots;
 
+	/* statistics */
 	u64		stat_gc_flows;
 	u64		stat_internal_packets;
 	u64		stat_tcp_retrans;
@@ -122,7 +124,6 @@ struct fp_sched_data {
 	u64		stat_pkts_too_long;
 	u64		stat_allocation_errors;
 	u64		stat_missed_timeslots;
-	struct qdisc_watchdog watchdog;
 };
 
 /* special value to mark a flow should not be scheduled */
@@ -239,9 +240,9 @@ static struct fp_flow *fp_classify(struct sk_buff *skb, struct fp_sched_data *q)
 	else
 		skb_hash = sk->sk_hash;
 
-	root = &q->flow_hash_tbl[skb_hash >> (32 - q->fp_trees_log)];
+	root = &q->flow_hash_tbl[skb_hash >> (32 - q->hash_tbl_log)];
 
-	if (q->flows >= (2U << q->fp_trees_log) &&
+	if (q->flows >= (2U << q->hash_tbl_log) &&
 	    q->inactive_flows > q->flows/2)
 		fp_gc(q, root, skb_hash, sk);
 
@@ -535,7 +536,7 @@ static void fp_reset(struct Qdisc *sch)
 	if (!q->flow_hash_tbl)
 		return;
 
-	for (idx = 0; idx < (1U << q->fp_trees_log); idx++) {
+	for (idx = 0; idx < (1U << q->hash_tbl_log); idx++) {
 		root = &q->flow_hash_tbl[idx];
 		while ((p = rb_first(root)) != NULL) {
 			f = container_of(p, struct fp_flow, fp_node);
@@ -608,7 +609,7 @@ static int fp_resize(struct fp_sched_data *q, u32 log)
 	struct rb_root *array;
 	u32 idx;
 
-	if (q->flow_hash_tbl && log == q->fp_trees_log)
+	if (q->flow_hash_tbl && log == q->hash_tbl_log)
 		return 0;
 
 	array = kmalloc(sizeof(struct rb_root) << log, GFP_KERNEL);
@@ -619,11 +620,11 @@ static int fp_resize(struct fp_sched_data *q, u32 log)
 		array[idx] = RB_ROOT;
 
 	if (q->flow_hash_tbl) {
-		fp_rehash(q, q->flow_hash_tbl, q->fp_trees_log, array, log);
+		fp_rehash(q, q->flow_hash_tbl, q->hash_tbl_log, array, log);
 		kfree(q->flow_hash_tbl);
 	}
 	q->flow_hash_tbl = array;
-	q->fp_trees_log = log;
+	q->hash_tbl_log = log;
 
 	return 0;
 }
@@ -655,7 +656,7 @@ static int fp_change(struct Qdisc *sch, struct nlattr *opt)
 
 	sch_tree_lock(sch);
 
-	fp_log = q->fp_trees_log;
+	fp_log = q->hash_tbl_log;
 
 	if (tb[TCA_FP_BUCKETS_LOG]) {
 		u32 nval = nla_get_u32(tb[TCA_FP_BUCKETS_LOG]);
@@ -734,14 +735,14 @@ static int fp_init(struct Qdisc *sch, struct nlattr *opt)
 	q->old_flows.first	= NULL;
 	q->delayed		= RB_ROOT;
 	q->flow_hash_tbl		= NULL;
-	q->fp_trees_log		= ilog2(1024);
+	q->hash_tbl_log		= ilog2(1024);
 	qdisc_watchdog_init(&q->watchdog, sch);
 	q->internal.next = &do_not_schedule;
 
 	if (opt)
 		err = fp_change(sch, opt);
 	else
-		err = fp_resize(q, q->fp_trees_log);
+		err = fp_resize(q, q->hash_tbl_log);
 
 	return err;
 }
@@ -762,7 +763,7 @@ static int fp_dump(struct Qdisc *sch, struct sk_buff *skb)
 	    nla_put_u32(skb, TCA_FP_RATE_ENABLE, q->rate_enable) ||
 	    nla_put_u32(skb, TCA_FP_FLOW_DEFAULT_RATE, q->flow_default_rate) ||
 	    nla_put_u32(skb, TCA_FP_FLOW_MAX_RATE, q->flow_max_rate) ||
-	    nla_put_u32(skb, TCA_FP_BUCKETS_LOG, q->fp_trees_log))
+	    nla_put_u32(skb, TCA_FP_BUCKETS_LOG, q->hash_tbl_log))
 		goto nla_put_failure;
 
 	nla_nest_end(skb, opts);

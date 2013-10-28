@@ -12,7 +12,7 @@ sys.path.insert(0, '../../bindings/graph-algo')
 
 from graph_util import graph_util
 from kr_util import kr_util
-from timing_util import timing_util
+from timing_util import *
 import graph
 import kapoorrizzi
 
@@ -77,18 +77,31 @@ class Test(unittest.TestCase):
 
     def test_timing(self):
 
-        experiments = 1000
+        experiments = 100
 
-        times = []
+        c_times = []
         for i in range(experiments):
-            t = timeit.Timer('timer.solve_c()',
-                             'import timing_util; timer = timing_util.timing_util(40, 15)')
-            times.append(t.timeit(1))
+            t = timeit.Timer('timer.solve()',
+                             'import timing_util; timer = timing_util.c_timing_util(40, 15)')
+            c_times.append(t.timeit(1))
 
-        avg = sum(times) / len(times)
-        print "min time: (%f)" % min(times)
-        print "max time: (%f)" % max(times)
-        print "avg time: (%f)" % avg
+        p_times = []
+        for i in range(experiments):
+            t = timeit.Timer('timer.solve()',
+                             'import timing_util; timer = timing_util.python_timing_util(40, 15)')
+            p_times.append(t.timeit(1))
+
+        c_avg = sum(c_times) / len(c_times)
+        print "C implementation:"
+        print "min time: (%f)" % min(c_times)
+        print "max time: (%f)" % max(c_times)
+        print "avg time: (%f)" % c_avg
+
+        p_avg = sum(p_times) / len(p_times)
+        print "Python implementation:"
+        print "min time: (%f)" % min(p_times)
+        print "max time: (%f)" % max(p_times)
+        print "avg time: (%f)" % p_avg
 
 if __name__ == "__main__":
     unittest.main()

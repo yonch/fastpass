@@ -5,8 +5,14 @@
  *      Author: aousterh
  */
 
+#include "euler_split.h"
 #include "graph.h"
 #include "kapoor_rizzi.h"
+
+// Helper methods
+void split_even(struct graph *src, struct graph *dst1, struct graph *dst2);
+void split_odd(struct graph *src1, struct graph *src2,
+               struct graph *dst1, struct graph *dst2);
 
 // Initialize a KR solver
 void kr_init(struct kr *kr, uint8_t degree) {
@@ -17,14 +23,73 @@ void kr_init(struct kr *kr, uint8_t degree) {
     kr->num_steps = 0;
 }
 
-// Splits graph_in into matchings, using the arbitary_matching
+// Splits graph_in into matchings, using the arbitary matching
 // Uses the approximate method
-void solve(struct kr *kr, struct graph *graph_in, struct graph *arbitrary_matching,
+void solve(struct kr *kr, struct graph *graph_in, struct graph *arbitrary,
            struct matching_set *solution)
 {
-    // TODO
+    assert(kr != NULL);
+    assert(graph_in != NULL);
+    assert(arbitrary != NULL);
+    assert(solution != NULL);
 
-    // outputs matchings in solution
+    uint8_t num_matchings = kr->degree + 1;
+
+    // Copy input graph and arbitrary matching to correct locations in solution
+    copy_graph(graph_in, &solution->matchings[num_matchings]);
+    copy_graph(arbitrary, &solution->matchings[0]);
+
+    int i;
+    for (i = 0; i < kr->num_steps; i++) {
+        struct kr_step *step = &kr->steps[i];
+
+        uint8_t src1 = step->src1_index;
+        uint8_t src2 = step->src2_index;
+        uint8_t dst1 = step->dst1_index;
+        uint8_t dst2 = step->dst2_index;
+        if (step->type == SPLIT_EVEN) {
+            split_even(&solution->matchings[src1], &solution->matchings[dst1],
+                       &solution->matchings[dst2]);
+        }
+        else {
+            split_odd(&solution->matchings[src1], &solution->matchings[src2],
+                      &solution->matchings[dst1], &solution->matchings[dst2]);
+        }
+    }
+
+    solution->num_matchings = num_matchings;
+}
+
+void split_even(struct graph *src, struct graph *dst1, struct graph *dst2)
+{
+    assert(src != NULL);
+    assert(dst1 != NULL);
+    assert(dst2 != NULL);
+
+    uint8_t n = src->n;
+
+    graph_init(dst1, n);
+    graph_init(dst2, n);
+    
+    split(src, dst1, dst2);
+}
+
+void split_odd(struct graph *src1, struct graph *src2,
+               struct graph *dst1, struct graph *dst2)
+{
+    assert(src1 != NULL);
+    assert(src2 != NULL);
+    assert(dst1 != NULL);
+    assert(dst2 != NULL);
+    assert(src1->n == src2->n);
+
+    uint8_t n = src1->n;
+
+    graph_init(dst1, n);
+    graph_init(dst2, n);
+ 
+    add_graph(src1, src2);
+    split(src1, dst1, dst2);
 }
 
 // Create a kr
@@ -44,7 +109,7 @@ void destroy_kr(struct kr *kr) {
 
 // Set the next step in this kr
 void set_kr_step(struct kr *kr, enum step_type type, uint8_t src1_index,
-                 uint8_t src2_index, uint8_t dest1_index, uint8_t dest2_index) {
+                 uint8_t src2_index, uint8_t dst1_index, uint8_t dst2_index) {
     assert(kr != NULL);
     assert(kr->num_steps < MAX_STEPS);
 
@@ -53,8 +118,8 @@ void set_kr_step(struct kr *kr, enum step_type type, uint8_t src1_index,
     next_step->type = type;
     next_step->src1_index = src1_index;
     next_step->src2_index = src2_index;
-    next_step->dest1_index = dest1_index;
-    next_step->dest2_index = dest2_index;
+    next_step->dst1_index = dst1_index;
+    next_step->dst2_index = dst2_index;
 
     kr->num_steps++;
 }

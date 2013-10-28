@@ -156,6 +156,16 @@ void add_graph(struct graph *graph_1, struct graph *graph_2) {
     }
 }
 
+// Copies the graph from src to dst
+static inline
+void copy_graph(struct graph *src, struct graph *dst) {
+    assert(src != NULL);
+    assert(dst != NULL);
+
+    graph_init(dst, src->n);
+    add_graph(dst, src);
+}
+
 // Returns true if the two graphs are equivalent, false otherwise
 static inline
 bool are_equal(struct graph *graph_1, struct graph *graph_2) {

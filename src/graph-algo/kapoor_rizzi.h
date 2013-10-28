@@ -24,8 +24,8 @@ struct kr_step {
     enum step_type type;
     uint8_t src1_index;
     uint8_t src2_index;
-    uint8_t dest1_index;
-    uint8_t dest2_index;
+    uint8_t dst1_index;
+    uint8_t dst2_index;
 };
 
 struct kr {
@@ -44,7 +44,7 @@ void kr_init(struct kr *kr, uint8_t degree);
 
 // Splits graph_in into matchings, using the arbitary_matching
 // Uses the approximate method
-void solve(struct kr *kr, struct graph *graph_in, struct graph *arbitrary_matching,
+void solve(struct kr *kr, struct graph *graph_in, struct graph *arbitrary,
            struct matching_set *solution);
 
 // Helper methods for creating/destroying KR's from Python code
@@ -54,7 +54,7 @@ void destroy_kr(struct kr *kr);
 
 // Set the next step in this kr
 void set_kr_step(struct kr *kr, enum step_type type, uint8_t src1_index,
-                 uint8_t src2_index, uint8_t dest1_index, uint8_t dest2_index);
+                 uint8_t src2_index, uint8_t dst1_index, uint8_t dst2_index);
 
 // Initialize a matching_set
 void matching_set_init(struct matching_set *solution);

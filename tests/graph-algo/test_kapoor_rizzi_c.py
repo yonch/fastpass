@@ -4,6 +4,7 @@ Created on October 27, 2013
 @author: aousterh
 '''
 import sys
+import timeit
 import unittest
 
 sys.path.insert(0, '../../src/graph-algo')
@@ -11,6 +12,7 @@ sys.path.insert(0, '../../bindings/graph-algo')
 
 from graph_util import graph_util
 from kr_util import kr_util
+from timing_util import timing_util
 import graph
 import kapoorrizzi
 
@@ -72,6 +74,21 @@ class Test(unittest.TestCase):
         kapoorrizzi.destroy_matching_set(solution)
 
         pass
+
+    def test_timing(self):
+
+        experiments = 1000
+
+        times = []
+        for i in range(experiments):
+            t = timeit.Timer('timer.solve_c()',
+                             'import timing_util; timer = timing_util.timing_util(40, 15)')
+            times.append(t.timeit(1))
+
+        avg = sum(times) / len(times)
+        print "min time: (%f)" % min(times)
+        print "max time: (%f)" % max(times)
+        print "avg time: (%f)" % avg
 
 if __name__ == "__main__":
     unittest.main()

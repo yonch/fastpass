@@ -46,6 +46,7 @@
 #define FASTPASS_HORIZON		64
 #define FASTPASS_TSLOT_NSEC		13000
 #define FASTPASS_HZ				(NSEC_PER_SEC / FASTPASS_TSLOT_NSEC)
+#define FASTPASS_REQ_DELAY		1000
 
 /* limit number of collected flows per round */
 #define FP_GC_MAX 8
@@ -93,7 +94,7 @@ struct fp_sched_data {
 	struct fp_timeslot_horizon	horizon;
 	u64		tslot_start_time;
 
-	u64		time_next_sch_req;
+	u64		time_next_req;
 	u64		time_next_sch_packet;
 
 
@@ -430,17 +431,53 @@ begin:
 	q->schedule[q->horizon.timeslot & FASTPASS_HORIZON] = NULL;
 }
 
-static void fp_do_request_if_permitted(struct fp_sched_data *q, u64 now) {
+void compute_time_next_req(struct fp_sched_data* q, u64 now)
+{
+	if (q->n_unreq_flows)
+		q->time_next_req = max_t(u64, q->req_t + q->req_cost,
+				now + FASTPASS_REQ_DELAY);
+	else
+		q->time_next_req = ~0ULL;
+}
+
+static void fp_do_request(struct fp_sched_data *q, u64 now)
+{
+	struct fp_flow *f;
+	int empty_slot;
+
 	BUG_ON(q->req_t + q->req_cost > now);
+	BUG_ON(!q->unreq_flows.first);
 
-	/* if not enough credits, return */
-	if (q->req_credits < q->req_cost)
-		return;
+	printk("fp_do_request start unreq_flows=%u, unreq_tslots=%u\n",
+			q->n_unreq_flows, q->unreq_tslots);
 
-	printk()
-	
+	while (q->unreq_flows.first) {
+		f = q->unreq_flows.first;
+		empty_slot = __ffs64(~q->horizon.mask & ~1ULL) - 1;
+
+		if (empty_slot < 0)
+			break; /* no more slots to schedule */
+
+		/* allocate slot to flow */
+		q->schedule[(q->horizon.timeslot + empty_slot) % FASTPASS_HORIZON] = f;
+		q->horizon.mask |= (1ULL << empty_slot);
+		f->unreq_tslots--;
+		q->unreq_tslots--;
+
+		if (f->unreq_tslots == 0) {
+			/* remove flow from the q->unreq_flows queue */
+			q->unreq_flows.first = f->next;
+			f->next = NULL;
+			q->n_unreq_flows--;
+		}
+	}
+
+	printk("fp_do_request end unreq_flows=%u, unreq_tslots=%u\n",
+			q->n_unreq_flows, q->unreq_tslots);
+
 	/* update credits */
 	q->req_t = max_t(u64, q->req_t, now - q->req_bucketlen) + q->req_cost;
+	compute_time_next_req(q, now);
 }
 
 static struct sk_buff *fp_dequeue(struct Qdisc *sch)
@@ -450,7 +487,8 @@ static struct sk_buff *fp_dequeue(struct Qdisc *sch)
 	struct sk_buff *skb;
 
 	/* initiate a request if appropriate */
-	fp_do_request_if_permitted(q, now);
+	if (now >= q->time_next_req)
+		fp_do_request(q, now);
 
 	/* any packets already queued? */
 	skb = flow_dequeue_skb(sch, &q->internal);

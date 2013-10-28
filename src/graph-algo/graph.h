@@ -177,6 +177,31 @@ bool are_equal(struct graph *graph_1, struct graph *graph_2) {
     return true;
 }
 
+// Returns true if the graph is a perfect matching, false otherwise
+static inline
+bool is_perfect_matching(struct graph *graph) {
+    assert(graph != NULL);
+
+    uint8_t n = graph->n;
+    int i, j;
+    for (i = 0; i < n; i++) {
+        uint8_t edges = 0;
+        for (j = 0; j < n; j++)
+            edges += graph->edges[i][j];
+        if (edges != 1)
+            return false;
+    }
+    for (i = 0; i < n; i++) {
+        uint8_t edges = 0;
+        for (j = 0; j < n; j++)
+            edges += graph->edges[j][i];
+        if (edges != 1)
+            return false;
+    }
+
+    return true;                
+}
+
 // Helper methods for testing in python
 static inline
 struct graph *create_graph_test(uint8_t n) {

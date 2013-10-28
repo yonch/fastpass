@@ -56,7 +56,7 @@
  */
 struct fp_flow {
 	struct sock	*sk;		/* flow identifier */
-	u32		socket_hash;	/* sk_hash, detect reuse of sk after free+alloc */
+	u32		skb_hash;	/* sk_hash, detect reuse of sk after free+alloc */
 
 	struct rb_node	fp_node; 	/* anchor in fp_root[] trees */
 	struct fp_flow	*next;		/* singly linked pointer into q->unreq_flows */
@@ -102,8 +102,11 @@ struct fp_sched_data {
 	u32		initial_quantum;
 	u32		flow_plimit;	/* max packets per flow */
 	u8		fp_trees_log;
-	struct psched_ratecfg rate;
+	struct psched_ratecfg data_rate;	/* rate of payload packets */
+	u64		req_cost;					/* cost, in tokens, of a request */
+	u32		req_bucketlen;				/* the max number of tokens to burst */
 
+	u64		req_t;						/* time when credits were zero */
 
 	u32		flows;
 	u32		inactive_flows;
@@ -122,7 +125,7 @@ struct fp_sched_data {
 };
 
 /* special value to mark a flow should not be scheduled */
-static struct fq_flow do_not_schedule;
+static struct fp_flow do_not_schedule;
 
 static struct kmem_cache *fp_flow_cachep __read_mostly;
 
@@ -221,20 +224,19 @@ static struct fp_flow *fp_classify(struct sk_buff *skb, struct fp_sched_data *q)
 	struct rb_root *root;
 	struct fp_flow *f;
 	int band;
+	u32 skb_hash;
 
 	/* warning: no starvation prevention... */
 	band = prio2band[skb->priority & TC_PRIO_MAX];
 	if (unlikely(band == 0))
 		return &q->internal;
 
-	if (unlikely(!sk)) {
-		/* By forcing low order bit to 1, we make sure to not
-		 * collide with a local flow (socket pointers are word aligned)
-		 */
-		sk = (struct sock *)(skb_get_rxhash(skb) | 1L);
-	}
+	if (unlikely(!sk))
+		skb_hash = skb_get_rxhash(skb);
+	else
+		skb_hash = sk->sk_hash;
 
-	root = &q->flow_hash_tbl[hash_32((u32)(long)sk, q->fp_trees_log)];
+	root = &q->flow_hash_tbl[skb_hash >> (32 - q->fp_trees_log)];
 
 	if (q->flows >= (2U << q->fp_trees_log) &&
 	    q->inactive_flows > q->flows/2)
@@ -246,20 +248,10 @@ static struct fp_flow *fp_classify(struct sk_buff *skb, struct fp_sched_data *q)
 		parent = *p;
 
 		f = container_of(parent, struct fp_flow, fp_node);
-		if (f->sk == sk) {
-			/* socket might have been reallocated, so check
-			 * if its sk_hash is the same.
-			 * It not, we need to refill credit with
-			 * initial quantum
-			 */
-			if (unlikely(skb->sk &&
-				     f->socket_hash != sk->sk_hash)) {
-				f->credit = q->initial_quantum;
-				f->socket_hash = sk->sk_hash;
-			}
+		if (f->skb_hash == skb_hash && f->sk == sk)
 			return f;
-		}
-		if (f->sk > sk)
+
+		if (f->skb_hash > skb_hash || (f->skb_hash == skb_hash && f->sk > sk))
 			p = &parent->rb_right;
 		else
 			p = &parent->rb_left;
@@ -270,11 +262,8 @@ static struct fp_flow *fp_classify(struct sk_buff *skb, struct fp_sched_data *q)
 		q->stat_allocation_errors++;
 		return &q->internal;
 	}
-	fp_flow_set_detached(f);
 	f->sk = sk;
-	if (skb->sk)
-		f->socket_hash = sk->sk_hash;
-	f->credit = q->initial_quantum;
+	f->skb_hash = skb_hash;
 
 	rb_link_node(&f->fp_node, parent, p);
 	rb_insert_color(&f->fp_node, root);
@@ -319,7 +308,7 @@ static void flow_enqueue_skb(struct Qdisc *sch, struct fp_flow *flow,
 {
 	struct fp_sched_data *q = qdisc_priv(sch);
 	struct sk_buff *head = flow->head;
-	s64 cost = (s64) psched_l2t_ns(q->rate, qdisc_pkt_len(skb));
+	s64 cost = (s64) psched_l2t_ns(&q->data_rate, qdisc_pkt_len(skb));
 
 	skb->next = NULL;
 	if (!head) {
@@ -387,7 +376,7 @@ static void fp_move_timeslot(struct Qdisc *sch, struct psched_ratecfg *rate,
 
 	/* while enough credit, move packets to q->internal */
 	while (src->head) {
-		credit -= (s64) psched_l2t_ns(rate, qdisc_pkt_len(f->head));
+		credit -= (s64) psched_l2t_ns(rate, qdisc_pkt_len(src->head));
 		if (credit < 0)
 			return; /* ran out of credit */
 
@@ -411,7 +400,7 @@ begin:
 	next_slot_start = q->tslot_start_time + next_slot * FASTPASS_TSLOT_NSEC;
 
 	/* is current slot an empty slot? */
-	if (next_slot < 0 || time_before(now, next_slot_start)) {
+	if (next_slot < 0 || time_before64(now, next_slot_start)) {
 		/* find the current timeslot's index */
 		next_slot = now - q->tslot_start_time;
 		do_div(next_slot, FASTPASS_TSLOT_NSEC);
@@ -432,12 +421,26 @@ begin:
 
 	/* did we encounter a scheduled slot that is in the past */
 	if (unlikely(time_after_eq64(now, q->tslot_start_time + FASTPASS_TSLOT_NSEC))) {
-		flow_inc_unrequested(q, f); /* flow will need to re-request */
+		flow_inc_unrequested(q, f); /* flow will need to re-request a slot*/
 		q->stat_missed_timeslots++;
 		goto begin;
 	}
 
-	fp_move_timeslot(sch, q->rate, f, q->internal);
+	fp_move_timeslot(sch, &q->data_rate, f, &q->internal);
+	q->schedule[q->horizon.timeslot & FASTPASS_HORIZON] = NULL;
+}
+
+static void fp_do_request_if_permitted(struct fp_sched_data *q, u64 now) {
+	BUG_ON(q->req_t + q->req_cost > now);
+
+	/* if not enough credits, return */
+	if (q->req_credits < q->req_cost)
+		return;
+
+	printk()
+	
+	/* update credits */
+	q->req_t = max_t(u64, q->req_t, now - q->req_bucketlen) + q->req_cost;
 }
 
 static struct sk_buff *fp_dequeue(struct Qdisc *sch)
@@ -445,6 +448,9 @@ static struct sk_buff *fp_dequeue(struct Qdisc *sch)
 	struct fp_sched_data *q = qdisc_priv(sch);
 	u64 now = ktime_to_ns(ktime_get());
 	struct sk_buff *skb;
+
+	/* initiate a request if appropriate */
+	fp_do_request_if_permitted(q, now);
 
 	/* any packets already queued? */
 	skb = flow_dequeue_skb(sch, &q->internal);
@@ -684,6 +690,7 @@ static int fp_init(struct Qdisc *sch, struct nlattr *opt)
 	q->flow_hash_tbl		= NULL;
 	q->fp_trees_log		= ilog2(1024);
 	qdisc_watchdog_init(&q->watchdog, sch);
+	q->internal.next = &do_not_schedule;
 
 	if (opt)
 		err = fp_change(sch, opt);

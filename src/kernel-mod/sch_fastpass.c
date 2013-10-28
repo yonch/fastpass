@@ -159,13 +159,14 @@ static void fp_flow_add_tail(struct fp_flow_head *head, struct fp_flow *flow)
 	flow->next = NULL;
 }
 
-/**
- * Flow 'f' is now allowed to use time slot 'tslot'
- */
-static void fp_schedule_tslot(struct fp_sched_data *q, u64 tslot,
-		struct fp_flow *f);
-
-
+void compute_time_next_req(struct fp_sched_data* q, u64 now)
+{
+	if (q->n_unreq_flows)
+		q->time_next_req = max_t(u64, q->req_t + q->req_cost,
+				now + FASTPASS_REQ_DELAY);
+	else
+		q->time_next_req = ~0ULL;
+}
 
 static bool fp_gc_candidate(const struct fp_sched_data *q,
 		const struct fp_flow *f)
@@ -176,6 +177,7 @@ static bool fp_gc_candidate(const struct fp_sched_data *q,
 
 static void fp_gc(struct fp_sched_data *q,
 		  struct rb_root *root,
+		  u32 skb_hash,
 		  struct sock *sk)
 {
 	struct fp_flow *f, *tofree[FP_GC_MAX];
@@ -188,7 +190,7 @@ static void fp_gc(struct fp_sched_data *q,
 		parent = *p;
 
 		f = container_of(parent, struct fp_flow, fp_node);
-		if (f->sk == sk)
+		if (f->skb_hash == skb_hash && f->sk == sk)
 			break;
 
 		if (fp_gc_candidate(q, f)) {
@@ -197,7 +199,7 @@ static void fp_gc(struct fp_sched_data *q,
 				break;
 		}
 
-		if (f->sk > sk)
+		if (f->skb_hash > skb_hash || (f->skb_hash == skb_hash && f->sk > sk))
 			p = &parent->rb_right;
 		else
 			p = &parent->rb_left;
@@ -241,7 +243,7 @@ static struct fp_flow *fp_classify(struct sk_buff *skb, struct fp_sched_data *q)
 
 	if (q->flows >= (2U << q->fp_trees_log) &&
 	    q->inactive_flows > q->flows/2)
-		fp_gc(q, root, sk);
+		fp_gc(q, root, skb_hash, sk);
 
 	p = &root->rb_node;
 	parent = NULL;
@@ -298,6 +300,9 @@ static void flow_inc_unrequested(struct fp_sched_data *q,
 		BUG_ON(flow->next != NULL);
 		fp_flow_add_tail(&q->unreq_flows, flow);
 		q->n_unreq_flows++;
+		/* if enqueued only flow in q->unreq_flows, compute next request time */
+		if (q->n_unreq_flows == 1)
+			compute_time_next_req(q, ktime_to_ns(ktime_get()));
 	}
 	flow->unreq_tslots++;
 	q->unreq_tslots++;
@@ -431,15 +436,6 @@ begin:
 	q->schedule[q->horizon.timeslot & FASTPASS_HORIZON] = NULL;
 }
 
-void compute_time_next_req(struct fp_sched_data* q, u64 now)
-{
-	if (q->n_unreq_flows)
-		q->time_next_req = max_t(u64, q->req_t + q->req_cost,
-				now + FASTPASS_REQ_DELAY);
-	else
-		q->time_next_req = ~0ULL;
-}
-
 static void fp_do_request(struct fp_sched_data *q, u64 now)
 {
 	struct fp_flow *f;
@@ -459,10 +455,14 @@ static void fp_do_request(struct fp_sched_data *q, u64 now)
 			break; /* no more slots to schedule */
 
 		/* allocate slot to flow */
+		BUG_ON(!q->schedule[(q->horizon.timeslot + empty_slot) % FASTPASS_HORIZON]);
 		q->schedule[(q->horizon.timeslot + empty_slot) % FASTPASS_HORIZON] = f;
 		q->horizon.mask |= (1ULL << empty_slot);
 		f->unreq_tslots--;
 		q->unreq_tslots--;
+		/* if we were receiving an allocation packet here, we would also
+		 * make sure that at the end, the queue is unthrottled or the watchdog
+		 * is at the correct time */
 
 		if (f->unreq_tslots == 0) {
 			/* remove flow from the q->unreq_flows queue */
@@ -485,6 +485,8 @@ static struct sk_buff *fp_dequeue(struct Qdisc *sch)
 	struct fp_sched_data *q = qdisc_priv(sch);
 	u64 now = ktime_to_ns(ktime_get());
 	struct sk_buff *skb;
+	int next_slot;
+	u64 next_time;
 
 	/* initiate a request if appropriate */
 	if (now >= q->time_next_req)
@@ -504,9 +506,12 @@ static struct sk_buff *fp_dequeue(struct Qdisc *sch)
 		goto out;
 
 	/* no packets in queue, go to sleep */
-	if (q->time_next_delayed_flow != ~0ULL)
-		qdisc_watchdog_schedule_ns(&q->watchdog,
-								   q->time_next_delayed_flow);
+	next_time = q->time_next_req;
+	next_slot = horizon_future_ffs(&q->horizon);
+	if (next_slot > 0)
+		next_time = min_t(u64, next_time,
+						  q->tslot_start_time + next_slot * FASTPASS_TSLOT_NSEC);
+	qdisc_watchdog_schedule_ns(&q->watchdog, next_time);
 
 out:
 	qdisc_bstats_update(sch, skb);
@@ -542,12 +547,14 @@ static void fp_reset(struct Qdisc *sch)
 			kmem_cache_free(fp_flow_cachep, f);
 		}
 	}
-	q->new_flows.first	= NULL;
-	q->old_flows.first	= NULL;
-	q->delayed		= RB_ROOT;
+	q->unreq_flows.first	= NULL;
+	for (idx = 0; idx < FASTPASS_HORIZON; idx++)
+		q->schedule[idx] = NULL;
+	q->horizon.mask = 0ULL;
 	q->flows		= 0;
 	q->inactive_flows	= 0;
-	q->throttled_flows	= 0;
+	q->n_unreq_flows = 0;
+	q->unreq_tslots	= 0;
 }
 
 static void fp_rehash(struct fp_sched_data *q,
@@ -570,7 +577,7 @@ static void fp_rehash(struct fp_sched_data *q,
 				kmem_cache_free(fp_flow_cachep, of);
 				continue;
 			}
-			nroot = &new_array[hash_32((u32)(long)of->sk, new_log)];
+			nroot = &new_array[of->skb_hash >> (32 - new_log)];
 
 			np = &nroot->rb_node;
 			parent = NULL;
@@ -578,9 +585,10 @@ static void fp_rehash(struct fp_sched_data *q,
 				parent = *np;
 
 				nf = container_of(parent, struct fp_flow, fp_node);
-				BUG_ON(nf->sk == of->sk);
+				BUG_ON(nf->skb_hash == of->skb_hash && nf->sk == of->sk);
 
-				if (nf->sk > of->sk)
+				if ( nf->skb_hash > of->skb_hash ||
+					(nf->skb_hash == of->skb_hash && nf->sk > of->sk))
 					np = &parent->rb_right;
 				else
 					np = &parent->rb_left;

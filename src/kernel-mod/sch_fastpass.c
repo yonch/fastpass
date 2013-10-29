@@ -50,7 +50,7 @@
 
 /* limit number of collected flows per round */
 #define FP_GC_MAX 8
-#define FP_GC_AGE (3*FASTPASS_HZ)
+#define FP_GC_NUM_SECS 3
 
 /*
  * Per flow structure, dynamically allocated
@@ -91,6 +91,7 @@ struct fp_sched_data {
 	struct psched_ratecfg data_rate;	/* rate of payload packets */
 	u64		req_cost;					/* cost, in tokens, of a request */
 	u32		req_bucketlen;				/* the max number of tokens to burst */
+	u64		gc_age;						/* number of tslots to keep empty flows */
 
 	/* state */
 	struct rb_root	*flow_hash_tbl;		/* table of rb-trees of flows */
@@ -173,7 +174,7 @@ static bool fp_gc_candidate(const struct fp_sched_data *q,
 		const struct fp_flow *f)
 {
 	return f->qlen == 0 &&
-	       time_after64(q->horizon.timeslot, f->last_sch_tslot + FP_GC_AGE);
+	       time_after64(q->horizon.timeslot, f->last_sch_tslot + q->gc_age);
 }
 
 static void fp_gc(struct fp_sched_data *q,
@@ -724,8 +725,12 @@ static int fp_init(struct Qdisc *sch, struct nlattr *opt)
 	struct fp_sched_data *q = qdisc_priv(sch);
 	int err;
 
-	sch->limit		= 10000;
+	sch->limit			= 10000;
 	q->flow_plimit		= 100;
+	q->hash_tbl_log		= ilog2(1024);
+	q->data_rate.rate_bytes_ps	= 1e9/8;	/* 1Gbps */
+	q->data_rate.linklayer		= TC_LINKLAYER_ETHERNET;
+	q->data_rate.overhead		= 24;		/* Ethernet overhead: preamble+crc+ifg */
 	q->quantum		= 2 * psched_mtu(qdisc_dev(sch));
 	q->initial_quantum	= 10 * psched_mtu(qdisc_dev(sch));
 	q->flow_default_rate	= 0;
@@ -735,7 +740,6 @@ static int fp_init(struct Qdisc *sch, struct nlattr *opt)
 	q->old_flows.first	= NULL;
 	q->delayed		= RB_ROOT;
 	q->flow_hash_tbl		= NULL;
-	q->hash_tbl_log		= ilog2(1024);
 	qdisc_watchdog_init(&q->watchdog, sch);
 	q->internal.next = &do_not_schedule;
 

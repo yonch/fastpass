@@ -423,7 +423,7 @@ begin:
 	q->tslot_start_time = next_slot_start;
 
 	/* get the scheduled flow */
-	f = q->schedule[q->horizon.timeslot & FASTPASS_HORIZON];
+	f = q->schedule[q->horizon.timeslot % FASTPASS_HORIZON];
 	BUG_ON(f == NULL);
 
 	/* did we encounter a scheduled slot that is in the past */
@@ -434,7 +434,7 @@ begin:
 	}
 
 	fp_move_timeslot(sch, &q->data_rate, f, &q->internal);
-	q->schedule[q->horizon.timeslot & FASTPASS_HORIZON] = NULL;
+	q->schedule[q->horizon.timeslot % FASTPASS_HORIZON] = NULL;
 	q->stat_used_timeslots++;
 }
 

@@ -1,7 +1,6 @@
 /*
  * net/sched/sch_fastpass.c FastPass client
  *
- *  Copyright (C) 2013 Eric Dumazet <edumazet@google.com> (sch_fq.c)
  *  Copyright (C) 2013 Jonathan Perry <yonch@yonch.com>
  *
  *	This program is free software; you can redistribute it and/or
@@ -136,11 +135,6 @@ static void horizon_advance(struct fp_timeslot_horizon *h, u32 num_tslots) {
 	else
 		h->mask >>= num_tslots;
 	h->timeslot += num_tslots;
-}
-
-/* is the time slot 'x' slots into the future set? */
-static bool horizon_is_set(struct fp_timeslot_horizon *h, u32 x) {
-	return (x < 64) && ((h->mask >> x) & 0x1);
 }
 
 /* find the first time slot in the future (x>0) that is set, returns -1 if none */
@@ -347,7 +341,7 @@ static void flow_enqueue_skb(struct Qdisc *sch, struct fp_flow *flow,
 	sch->qstats.backlog += qdisc_pkt_len(skb);
 }
 
-static int fp_enqueue(struct sk_buff *skb, struct Qdisc *sch)
+static int fastpass_enqueue(struct sk_buff *skb, struct Qdisc *sch)
 {
 	struct fp_sched_data *q = qdisc_priv(sch);
 	struct fp_flow *f;
@@ -488,7 +482,7 @@ static void fp_do_request(struct fp_sched_data *q, u64 now)
 	compute_time_next_req(q, now);
 }
 
-static struct sk_buff *fp_dequeue(struct Qdisc *sch)
+static struct sk_buff *fastpass_dequeue(struct Qdisc *sch)
 {
 	struct fp_sched_data *q = qdisc_priv(sch);
 	u64 now = ktime_to_ns(ktime_get());
@@ -528,7 +522,7 @@ out:
 
 }
 
-static void fp_reset(struct Qdisc *sch)
+static void fastpass_reset(struct Qdisc *sch)
 {
 	struct fp_sched_data *q = qdisc_priv(sch);
 	struct rb_root *root;
@@ -647,7 +641,7 @@ static const struct nla_policy fp_policy[TCA_FASTPASS_MAX + 1] = {
 	[TCA_FASTPASS_REQUEST_GAP]		= { .type = NLA_U32 },
 };
 
-static int fp_change(struct Qdisc *sch, struct nlattr *opt)
+static int fastpass_change(struct Qdisc *sch, struct nlattr *opt)
 {
 	struct fp_sched_data *q = qdisc_priv(sch);
 	struct nlattr *tb[TCA_FASTPASS_MAX + 1];
@@ -708,7 +702,7 @@ static int fp_change(struct Qdisc *sch, struct nlattr *opt)
 		err = fp_resize(q, fp_log);
 
 	while (sch->q.qlen > sch->limit) {
-		struct sk_buff *skb = fp_dequeue(sch);
+		struct sk_buff *skb = fastpass_dequeue(sch);
 
 		if (!skb)
 			break;
@@ -721,16 +715,16 @@ static int fp_change(struct Qdisc *sch, struct nlattr *opt)
 	return err;
 }
 
-static void fp_destroy(struct Qdisc *sch)
+static void fastpass_destroy(struct Qdisc *sch)
 {
 	struct fp_sched_data *q = qdisc_priv(sch);
 
-	fp_reset(sch);
+	fastpass_reset(sch);
 	kfree(q->flow_hash_tbl);
 	qdisc_watchdog_cancel(&q->watchdog);
 }
 
-static int fp_init(struct Qdisc *sch, struct nlattr *opt)
+static int fastpass_init(struct Qdisc *sch, struct nlattr *opt)
 {
 	struct fp_sched_data *q = qdisc_priv(sch);
 	struct tc_ratespec data_rate_spec ={
@@ -754,14 +748,14 @@ static int fp_init(struct Qdisc *sch, struct nlattr *opt)
 	qdisc_watchdog_init(&q->watchdog, sch);
 
 	if (opt)
-		err = fp_change(sch, opt);
+		err = fastpass_change(sch, opt);
 	else
 		err = fp_resize(q, q->hash_tbl_log);
 
 	return err;
 }
 
-static int fp_dump(struct Qdisc *sch, struct sk_buff *skb)
+static int fastpass_dump(struct Qdisc *sch, struct sk_buff *skb)
 {
 	struct fp_sched_data *q = qdisc_priv(sch);
 	struct nlattr *opts;
@@ -787,7 +781,7 @@ nla_put_failure:
 	return -1;
 }
 
-static int fp_dump_stats(struct Qdisc *sch, struct gnet_dump *d)
+static int fastpass_dump_stats(struct Qdisc *sch, struct gnet_dump *d)
 {
 	struct fp_sched_data *q = qdisc_priv(sch);
 	u64 now = ktime_to_ns(ktime_get());
@@ -814,19 +808,19 @@ static struct Qdisc_ops fastpass_qdisc_ops __read_mostly = {
 	.id		=	"fastpass",
 	.priv_size	=	sizeof(struct fp_sched_data),
 
-	.enqueue	=	fp_enqueue,
-	.dequeue	=	fp_dequeue,
+	.enqueue	=	fastpass_enqueue,
+	.dequeue	=	fastpass_dequeue,
 	.peek		=	qdisc_peek_dequeued,
-	.init		=	fp_init,
-	.reset		=	fp_reset,
-	.destroy	=	fp_destroy,
-	.change		=	fp_change,
-	.dump		=	fp_dump,
-	.dump_stats	=	fp_dump_stats,
+	.init		=	fastpass_init,
+	.reset		=	fastpass_reset,
+	.destroy	=	fastpass_destroy,
+	.change		=	fastpass_change,
+	.dump		=	fastpass_dump,
+	.dump_stats	=	fastpass_dump_stats,
 	.owner		=	THIS_MODULE,
 };
 
-static int __init fp_module_init(void)
+static int __init fastpass_module_init(void)
 {
 	int ret;
 
@@ -842,13 +836,13 @@ static int __init fp_module_init(void)
 	return ret;
 }
 
-static void __exit fp_module_exit(void)
+static void __exit fastpass_module_exit(void)
 {
 	unregister_qdisc(&fastpass_qdisc_ops);
 	kmem_cache_destroy(fp_flow_cachep);
 }
 
-module_init(fp_module_init)
-module_exit(fp_module_exit)
-MODULE_AUTHOR("Eric Dumazet");
+module_init(fastpass_module_init)
+module_exit(fastpass_module_exit)
+MODULE_AUTHOR("Jonathan Perry");
 MODULE_LICENSE("GPL");

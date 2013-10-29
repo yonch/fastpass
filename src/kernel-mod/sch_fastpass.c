@@ -44,9 +44,6 @@
  */
 
 #define FASTPASS_HORIZON		64
-#define FASTPASS_TSLOT_NSEC		13000
-#define FASTPASS_HZ				(NSEC_PER_SEC / FASTPASS_TSLOT_NSEC)
-#define FASTPASS_REQ_DELAY		1000
 
 /* limit number of collected flows per round */
 #define FP_GC_MAX 8
@@ -89,9 +86,11 @@ struct fp_sched_data {
 	u32		flow_plimit;				/* max packets per flow */
 	u8		hash_tbl_log;				/* log number of hash buckets */
 	struct psched_ratecfg data_rate;	/* rate of payload packets */
-	u64		req_cost;					/* cost, in tokens, of a request */
+	u32		tslot_len;					/* duration of a timeslot, in nanosecs */
+	u32		req_cost;					/* cost, in tokens, of a request */
 	u32		req_bucketlen;				/* the max number of tokens to burst */
-	u64		gc_age;						/* number of tslots to keep empty flows */
+	u32		req_min_delay;				/* min delay between requests (ns) */
+	u32		gc_age;						/* number of tslots to keep empty flows */
 
 	/* state */
 	struct rb_root	*flow_hash_tbl;		/* table of rb-trees of flows */
@@ -119,12 +118,10 @@ struct fp_sched_data {
 	/* statistics */
 	u64		stat_gc_flows;
 	u64		stat_internal_packets;
-	u64		stat_tcp_retrans;
-	u64		stat_throttled;
 	u64		stat_flows_plimit;
-	u64		stat_pkts_too_long;
 	u64		stat_allocation_errors;
 	u64		stat_missed_timeslots;
+	u64		stat_used_timeslots;
 };
 
 /* special value to mark a flow should not be scheduled */
@@ -165,7 +162,7 @@ void compute_time_next_req(struct fp_sched_data* q, u64 now)
 {
 	if (q->n_unreq_flows)
 		q->time_next_req = max_t(u64, q->req_t + q->req_cost,
-				now + FASTPASS_REQ_DELAY);
+									  now + q->req_min_delay);
 	else
 		q->time_next_req = ~0ULL;
 }
@@ -334,7 +331,7 @@ static void flow_enqueue_skb(struct Qdisc *sch, struct fp_flow *flow,
 	/* check if need to request a new slot */
 	if (cost > flow->credit) {
 		flow_inc_unrequested(q, flow);
-		flow->credit = FASTPASS_TSLOT_NSEC;
+		flow->credit = q->tslot_len;
 	}
 
 	flow->credit -= cost;
@@ -379,7 +376,8 @@ static int fp_enqueue(struct sk_buff *skb, struct Qdisc *sch)
 static void fp_move_timeslot(struct Qdisc *sch, struct psched_ratecfg *rate,
 		struct fp_flow *src, struct fp_flow *dst)
 {
-	s64 credit = FASTPASS_TSLOT_NSEC;
+	struct fp_sched_data *q = qdisc_priv(sch);
+	s64 credit = q->tslot_len;
 	struct sk_buff *skb;
 
 	/* while enough credit, move packets to q->internal */
@@ -400,21 +398,21 @@ static void fp_update_timeslot(struct Qdisc *sch, u64 now)
 	int next_slot;
 	u64 next_slot_start;
 
-	if(unlikely(time_before64(now, q->tslot_start_time + FASTPASS_TSLOT_NSEC)))
+	if(unlikely(time_before64(now, q->tslot_start_time + q->tslot_len)))
 		return; /* still in the old time slot */
 
 begin:
 	next_slot = horizon_future_ffs(&q->horizon);
-	next_slot_start = q->tslot_start_time + next_slot * FASTPASS_TSLOT_NSEC;
+	next_slot_start = q->tslot_start_time + next_slot * q->tslot_len;
 
 	/* is current slot an empty slot? */
 	if (next_slot < 0 || time_before64(now, next_slot_start)) {
 		/* find the current timeslot's index */
 		next_slot = now - q->tslot_start_time;
-		do_div(next_slot, FASTPASS_TSLOT_NSEC);
+		do_div(next_slot, q->tslot_len);
 
 		/* move to the new slot */
-		q->tslot_start_time += next_slot * FASTPASS_TSLOT_NSEC;
+		q->tslot_start_time += next_slot * q->tslot_len;
 		horizon_advance(&q->horizon, next_slot);
 		return;
 	}
@@ -428,7 +426,7 @@ begin:
 	BUG_ON(f == NULL);
 
 	/* did we encounter a scheduled slot that is in the past */
-	if (unlikely(time_after_eq64(now, q->tslot_start_time + FASTPASS_TSLOT_NSEC))) {
+	if (unlikely(time_after_eq64(now, q->tslot_start_time + q->tslot_len))) {
 		flow_inc_unrequested(q, f); /* flow will need to re-request a slot*/
 		q->stat_missed_timeslots++;
 		goto begin;
@@ -436,6 +434,7 @@ begin:
 
 	fp_move_timeslot(sch, &q->data_rate, f, &q->internal);
 	q->schedule[q->horizon.timeslot & FASTPASS_HORIZON] = NULL;
+	q->stat_used_timeslots++;
 }
 
 static void fp_do_request(struct fp_sched_data *q, u64 now)
@@ -512,7 +511,7 @@ static struct sk_buff *fp_dequeue(struct Qdisc *sch)
 	next_slot = horizon_future_ffs(&q->horizon);
 	if (next_slot > 0)
 		next_time = min_t(u64, next_time,
-						  q->tslot_start_time + next_slot * FASTPASS_TSLOT_NSEC);
+						  q->tslot_start_time + next_slot * q->tslot_len);
 	qdisc_watchdog_schedule_ns(&q->watchdog, next_time);
 
 out:
@@ -631,27 +630,30 @@ static int fp_resize(struct fp_sched_data *q, u32 log)
 }
 
 static const struct nla_policy fp_policy[TCA_FP_MAX + 1] = {
-	[TCA_FP_PLIMIT]			= { .type = NLA_U32 },
-	[TCA_FP_FLOW_PLIMIT]		= { .type = NLA_U32 },
-	[TCA_FP_QUANTUM]		= { .type = NLA_U32 },
-	[TCA_FP_INITIAL_QUANTUM]	= { .type = NLA_U32 },
-	[TCA_FP_RATE_ENABLE]		= { .type = NLA_U32 },
-	[TCA_FP_FLOW_DEFAULT_RATE]	= { .type = NLA_U32 },
-	[TCA_FP_FLOW_MAX_RATE]		= { .type = NLA_U32 },
-	[TCA_FP_BUCKETS_LOG]		= { .type = NLA_U32 },
+	[TCA_FASTPASS_PLIMIT]			= { .type = NLA_U32 },
+	[TCA_FASTPASS_FLOW_PLIMIT]		= { .type = NLA_U32 },
+	[TCA_FASTPASS_BUCKETS_LOG]		= { .type = NLA_U32 },
+	[TCA_FASTPASS_DATA_RATE]	= { .type = NLA_U32 },
+	[TCA_FASTPASS_TIMESLOT_NSEC]		= { .type = NLA_U32 },
+	[TCA_FASTPASS_REQUEST_COST]	= { .type = NLA_U32 },
+	[TCA_FASTPASS_REQUEST_BUCKET]		= { .type = NLA_U32 },
 };
 
 static int fp_change(struct Qdisc *sch, struct nlattr *opt)
 {
 	struct fp_sched_data *q = qdisc_priv(sch);
-	struct nlattr *tb[TCA_FP_MAX + 1];
+	struct nlattr *tb[TCA_FASTPASS_MAX + 1];
 	int err, drop_count = 0;
 	u32 fp_log;
+	struct tc_ratespec data_rate_spec ={
+			.linklayer = TC_LINKLAYER_ETHERNET,
+			.overhead = 24};
+
 
 	if (!opt)
 		return -EINVAL;
 
-	err = nla_parse_nested(tb, TCA_FP_MAX, opt, fp_policy);
+	err = nla_parse_nested(tb, TCA_FASTPASS_MAX, opt, fp_policy);
 	if (err < 0)
 		return err;
 
@@ -659,40 +661,35 @@ static int fp_change(struct Qdisc *sch, struct nlattr *opt)
 
 	fp_log = q->hash_tbl_log;
 
-	if (tb[TCA_FP_BUCKETS_LOG]) {
-		u32 nval = nla_get_u32(tb[TCA_FP_BUCKETS_LOG]);
+	if (tb[TCA_FASTPASS_BUCKETS_LOG])
+		sch->limit = nla_get_u32(tb[TCA_FASTPASS_BUCKETS_LOG]);
+
+	if (tb[TCA_FASTPASS_FLOW_PLIMIT])
+		q->flow_plimit = nla_get_u32(tb[TCA_FASTPASS_FLOW_PLIMIT]);
+
+	if (tb[TCA_FASTPASS_BUCKETS_LOG]) {
+		u32 nval = nla_get_u32(tb[TCA_FASTPASS_BUCKETS_LOG]);
 
 		if (nval >= 1 && nval <= ilog2(256*1024))
 			fp_log = nval;
 		else
 			err = -EINVAL;
 	}
-	if (tb[TCA_FP_PLIMIT])
-		sch->limit = nla_get_u32(tb[TCA_FP_PLIMIT]);
-
-	if (tb[TCA_FP_FLOW_PLIMIT])
-		q->flow_plimit = nla_get_u32(tb[TCA_FP_FLOW_PLIMIT]);
-
-	if (tb[TCA_FP_QUANTUM])
-		q->quantum = nla_get_u32(tb[TCA_FP_QUANTUM]);
-
-	if (tb[TCA_FP_INITIAL_QUANTUM])
-		q->quantum = nla_get_u32(tb[TCA_FP_INITIAL_QUANTUM]);
-
-	if (tb[TCA_FP_FLOW_DEFAULT_RATE])
-		q->flow_default_rate = nla_get_u32(tb[TCA_FP_FLOW_DEFAULT_RATE]);
-
-	if (tb[TCA_FP_FLOW_MAX_RATE])
-		q->flow_max_rate = nla_get_u32(tb[TCA_FP_FLOW_MAX_RATE]);
-
-	if (tb[TCA_FP_RATE_ENABLE]) {
-		u32 enable = nla_get_u32(tb[TCA_FP_RATE_ENABLE]);
-
-		if (enable <= 1)
-			q->rate_enable = enable;
-		else
+	if (tb[TCA_FASTPASS_DATA_RATE]) {
+		data_rate_spec.rate = nla_get_u32(tb[TCA_FASTPASS_DATA_RATE]);
+		if (data_rate_spec.rate == 0)
 			err = -EINVAL;
+		else
+			psched_ratecfg_precompute(&q->data_rate, &data_rate_spec);
 	}
+	if (tb[TCA_FASTPASS_TIMESLOT_NSEC])
+		q->tslot_len = nla_get_u32(tb[TCA_FASTPASS_TIMESLOT_NSEC]);
+
+	if (tb[TCA_FASTPASS_REQUEST_COST])
+		q->req_cost = nla_get_u32(tb[TCA_FASTPASS_REQUEST_COST]);
+
+	if (tb[TCA_FASTPASS_REQUEST_BUCKET])
+		q->req_bucketlen = nla_get_u32(tb[TCA_FASTPASS_REQUEST_BUCKET]);
 
 	if (!err)
 		err = fp_resize(q, fp_log);
@@ -723,25 +720,25 @@ static void fp_destroy(struct Qdisc *sch)
 static int fp_init(struct Qdisc *sch, struct nlattr *opt)
 {
 	struct fp_sched_data *q = qdisc_priv(sch);
+	struct tc_ratespec data_rate_spec ={
+			.linklayer = TC_LINKLAYER_ETHERNET,
+			.rate = 1e9/8,
+			.overhead = 24};
 	int err;
 
 	sch->limit			= 10000;
 	q->flow_plimit		= 100;
 	q->hash_tbl_log		= ilog2(1024);
-	q->data_rate.rate_bytes_ps	= 1e9/8;	/* 1Gbps */
-	q->data_rate.linklayer		= TC_LINKLAYER_ETHERNET;
-	q->data_rate.overhead		= 24;		/* Ethernet overhead: preamble+crc+ifg */
-	q->quantum		= 2 * psched_mtu(qdisc_dev(sch));
-	q->initial_quantum	= 10 * psched_mtu(qdisc_dev(sch));
-	q->flow_default_rate	= 0;
-	q->flow_max_rate	= ~0U;
-	q->rate_enable		= 1;
-	q->new_flows.first	= NULL;
-	q->old_flows.first	= NULL;
-	q->delayed		= RB_ROOT;
+	psched_ratecfg_precompute(&q->data_rate, &data_rate_spec);
+	q->tslot_len		= 13000;
+	q->req_cost			= 2 * q->tslot_len;
+	q->req_bucketlen	= 4 * q->req_cost;
+	q->req_min_delay	= 1000;
+	q->gc_age			= FP_GC_NUM_SECS * NSEC_PER_SEC / q->tslot_len;
 	q->flow_hash_tbl		= NULL;
-	qdisc_watchdog_init(&q->watchdog, sch);
+	q->unreq_flows.first	= NULL;
 	q->internal.next = &do_not_schedule;
+	qdisc_watchdog_init(&q->watchdog, sch);
 
 	if (opt)
 		err = fp_change(sch, opt);
@@ -760,13 +757,13 @@ static int fp_dump(struct Qdisc *sch, struct sk_buff *skb)
 	if (opts == NULL)
 		goto nla_put_failure;
 
-	if (nla_put_u32(skb, TCA_FP_PLIMIT, sch->limit) ||
-	    nla_put_u32(skb, TCA_FP_FLOW_PLIMIT, q->flow_plimit) ||
-	    nla_put_u32(skb, TCA_FP_QUANTUM, q->quantum) ||
-	    nla_put_u32(skb, TCA_FP_INITIAL_QUANTUM, q->initial_quantum) ||
-	    nla_put_u32(skb, TCA_FP_RATE_ENABLE, q->rate_enable) ||
-	    nla_put_u32(skb, TCA_FP_FLOW_DEFAULT_RATE, q->flow_default_rate) ||
-	    nla_put_u32(skb, TCA_FP_FLOW_MAX_RATE, q->flow_max_rate) ||
+	if (nla_put_u32(skb, TCA_FASTPASS_PLIMIT, sch->limit) ||
+	    nla_put_u32(skb, TCA_FASTPASS_FLOW_PLIMIT, q->flow_plimit) ||
+	    nla_put_u32(skb, TCA_FASTPASS_BUCKETS_LOG, q->hash_tbl_log) ||
+	    nla_put_u32(skb, TCA_FASTPASS_DATA_RATE, q->data_rate.rate_bytes_ps) ||
+	    nla_put_u32(skb, TCA_FASTPASS_TIMESLOT_NSEC, q->tslot_len) ||
+	    nla_put_u32(skb, TCA_FASTPASS_REQUEST_COST, q->req_cost) ||
+	    nla_put_u32(skb, TCA_FASTPASS_REQUEST_BUCKET, q->req_bucketlen) ||
 	    nla_put_u32(skb, TCA_FP_BUCKETS_LOG, q->hash_tbl_log))
 		goto nla_put_failure;
 
@@ -784,10 +781,8 @@ static int fp_dump_stats(struct Qdisc *sch, struct gnet_dump *d)
 	struct tc_fastpass_qd_stats st = {
 		.gc_flows		= q->stat_gc_flows,
 		.highprio_packets	= q->stat_internal_packets,
-		.tcp_retrans		= q->stat_tcp_retrans,
 		.throttled		= q->stat_throttled,
 		.flows_plimit		= q->stat_flows_plimit,
-		.pkts_too_long		= q->stat_pkts_too_long,
 		.allocation_errors	= q->stat_allocation_errors,
 		.flows			= q->flows,
 		.inactive_flows		= q->inactive_flows,

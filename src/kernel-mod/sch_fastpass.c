@@ -139,7 +139,7 @@ static void horizon_advance(struct fp_timeslot_horizon *h, u32 num_tslots) {
 
 /* find the first time slot in the future (x>0) that is set, returns -1 if none */
 static u32 horizon_future_ffs(struct fp_timeslot_horizon *h) {
-	return __ffs64(h->mask & ~1ULL) - 1;
+	return h->mask ? __ffs64(h->mask & ~1ULL) : -1;
 }
 
 static void fp_flow_add_tail(struct fp_flow_head *head, struct fp_flow *flow)
@@ -159,6 +159,23 @@ void compute_time_next_req(struct fp_sched_data* q, u64 now)
 									  now + q->req_min_gap);
 	else
 		q->time_next_req = ~0ULL;
+}
+
+/* Set watchdog (assuming there are no packets in q->internal) */
+void set_watchdog(struct fp_sched_data* q)
+{
+	int next_slot;
+	u64 next_time;
+
+	BUG_ON(q->internal.qlen); /* we should be throttled */
+
+	next_time = q->time_next_req;
+	next_slot = horizon_future_ffs(&q->horizon);
+	if (next_slot > 0)
+		next_time = min_t(u64, next_time,
+				q->tslot_start_time + next_slot * q->tslot_len);
+
+	qdisc_watchdog_schedule_ns(&q->watchdog, next_time);
 }
 
 static bool fp_gc_candidate(const struct fp_sched_data *q,
@@ -297,8 +314,12 @@ static void flow_inc_unrequested(struct fp_sched_data *q,
 		fp_flow_add_tail(&q->unreq_flows, flow);
 		q->n_unreq_flows++;
 		/* if enqueued only flow in q->unreq_flows, compute next request time */
-		if (q->n_unreq_flows == 1)
+		if (q->n_unreq_flows == 1) {
 			compute_time_next_req(q, ktime_to_ns(ktime_get()));
+			/* if we are throttled, watchdog time might need to change. set it */
+			if (q->internal.qlen == 0)
+				set_watchdog(q);
+		}
 	}
 	flow->unreq_tslots++;
 	q->unreq_tslots++;
@@ -407,7 +428,7 @@ begin:
 	next_slot_start = q->tslot_start_time + next_slot * q->tslot_len;
 
 	/* is current slot an empty slot? */
-	if (next_slot < 0 || time_before64(now, next_slot_start)) {
+	if (next_slot <= 0 || time_before64(now, next_slot_start)) {
 		/* find the current timeslot's index */
 		next_slot = now - q->tslot_start_time;
 		do_div(next_slot, q->tslot_len);
@@ -429,6 +450,7 @@ begin:
 	/* did we encounter a scheduled slot that is in the past */
 	if (unlikely(time_after_eq64(now, q->tslot_start_time + q->tslot_len))) {
 		flow_inc_unrequested(q, f); /* flow will need to re-request a slot*/
+		q->schedule[q->horizon.timeslot % FASTPASS_HORIZON] = NULL;
 		q->stat_missed_timeslots++;
 		goto begin;
 	}
@@ -449,12 +471,11 @@ static void fp_do_request(struct fp_sched_data *q, u64 now)
 	printk("fp_do_request start unreq_flows=%u, unreq_tslots=%u\n",
 			q->n_unreq_flows, q->unreq_tslots);
 
-	while (q->unreq_flows.first) {
+	while (q->unreq_flows.first && (~q->horizon.mask & ~1ULL)) {
 		f = q->unreq_flows.first;
-		empty_slot = __ffs64(~q->horizon.mask & ~1ULL) - 1;
-
-		if (empty_slot < 0)
-			break; /* no more slots to schedule */
+		empty_slot = __ffs64(~q->horizon.mask & ~1ULL);
+		printk("fp_do_request empty_slot=%d horizon=%llx ~h=%llx, ~1=%llx, &=%llx\n",
+				empty_slot, q->horizon.mask, ~q->horizon.mask, ~1ULL, ~q->horizon.mask & ~1ULL);
 
 		/* allocate slot to flow */
 		BUG_ON(q->schedule[(q->horizon.timeslot + empty_slot) % FASTPASS_HORIZON]);
@@ -487,12 +508,6 @@ static struct sk_buff *fastpass_dequeue(struct Qdisc *sch)
 	struct fp_sched_data *q = qdisc_priv(sch);
 	u64 now = ktime_to_ns(ktime_get());
 	struct sk_buff *skb;
-	int next_slot;
-	u64 next_time;
-
-	/* initiate a request if appropriate */
-	if (now >= q->time_next_req)
-		fp_do_request(q, now);
 
 	/* any packets already queued? */
 	skb = flow_dequeue_skb(sch, &q->internal);
@@ -502,18 +517,17 @@ static struct sk_buff *fastpass_dequeue(struct Qdisc *sch)
 	/* internal queue is empty; update timeslot (may queue skbs in q->internal) */
 	fp_update_timeslot(sch, now);
 
+	/* initiate a request if appropriate */
+	if (now >= q->time_next_req)
+		fp_do_request(q, now);
+
 	/* if packets were queued for this timeslot, send them. */
 	skb = flow_dequeue_skb(sch, &q->internal);
 	if (skb)
 		goto out;
 
 	/* no packets in queue, go to sleep */
-	next_time = q->time_next_req;
-	next_slot = horizon_future_ffs(&q->horizon);
-	if (next_slot > 0)
-		next_time = min_t(u64, next_time,
-						  q->tslot_start_time + next_slot * q->tslot_len);
-	qdisc_watchdog_schedule_ns(&q->watchdog, next_time);
+	set_watchdog(q);
 	return NULL;
 
 out:

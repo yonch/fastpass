@@ -514,6 +514,7 @@ static struct sk_buff *fastpass_dequeue(struct Qdisc *sch)
 		next_time = min_t(u64, next_time,
 						  q->tslot_start_time + next_slot * q->tslot_len);
 	qdisc_watchdog_schedule_ns(&q->watchdog, next_time);
+	return NULL;
 
 out:
 	qdisc_bstats_update(sch, skb);
@@ -745,6 +746,7 @@ static int fastpass_init(struct Qdisc *sch, struct nlattr *opt)
 	q->flow_hash_tbl		= NULL;
 	q->unreq_flows.first	= NULL;
 	q->internal.next = &do_not_schedule;
+	q->time_next_req = ~0ULL;
 	qdisc_watchdog_init(&q->watchdog, sch);
 
 	if (opt)
@@ -833,6 +835,7 @@ static int __init fastpass_module_init(void)
 	ret = register_qdisc(&fastpass_qdisc_ops);
 	if (ret)
 		kmem_cache_destroy(fp_flow_cachep);
+
 	return ret;
 }
 

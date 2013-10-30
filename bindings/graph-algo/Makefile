@@ -1,6 +1,7 @@
 # Macros
 CC = gcc
 CCFLAGS = -g
+#CCFLAGS = -DNDEBUG
 
 # Pattern rule
 %.o: ../../src/graph-algo/%.c

@@ -41,6 +41,7 @@ void graph_init(struct graph *graph, uint8_t n) {
 }
 
 // Returns a neighbor of vertex
+// Assumes this vertex has at least one neighbor
 static inline
 uint8_t get_neighbor(struct graph *graph, uint8_t vertex) {
     assert(graph != NULL);
@@ -64,6 +65,7 @@ uint8_t get_neighbor(struct graph *graph, uint8_t vertex) {
     }
     
     assert(0);  // No neighbors
+    return vertex;   // To avoid compile warning when asserts are disabled
 }
 
 // Returns the degree of vertex

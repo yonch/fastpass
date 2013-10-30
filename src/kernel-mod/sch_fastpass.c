@@ -457,7 +457,7 @@ static void fp_do_request(struct fp_sched_data *q, u64 now)
 			break; /* no more slots to schedule */
 
 		/* allocate slot to flow */
-		BUG_ON(!q->schedule[(q->horizon.timeslot + empty_slot) % FASTPASS_HORIZON]);
+		BUG_ON(q->schedule[(q->horizon.timeslot + empty_slot) % FASTPASS_HORIZON]);
 		q->schedule[(q->horizon.timeslot + empty_slot) % FASTPASS_HORIZON] = f;
 		q->horizon.mask |= (1ULL << empty_slot);
 		f->unreq_tslots--;

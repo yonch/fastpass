@@ -31,8 +31,8 @@ void split(struct graph *graph_in, struct graph *graph_1,
             cur_node = new_node;
 
             new_node = get_neighbor(graph_in, cur_node);
-            add_edge(graph_2, cur_node, new_node);
-            remove_edge(graph_in, cur_node, new_node);
+            add_edge(graph_2, new_node, cur_node);
+            remove_edge(graph_in, new_node, cur_node);
             cur_node = new_node;
         }
     }

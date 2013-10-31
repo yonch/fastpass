@@ -105,41 +105,28 @@ uint8_t get_max_degree(struct graph *graph) {
 }
 
 // Adds an edge from vertex u to vertex v
+// Assume u is a left vertex, v is right
 static inline
 void add_edge(struct graph *graph, uint8_t u, uint8_t v) {
     assert(graph != NULL);
     uint8_t n = graph->n;
-    assert(u < 2 * n);
-    assert(v < 2 * n);
-    // must have one left and one right vertex
-    assert((u < n && v >= n) || (v < n && u >= n));
-
-    if (u < n)
-        graph->edges[u][v - n] += 1;
-    else
-        graph->edges[v][u - n] += 1;
+    assert(u < n);
+    assert(v >= n && v < 2 * n);
+ 
+    graph->edges[u][v - n] += 1;
 }
 
 // Removes an edge from vertex u to vertex v
+// Assume u is a left vertex, v is right
 static inline
 void remove_edge(struct graph *graph, uint8_t u, uint8_t v) {
     assert(graph != NULL);
     uint8_t n = graph->n;
-    assert(u < 2 * n);
-    assert(v < 2 * n);
-    // must have one left and one right vertex
-    assert((u < n && v >= n) || (v < n && u >= n));
-
-    if (u < n) {
-        assert(graph->edges[u][v - n] > 0);
-
-        graph->edges[u][v - n] -= 1;
-    }
-    else {
-        assert(graph->edges[v][u - n] > 0);
-
-        graph->edges[v][u - n] -= 1;
-    }
+    assert(u < n);
+    assert(v >= n && v < 2 * n);
+    assert(graph->edges[u][v - n] > 0);
+    
+    graph->edges[u][v - n] -= 1;
 }
 
 // Adds the edges from graph_2 to graph_1

@@ -34,14 +34,21 @@ class Test(unittest.TestCase):
         g_c = graph.create_graph_test(n_nodes)
         g_c_copy = graph.create_graph_test(n_nodes)
         for edge in g_p.edges_iter():
-            graph.add_edge(g_c, edge[0], edge[1])
-            graph.add_edge(g_c_copy, edge[0], edge[1])
+            if (edge[0] < edge[1]):
+                graph.add_edge(g_c, edge[0], edge[1])
+                graph.add_edge(g_c_copy, edge[0], edge[1])
+            else:
+                graph.add_edge(g_c, edge[1], edge[0])
+                graph.add_edge(g_c_copy, edge[1], edge[0])
         self.assertEqual(graph.get_max_degree(g_c), degree)
         self.assertEqual(graph.get_max_degree(g_c_copy), degree)
 
         arbitrary_c = graph.create_graph_test(n_nodes)
         for edge in arbitrary_p.edges_iter():
-            graph.add_edge(arbitrary_c, edge[0], edge[1])
+            if (edge[0] < edge[1]):
+                graph.add_edge(arbitrary_c, edge[0], edge[1])
+            else:
+                graph.add_edge(arbitrary_c, edge[1], edge[0])
         self.assertEqual(graph.get_max_degree(arbitrary_c), 1)
 
         # save original graph in g_c

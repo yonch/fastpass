@@ -28,7 +28,10 @@ class Test(unittest.TestCase):
                 # Create the graph in C
                 # first n vertices are on left, second n are on right
                 for edge in g_p.edges_iter():
-                    graph.add_edge(g_c, edge[0], edge[1])
+                    if (edge[0] < edge[1]):
+                        graph.add_edge(g_c, edge[0], edge[1])
+                    else:
+                        graph.add_edge(g_c, edge[1], edge[0])
                 self.assertEqual(deg, graph.get_max_degree(g_c))
                     
                 # Check that graph in C matches the graph in Python

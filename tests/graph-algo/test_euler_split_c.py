@@ -27,8 +27,12 @@ class Test(unittest.TestCase):
                 g_c = graph.create_graph_test(n_side);
                 g_c_copy = graph.create_graph_test(n_side)
                 for edge in g_p.edges_iter():
-                    graph.add_edge(g_c, edge[0], edge[1])
-                    graph.add_edge(g_c_copy, edge[0], edge[1])
+                    if (edge[0] < edge[1]):
+                        graph.add_edge(g_c, edge[0], edge[1])
+                        graph.add_edge(g_c_copy, edge[0], edge[1])
+                    else:
+                        graph.add_edge(g_c, edge[1], edge[0])
+                        graph.add_edge(g_c_copy, edge[1], edge[0])
                 self.assertEqual(graph.get_max_degree(g_c), deg)
                 self.assertEqual(graph.get_max_degree(g_c_copy), deg)
              
@@ -75,9 +79,12 @@ class Test(unittest.TestCase):
                     g_c = graph.create_graph_test(n_side);
                     g_c_copy = graph.create_graph_test(n_side)
                     for edge in g_p.edges_iter():
-                        graph.add_edge(g_c, edge[0], edge[1])
-                        graph.add_edge(g_c_copy, edge[0], edge[1])
-     
+                        if (edge[0] < edge[1]):
+                            graph.add_edge(g_c, edge[0], edge[1])
+                            graph.add_edge(g_c_copy, edge[0], edge[1])
+                        else:
+                            graph.add_edge(g_c, edge[1], edge[0])
+                            graph.add_edge(g_c_copy, edge[1], edge[0])
                     # Create the output graphs
                     g1_c = graph.create_graph_test(n_side)
                     g2_c = graph.create_graph_test(n_side)

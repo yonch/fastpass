@@ -17,8 +17,9 @@ class kapoor_rizzi(object):
         coloring to multiple Euler-splits and at most one matching search.
     '''
     
-    def __init__(self):
+    def __init__(self, print_debug=False):
         self.euler_split = euler_split()
+        self.print_debug = print_debug
 
     def almost_solve(self, d, g, arbitrary_matchings = []):
         '''
@@ -28,14 +29,16 @@ class kapoor_rizzi(object):
         @param arbitrary_matchings: a list of arbitrary permutations to use instead
             of SLICE-ONE. If d is even, one is needed; if odd, two.
         '''
-        print "Normalize:"
+        if self.print_debug:
+            print "Normalize:"
         if (len(arbitrary_matchings) == 0):
             bins = self._normalize(bin_graph(d,g))
         else:
             # use the arbitrary matchings
             bins = self._approx_normalize(
                 bin_graph(d,g), [bin_graph(1,x) for x in arbitrary_matchings])
-        print "After normalize"
+        if self.print_debug:
+            print "After normalize"
         self._print_degrees(bins)
         
         a = bins[0]
@@ -125,7 +128,8 @@ class kapoor_rizzi(object):
         '''
         perform HIT-EVEN on (a,b,c)
         '''
-        print "Hit-even(%d,%d,%d)" % (a.degree,b.degree,c.degree)
+        if self.print_debug:
+            print "Hit-even(%d,%d,%d)" % (a.degree,b.degree,c.degree)
         
         assert(a.degree % 2 == 1)
         assert(b.degree % 2 == 1)
@@ -141,21 +145,25 @@ class kapoor_rizzi(object):
         return a, b, c
     
     def _split_even(self, d):
-        print "Split-even(%d)" % d.degree 
+        if self.print_debug:
+            print "Split-even(%d)" % d.degree 
         g1,g2 = self.euler_split.split(d.g)
         return bin_graph(d.degree/2, g1), bin_graph(d.degree/2, g2)
     
     def _split_odd(self, d1, d2):
-        print "Split-odd(%d,%d)" % (d1.degree,d2.degree)
+        if self.print_debug:
+            print "Split-odd(%d,%d)" % (d1.degree,d2.degree)
         d1.g.add_edges_from(d2.g.edges())
         d1.degree += d2.degree
         g_a, g_b = self.euler_split.split(d1.g)
         return bin_graph(d1.degree / 2, g_a), bin_graph(d1.degree / 2, g_b)
     
     def _slice_one(self, d):
-        print "Slice-one(%d)" % d.degree
+        if self.print_debug:
+            print "Slice-one(%d)" % d.degree
         raise RuntimeError, "Slice-one not currently implemented, try the approximation version"
         #return bin_graph(1, None), bin_graph(d.degree - 1, None)
     
     def _print_degrees(self, L):
-        print ", ".join(repr(x.degree) for x in L)
+        if self.print_debug:
+            print ", ".join(repr(x.degree) for x in L)

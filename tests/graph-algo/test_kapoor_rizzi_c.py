@@ -24,7 +24,7 @@ class Test(unittest.TestCase):
 
         # initialize kr
         generator = kr_util()
-        kr = generator.build_kr(n_nodes, degree)
+        kr = generator.build_kr(n_nodes, degree, print_debug=True)
         
         # generate graph and arbitrary matching
         g_p = graph_util().generate_random_regular_bipartite(n_nodes, degree)
@@ -84,31 +84,38 @@ class Test(unittest.TestCase):
 
     def test_timing(self):
 
+        params = [(20, 16), (40, 16), (20, 32), (40, 32)]
         experiments = 100
+        
+        for x in params:
+            degree = x[0]
+            n_nodes = x[1]
 
-        c_times = []
-        for i in range(experiments):
-            t = timeit.Timer('timer.solve()',
-                             'import timing_util; timer = timing_util.c_timing_util(40, 15)')
-            c_times.append(t.timeit(1))
+            print "\ndegree=%d, n_nodes=%d" % (degree, n_nodes)
 
-        p_times = []
-        for i in range(experiments):
-            t = timeit.Timer('timer.solve()',
-                             'import timing_util; timer = timing_util.python_timing_util(40, 15)')
-            p_times.append(t.timeit(1))
+            c_times = []
+            for i in range(experiments):
+                t = timeit.Timer('timer.solve()',
+                                 'import timing_util; timer = timing_util.c_timing_util(%d, %d)' % (degree, n_nodes))
+                c_times.append(t.timeit(1))
 
-        c_avg = sum(c_times) / len(c_times)
-        print "C implementation:"
-        print "min time: (%f)" % min(c_times)
-        print "max time: (%f)" % max(c_times)
-        print "avg time: (%f)" % c_avg
+            p_times = []
+            for i in range(experiments):
+                t = timeit.Timer('timer.solve()',
+                                 'import timing_util; timer = timing_util.python_timing_util(%d, %d)' % (degree, n_nodes))
+                p_times.append(t.timeit(1))
 
-        p_avg = sum(p_times) / len(p_times)
-        print "Python implementation:"
-        print "min time: (%f)" % min(p_times)
-        print "max time: (%f)" % max(p_times)
-        print "avg time: (%f)" % p_avg
+            c_avg = sum(c_times) / len(c_times)
+            print "C implementation:"
+            print "min time: (%f)" % min(c_times)
+            print "max time: (%f)" % max(c_times)
+            print "avg time: (%f)" % c_avg
+
+            p_avg = sum(p_times) / len(p_times)
+            print "Python implementation:"
+            print "min time: (%f)" % min(p_times)
+            print "max time: (%f)" % max(p_times)
+            print "avg time: (%f)" % p_avg
 
 if __name__ == "__main__":
     unittest.main()

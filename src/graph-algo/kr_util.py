@@ -22,12 +22,14 @@ class kr_util(object):
     Based on kapoor_rizzi.py, but doesn't actually manipulate graphs.
     '''
 
-    def build_kr(self, n, d):
+    def build_kr(self, n, d, print_debug=False):
         '''
     Builds a kr for a network with n nodes each with degree d.
     Assumes d is even and that we use the approximation method.
     '''
         assert d % 2 == 0, "build_kr assumes even degree, given odd degree"
+
+        self.print_debug = print_debug
 
         self.num_matchings = d + 1
 
@@ -78,9 +80,11 @@ class kr_util(object):
         '''
         Performs ALMOST-SOLVE(delta).
         '''
-        print "Normalize:"
+        if self.print_debug:
+            print "Normalize:"
         bins = self._approx_normalize(bin_info(d, self.num_matchings), bin_info(1, 0))
-        print "After normalize"
+        if self.print_debug:
+            print "After normalize"
         self._print_degrees(bins)
 
         a = bins[0]
@@ -110,7 +114,8 @@ class kr_util(object):
         '''
         perform HIT-EVEN on (a,b,c)
         '''
-        print "Hit-even(%d,%d,%d)" % (a.degree,b.degree,c.degree)
+        if self.print_debug:
+            print "Hit-even(%d,%d,%d)" % (a.degree,b.degree,c.degree)
         
         assert(a.degree % 2 == 1)
         assert(b.degree % 2 == 1)
@@ -126,7 +131,8 @@ class kr_util(object):
         return a, b, c
 
     def _split_even(self, d):
-        print "Split-even(%d)" % d.degree
+        if self.print_debug:
+            print "Split-even(%d)" % d.degree
         
         if d.degree == 2:
             # split into matchings area
@@ -144,14 +150,14 @@ class kr_util(object):
         self.indices[d.index] = 0
   
         # record this step
-        # print "kr step split even (%d,%d,%d)" % (d.index, index1, index2)
         kapoorrizzi.set_kr_step(self.kr, kapoorrizzi.SPLIT_EVEN,
                                 d.index, 0, index1, index2);
 
         return bin_info(d.degree / 2, index1), bin_info(d.degree / 2, index2)
 
     def _split_odd(self, d1, d2):
-        print "Split-odd(%d,%d)" % (d1.degree,d2.degree)
+        if self.print_debug:
+            print "Split-odd(%d,%d)" % (d1.degree,d2.degree)
         
         d1.degree += d2.degree
         index1 = self._get_free_workspace_index()
@@ -163,7 +169,6 @@ class kr_util(object):
         self.indices[d2.index] = 0
 
         # record this step
-        # print "kr step split odd (%d,%d,%d,%d)" % (d1.index, d2.index, index1, index2)
         kapoorrizzi.set_kr_step(self.kr, kapoorrizzi.SPLIT_ODD,
                                 d1.index, d2.index, index1, index2);
 
@@ -180,4 +185,5 @@ class kr_util(object):
                 return self.num_matchings + i
         
     def _print_degrees(self, L):
-        print ", ".join(repr(x.degree) for x in L)
+        if self.print_debug:
+            print ", ".join(repr(x.degree) for x in L)

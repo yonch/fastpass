@@ -123,7 +123,7 @@ class kapoor_rizzi(object):
 
     def _hit_even(self, a, b, c):
         '''
-        perform HIT-EVEN on (a,b,b)
+        perform HIT-EVEN on (a,b,c)
         '''
         print "Hit-even(%d,%d,%d)" % (a.degree,b.degree,c.degree)
         
@@ -133,10 +133,11 @@ class kapoor_rizzi(object):
         assert(b.degree == c.degree)
         
         while b.degree % 2 == 1:
-            # todo: the first parameter to split_odd should be the higher
-            #     degree graph, to pay less for merging..
-            (a, (b, c)) = (c, self._split_odd(a, b)) 
-        
+            if (a.degree >= b.degree):
+                (a, (b, c)) = (c, self._split_odd(a, b)) 
+            else:
+                (a, (b, c)) = (c, self._split_odd(b, a)) 
+         
         return a, b, c
     
     def _split_even(self, d):

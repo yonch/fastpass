@@ -10,26 +10,26 @@
 
 #include <assert.h>
 #include <inttypes.h>
+#include <stdbool.h>
 #include <stdlib.h>
 
+#define MAX(X, Y) ((X) > (Y) ? (X) : (Y))
 #define MAX_NODES 40
 
 // Graph representation. Edges are stored in a matrix where each
 // entry [i][j] corresponds to the number of edges from i to j.
 // n is the number of nodes on each side of the bipartite graph
 struct graph {
-    uint8_t degree;
     uint8_t n;
     uint8_t edges[MAX_NODES][MAX_NODES];
 };
 
 // Initializes the bipartite graph
 static inline
-void graph_init(struct graph *graph, uint8_t degree, uint8_t n) {
+void graph_init(struct graph *graph, uint8_t n) {
     assert(graph != NULL);
     assert(n <= MAX_NODES);
 
-    graph->degree = degree;
     graph->n = n;
 
     int i, j;
@@ -41,6 +41,7 @@ void graph_init(struct graph *graph, uint8_t degree, uint8_t n) {
 }
 
 // Returns a neighbor of vertex
+// Assumes this vertex has at least one neighbor
 static inline
 uint8_t get_neighbor(struct graph *graph, uint8_t vertex) {
     assert(graph != NULL);
@@ -64,6 +65,7 @@ uint8_t get_neighbor(struct graph *graph, uint8_t vertex) {
     }
     
     assert(0);  // No neighbors
+    return vertex;   // To avoid compile warning when asserts are disabled
 }
 
 // Returns the degree of vertex
@@ -87,6 +89,19 @@ uint8_t get_degree(struct graph *graph, uint8_t vertex) {
     }
 
     return degree;
+}
+
+// Returns the max degree
+static inline
+uint8_t get_max_degree(struct graph *graph) {
+    assert(graph != NULL);
+
+    uint8_t max_degree = 0;
+    int i;
+    for (i = 0; i < 2 * graph->n; i++)
+        max_degree = MAX(max_degree, get_degree(graph, i));
+
+    return max_degree;
 }
 
 // Adds an edge from vertex u to vertex v
@@ -143,11 +158,67 @@ void add_graph(struct graph *graph_1, struct graph *graph_2) {
     }
 }
 
+// Copies the graph from src to dst
+static inline
+void copy_graph(struct graph *src, struct graph *dst) {
+    assert(src != NULL);
+    assert(dst != NULL);
+
+    graph_init(dst, src->n);
+    add_graph(dst, src);
+}
+
+// Returns true if the two graphs are equivalent, false otherwise
+static inline
+bool are_equal(struct graph *graph_1, struct graph *graph_2) {
+    assert(graph_1 != NULL);
+    assert(graph_2 != NULL);
+
+    if (graph_1->n != graph_2->n)
+        return false;
+
+    uint8_t n = graph_1->n;
+    int i, j;
+    for (i = 0; i < n; i++) {
+        for (j = 0; j < n; j++) {
+            if (graph_1->edges[i][j] != graph_2->edges[i][j])
+                return false;
+        }
+    }
+
+    return true;
+}
+
+// Returns true if the graph is a perfect matching, false otherwise
+static inline
+bool is_perfect_matching(struct graph *graph) {
+    assert(graph != NULL);
+
+    uint8_t n = graph->n;
+    int i, j;
+    for (i = 0; i < n; i++) {
+        uint8_t edges = 0;
+        for (j = 0; j < n; j++)
+            edges += graph->edges[i][j];
+        if (edges != 1)
+            return false;
+    }
+    for (i = 0; i < n; i++) {
+        uint8_t edges = 0;
+        for (j = 0; j < n; j++)
+            edges += graph->edges[j][i];
+        if (edges != 1)
+            return false;
+    }
+
+    return true;                
+}
+
 // Helper methods for testing in python
 static inline
-struct graph *create_graph_test(uint8_t degree, uint8_t n) {
+struct graph *create_graph_test(uint8_t n) {
     struct graph *graph_out = malloc(sizeof(struct graph));
-    graph_init(graph_out, degree, n);
+    graph_init(graph_out, n);
 
     return graph_out;
 }

@@ -51,8 +51,6 @@ void graph_init(struct graph *graph, uint8_t n) {
     for (i = 0; i < 2 * n; i++) {
         graph->vertices[i].tail = 0;
         graph->vertices[i].degree = 0;
-        for (j = 0; j < MAX_DEGREE; j++)
-            graph->vertices[i].edges[j].count = 0;
     }
 }
 
@@ -121,11 +119,11 @@ void remove_edge(struct graph *graph, uint8_t u, uint8_t v) {
     assert(u < 2 * n);
     assert(v < 2 * n);
 
-    // Remove any edge of this type
+    // Remove any edge of this type, starting from end of edge lists
     struct vertex_info *u_info = &graph->vertices[u];
     int i;
     assert(u_info->tail > 0);
-    for (i = 0; i < u_info->tail; i++) {
+    for (i = u_info->tail - 1; i >= 0; i--) {
         if (u_info->edges[i].count > 0 && u_info->edges[i].other_vertex == v) {
             u_info->edges[i].count--;
             break;
@@ -138,7 +136,7 @@ void remove_edge(struct graph *graph, uint8_t u, uint8_t v) {
 
     struct vertex_info *v_info = &graph->vertices[v];
     assert(v_info->tail > 0);
-    for (i = 0; i < v_info->tail; i++) {
+    for (i = v_info->tail - 1; i >= 0; i--) {
         if (v_info->edges[i].count > 0 && v_info->edges[i].other_vertex == u) {
             v_info->edges[i].count--;
             break;

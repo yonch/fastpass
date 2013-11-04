@@ -84,7 +84,7 @@ class Test(unittest.TestCase):
 
     def test_timing(self):
 
-        params = [(20, 16), (40, 16), (20, 32), (40, 32)]
+        params = [(20, 15), (40, 15), (20, 30), (40, 30)]
         experiments = 100
         
         for x in params:

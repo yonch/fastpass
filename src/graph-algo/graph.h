@@ -21,12 +21,12 @@
 struct edge {
     uint8_t count;
     uint8_t other_vertex;
+    uint8_t other_index;  // Index of this edge in the other vertex's list
 };
 
 struct vertex_info {
     uint8_t tail;  // first unused index
-    uint8_t degree;
-    struct edge edges[MAX_DEGREE];  // MAX_DEGREE or MAX_NODES, whichever is smaller
+    struct edge edges[MAX_DEGREE];
 };
 
 // Graph representation. Edges are stored in adjacency lists.
@@ -48,10 +48,17 @@ void graph_init(struct graph *graph, uint8_t n) {
     graph->n = n;
 
     int i, j;
-    for (i = 0; i < 2 * n; i++) {
+    for (i = 0; i < 2 * n; i++)
         graph->vertices[i].tail = 0;
-        graph->vertices[i].degree = 0;
-    }
+}
+
+// Returns true if vertex has at least one neighbor, false otherwise
+static inline
+bool has_neighbor(struct graph *graph, uint8_t vertex) {
+    assert(graph != NULL);
+    assert(vertex < 2 * graph->n);
+
+    return (graph->vertices[vertex].tail > 0);
 }
 
 // Returns the degree of vertex
@@ -60,10 +67,15 @@ uint8_t get_degree(struct graph *graph, uint8_t vertex) {
     assert(graph != NULL);
     assert(vertex < 2 * graph->n);
 
-    return graph->vertices[vertex].degree;
+    uint8_t degree = 0;
+    int i;
+    struct vertex_info *v_info = &graph->vertices[vertex];
+    for (i = 0; i < v_info->tail; i++)
+        degree += v_info->edges[i].count;
+    
+    return degree;
 }
 
-// Returns a neighbor of vertex
 // Assumes this vertex has at least one neighbor
 static inline
 uint8_t get_neighbor(struct graph *graph, uint8_t vertex) {
@@ -99,56 +111,51 @@ void add_edge(struct graph *graph, uint8_t u, uint8_t v) {
  
     // For now just add edges to end of list
     struct vertex_info *u_info = &graph->vertices[u];
+    struct vertex_info *v_info = &graph->vertices[v];
     u_info->edges[u_info->tail].count = 1;
     u_info->edges[u_info->tail].other_vertex = v;
-    u_info->tail++;
-    u_info->degree++;
+    u_info->edges[u_info->tail].other_index = v_info->tail;
 
-    struct vertex_info *v_info = &graph->vertices[v];
     v_info->edges[v_info->tail].count = 1;
     v_info->edges[v_info->tail].other_vertex = u;
+    v_info->edges[v_info->tail].other_index = u_info->tail;
+
+    u_info->tail++;
     v_info->tail++;
-    v_info->degree++;
 }
 
-// Removes an edge from vertex u to vertex v
+// Find a neighbor of vertex and remove the edge to it
+// Return the neighbor
 static inline
-void remove_edge(struct graph *graph, uint8_t u, uint8_t v) {
+uint8_t remove_edge_to_neighbor(struct graph *graph, uint8_t vertex) {
     assert(graph != NULL);
-    uint8_t n = graph->n;
-    assert(u < 2 * n);
-    assert(v < 2 * n);
+    assert(vertex < 2 * graph->n);
+    assert(get_degree(graph, vertex) > 0);
 
-    // Remove any edge of this type, starting from end of edge lists
-    struct vertex_info *u_info = &graph->vertices[u];
-    int i;
-    assert(u_info->tail > 0);
-    for (i = u_info->tail - 1; i >= 0; i--) {
-        if (u_info->edges[i].count > 0 && u_info->edges[i].other_vertex == v) {
-            u_info->edges[i].count--;
-            break;
-        }
-    }
-    while (u_info->edges[u_info->tail - 1].count == 0 &&
-           u_info->tail > 0)
-        u_info->tail--;
-    u_info->degree--;
+    // Find the last neighbor
+    struct vertex_info *vertex_info = &graph->vertices[vertex];
+    uint8_t neighbor = vertex_info->edges[vertex_info->tail - 1].other_vertex;
 
-    struct vertex_info *v_info = &graph->vertices[v];
-    assert(v_info->tail > 0);
-    for (i = v_info->tail - 1; i >= 0; i--) {
-        if (v_info->edges[i].count > 0 && v_info->edges[i].other_vertex == u) {
-            v_info->edges[i].count--;
-            break;
-        }
-    }
-    while (v_info->edges[v_info->tail - 1].count == 0 &&
-           v_info->tail > 0)
-        v_info->tail--;
-    v_info->degree--;
+    uint8_t neighbor_index = vertex_info->edges[vertex_info->tail - 1].other_index;
+    struct vertex_info *neighbor_info = &graph->vertices[neighbor];
+
+    // Remove edge
+    vertex_info->edges[vertex_info->tail - 1].count--;
+    neighbor_info->edges[neighbor_index].count--;
+
+    // Update state for both vertices
+    while (vertex_info->edges[vertex_info->tail - 1].count == 0 &&
+           vertex_info->tail > 0)
+        vertex_info->tail--;
+    while (neighbor_info->edges[neighbor_info->tail - 1].count == 0 &&
+           neighbor_info->tail > 0)
+        neighbor_info->tail--;
+
+    return neighbor;
 }
 
 // Adds the edges from graph_2 to graph_1
+// Assumes that graph_2 has not had any edges removed
 static inline
 void add_graph(struct graph *graph_1, struct graph *graph_2) {
     assert(graph_1 != NULL);
@@ -162,8 +169,8 @@ void add_graph(struct graph *graph_1, struct graph *graph_2) {
         vertex_info = &graph_2->vertices[i];
         assert(vertex_info->tail >= 0);
         for (j = 0; j < vertex_info->tail; j++) {
-            if (vertex_info->edges[j].count > 0)
-                add_edge(graph_1, i, vertex_info->edges[j].other_vertex);
+            assert(vertex_info->edges[j].count == 1);
+            add_edge(graph_1, i, vertex_info->edges[j].other_vertex);
         }
     }
 }

@@ -10,7 +10,7 @@
 
 #include "graph.h"
 
-#define MAX_MATCHINGS 64
+#define MAX_MATCHINGS 48
 #define MAX_STEPS 128
 
 enum step_type {

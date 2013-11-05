@@ -35,11 +35,15 @@ void solve(struct kr *kr, struct graph *graph_in, struct graph *arbitrary,
 
     uint8_t num_matchings = kr->degree + 1;
 
+    // Initialize the graphs
+    int i;
+    for (i = 0; i < MAX_MATCHINGS; i++)
+        graph_init(&solution->matchings[i], graph_in->n);
+
     // Copy input graph and arbitrary matching to correct locations in solution
     copy_graph(graph_in, &solution->matchings[num_matchings]);
     copy_graph(arbitrary, &solution->matchings[0]);
 
-    int i;
     for (i = 0; i < kr->num_steps; i++) {
         struct kr_step *step = &kr->steps[i];
 
@@ -67,9 +71,6 @@ void split_even(struct graph *src, struct graph *dst1, struct graph *dst2)
     assert(dst2 != NULL);
 
     uint8_t n = src->n;
-
-    graph_init(dst1, n);
-    graph_init(dst2, n);
     
     split(src, dst1, dst2);
 }
@@ -84,11 +85,10 @@ void split_odd(struct graph *src1, struct graph *src2,
     assert(src1->n == src2->n);
 
     uint8_t n = src1->n;
-
-    graph_init(dst1, n);
-    graph_init(dst2, n);
  
     add_graph(src1, src2);
+    graph_init(src2, n);  // re-initialize graph for future use
+
     split(src1, dst1, dst2);
 }
 

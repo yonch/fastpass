@@ -45,8 +45,10 @@ class kr_util(object):
         self.indices[self.num_matchings] = 1
 
         self.kr = kapoorrizzi.create_kr(d)
+        self.steps = []
 
         bins = self._solve(d)
+        self._set_steps()
 
         return self.kr
 
@@ -150,8 +152,7 @@ class kr_util(object):
         self.indices[d.index] = 0
   
         # record this step
-        kapoorrizzi.set_kr_step(self.kr, kapoorrizzi.SPLIT_EVEN,
-                                d.index, 0, index1, index2);
+        self.steps.append((d.index, index1, index2))
 
         return bin_info(d.degree / 2, index1), bin_info(d.degree / 2, index2)
 
@@ -169,8 +170,31 @@ class kr_util(object):
         self.indices[d2.index] = 0
 
         # record this step
-        kapoorrizzi.set_kr_step(self.kr, kapoorrizzi.SPLIT_ODD,
-                                d1.index, d2.index, index1, index2);
+        # find the second src to be split into and split it into
+        # the first src instead
+        # this allows us to treat this step as a split_even and
+        # avoid calling add_graph
+        step_index = len(self.steps) - 1
+        while step_index >= 0:
+            current_step = self.steps[step_index]
+            if current_step[1] == d1.index:
+                self.steps[step_index] = (current_step[0], d2.index, current_step[2])
+                source = d2.index
+                break
+            elif current_step[1] == d2.index:
+                self.steps[step_index] = (current_step[0], d1.index, current_step[2])
+                source = d1.index
+                break
+            elif current_step[2] == d1.index:
+                self.steps[step_index] = (current_step[0], current_step[1], d2.index)
+                source = d2.index
+                break
+            elif current_step[2] == d2.index:
+                self.steps[step_index] = (current_step[0], current_step[1], d1.index)
+                source = d1.index
+                break
+            step_index = step_index - 1
+        self.steps.append((source, index1, index2))
 
         return bin_info(d1.degree / 2, index1), bin_info(d1.degree / 2, index2)
 
@@ -187,3 +211,9 @@ class kr_util(object):
     def _print_degrees(self, L):
         if self.print_debug:
             print ", ".join(repr(x.degree) for x in L)
+
+    def _set_steps(self):
+        for i in range(len(self.steps)):
+            step = self.steps[i]
+            # record this step
+            kapoorrizzi.set_kr_step(self.kr, step[0], step[1], step[2])

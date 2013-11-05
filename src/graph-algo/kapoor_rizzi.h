@@ -13,17 +13,10 @@
 #define MAX_MATCHINGS 48
 #define MAX_STEPS 128
 
-enum step_type {
-    SPLIT_EVEN,
-    SPLIT_ODD
-};
-
 // Specification of one step
 // Note that all indices must be unique
 struct kr_step {
-    enum step_type type;
-    uint8_t src1_index;
-    uint8_t src2_index;
+    uint8_t src_index;
     uint8_t dst1_index;
     uint8_t dst2_index;
 };
@@ -53,8 +46,8 @@ struct kr *create_kr(uint8_t degree);
 void destroy_kr(struct kr *kr);
 
 // Set the next step in this kr
-void set_kr_step(struct kr *kr, enum step_type type, uint8_t src1_index,
-                 uint8_t src2_index, uint8_t dst1_index, uint8_t dst2_index);
+void set_kr_step(struct kr *kr, uint8_t src_index,
+                 uint8_t dst1_index, uint8_t dst2_index);
 
 // Initialize a matching_set
 void matching_set_init(struct matching_set *solution);

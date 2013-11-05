@@ -16,9 +16,7 @@ void split(struct graph *graph_in, struct graph *graph_1,
     assert(graph_2 != NULL);
 
     uint8_t n = graph_in->n;
-    uint8_t start_degree;
-    assert((start_degree = get_max_degree(graph_in)) > 1);
-
+ 
     uint8_t node, cur_node, new_node;
     for (node = 0; node < n; node++) {
         cur_node = node;
@@ -36,7 +34,4 @@ void split(struct graph *graph_in, struct graph *graph_1,
             cur_node = new_node;
         }
     }
-
-    assert(get_max_degree(graph_1) <= start_degree / 2);
-    assert(get_max_degree(graph_2) <= start_degree / 2);
 }

@@ -262,7 +262,7 @@ void print_graph(struct graph *graph) {
     
     printf("printing graph:\n");
     int i, j;
-    for (int i = 0; i < graph->n * 2; i++) {
+    for (i = 0; i < graph->n * 2; i++) {
         struct vertex_info *v_info = &graph->vertices[i];
         printf("vertices adjacent to %d (deg %d): ", i, get_degree(graph, i));
         for (j = 0; j < v_info->tail; j++) {

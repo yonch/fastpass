@@ -27,38 +27,34 @@ class Test(unittest.TestCase):
                 g_c = graph.create_graph_test(n_side);
                 g_c_copy = graph.create_graph_test(n_side)
                 for edge in g_p.edges_iter():
-                    if (edge[0] < edge[1]):
-                        graph.add_edge(g_c, edge[0], edge[1])
-                        graph.add_edge(g_c_copy, edge[0], edge[1])
-                    else:
-                        graph.add_edge(g_c, edge[1], edge[0])
-                        graph.add_edge(g_c_copy, edge[1], edge[0])
-                self.assertEqual(graph.get_max_degree(g_c), deg)
-                self.assertEqual(graph.get_max_degree(g_c_copy), deg)
-             
+                    graph.add_edge_test(g_c, edge[0], edge[1])
+                    graph.add_edge_test(g_c_copy, edge[0], edge[1])
+                self.assertEqual(graph.get_max_degree_test(g_c), deg)
+                self.assertEqual(graph.get_max_degree_test(g_c_copy), deg)
+ 
                 # Create the output graphs
                 g1_c = graph.create_graph_test(n_side)
                 g2_c = graph.create_graph_test(n_side)
 
-                eulersplit.split(g_c_copy, g1_c, g2_c)
+                eulersplit.split_test(g_c_copy, g1_c, g2_c)
 
                 # Check that the input graph is now empty
-                self.assertEqual(graph.get_max_degree(g_c_copy), 0)
+                self.assertEqual(graph.get_max_degree_test(g_c_copy), 0)
                 for node in xrange(2 * n_side):
-                    self.assertEqual(graph.get_degree(g_c_copy, node), 0)
+                    self.assertEqual(graph.get_degree_test(g_c_copy, node), 0)
 
                 # Check that graphs have the correct degree
-                self.assertEqual(graph.get_max_degree(g1_c), deg / 2)
-                self.assertEqual(graph.get_max_degree(g2_c), deg / 2)
+                self.assertEqual(graph.get_max_degree_test(g1_c), deg / 2)
+                self.assertEqual(graph.get_max_degree_test(g2_c), deg / 2)
 
                 # Check that vertices have the correct degree
                 for node in xrange(2 * n_side):
-                    self.assertEqual(graph.get_degree(g1_c, node), deg / 2)
-                    self.assertEqual(graph.get_degree(g2_c, node), deg / 2)
+                    self.assertEqual(graph.get_degree_test(g1_c, node), deg / 2)
+                    self.assertEqual(graph.get_degree_test(g2_c, node), deg / 2)
 
                 # Check that the combination of the two graphs equals the original graph
-                graph.add_graph(g1_c, g2_c)
-                self.assertTrue(graph.are_equal(g_c, g1_c))
+                graph.add_graph_test(g1_c, g2_c)
+                self.assertTrue(graph.are_equal_test(g_c, g1_c))
                    
                 graph.destroy_graph_test(g_c)
                 graph.destroy_graph_test(g_c_copy)
@@ -79,30 +75,26 @@ class Test(unittest.TestCase):
                     g_c = graph.create_graph_test(n_side);
                     g_c_copy = graph.create_graph_test(n_side)
                     for edge in g_p.edges_iter():
-                        if (edge[0] < edge[1]):
-                            graph.add_edge(g_c, edge[0], edge[1])
-                            graph.add_edge(g_c_copy, edge[0], edge[1])
-                        else:
-                            graph.add_edge(g_c, edge[1], edge[0])
-                            graph.add_edge(g_c_copy, edge[1], edge[0])
+                        graph.add_edge_test(g_c, edge[0], edge[1])
+                        graph.add_edge_test(g_c_copy, edge[0], edge[1])
                     # Create the output graphs
                     g1_c = graph.create_graph_test(n_side)
                     g2_c = graph.create_graph_test(n_side)
 
-                    eulersplit.split(g_c_copy, g1_c, g2_c)
+                    eulersplit.split_test(g_c_copy, g1_c, g2_c)
 
                     # Check that the input graph is now empty
-                    self.assertEqual(graph.get_max_degree(g_c_copy), 0)
+                    self.assertEqual(graph.get_max_degree_test(g_c_copy), 0)
                     for node in xrange(2 * n_side):
-                        self.assertEqual(graph.get_degree(g_c_copy, node), 0)
+                        self.assertEqual(graph.get_degree_test(g_c_copy, node), 0)
 
                     # Check that graphs have the correct max_degree
-                    self.assertEqual(graph.get_max_degree(g1_c), graph.get_max_degree(g_c) / 2)
-                    self.assertEqual(graph.get_max_degree(g2_c), graph.get_max_degree(g_c) / 2)
+                    self.assertEqual(graph.get_max_degree_test(g1_c), graph.get_max_degree_test(g_c) / 2)
+                    self.assertEqual(graph.get_max_degree_test(g2_c), graph.get_max_degree_test(g_c) / 2)
 
                     # Check that the combination of the two graphs equals the original graph
-                    graph.add_graph(g1_c, g2_c)
-                    self.assertTrue(graph.are_equal(g_c, g1_c))
+                    graph.add_graph_test(g1_c, g2_c)
+                    self.assertTrue(graph.are_equal_test(g_c, g1_c))
                    
                     graph.destroy_graph_test(g_c)
                     graph.destroy_graph_test(g_c_copy)

@@ -38,10 +38,10 @@ struct graph_structure {
     struct vertex_info vertices[2 * MAX_NODES];
 };
 
-// Wrapper struct for a graph object. Simplifies testing.
+// Wrapper struct for a graph object.
 struct graph {
-    struct graph_structure *structure;
-    struct graph_edges *edges;
+    struct graph_structure structure;
+    struct graph_edges edges;
 };
 
 // Helper method for debugging
@@ -233,11 +233,8 @@ static inline
 struct graph *create_graph_test(uint8_t n) {
     struct graph *graph_out = malloc(sizeof(struct graph));
 
-    graph_out->structure = malloc(sizeof(struct graph_structure));
-    graph_structure_init(graph_out->structure, n);
-
-    graph_out->edges = malloc(sizeof(struct graph_edges));
-    graph_edges_init(graph_out->edges, n);
+    graph_structure_init(&graph_out->structure, n);
+    graph_edges_init(&graph_out->edges, n);
 
     return graph_out;
 }
@@ -246,10 +243,6 @@ static inline
 void destroy_graph_test(struct graph *graph) {
     assert(graph != NULL);
 
-    if (graph->structure != NULL)
-        free(graph->structure);
-    if (graph->edges != NULL)
-        free(graph->edges);
     free(graph);
 }
 
@@ -257,46 +250,46 @@ static inline
 void add_edge_test(struct graph *graph, uint8_t u, uint8_t v) {
     assert(graph != NULL);
 
-    add_edge(graph->structure, graph->edges, u, v);
+    add_edge(&graph->structure, &graph->edges, u, v);
 }
 
 static inline
 bool has_neighbor_test(struct graph *graph, uint8_t vertex) {
     assert(graph != NULL);
     
-    return has_neighbor(graph->edges, vertex);
+    return has_neighbor(&graph->edges, vertex);
 }
 
 static inline
 uint8_t get_degree_test(struct graph *graph, uint8_t vertex) {
     assert(graph != NULL);
 
-    return get_degree(graph->edges, vertex);
+    return get_degree(&graph->edges, vertex);
 }
 
 static inline
 uint8_t get_max_degree_test(struct graph *graph) {
     assert(graph != NULL);
 
-    return get_degree(graph->edges, graph->structure->n);
+    return get_degree(&graph->edges, graph->structure.n);
 }
 
 static inline
 void add_graph_test(struct graph *graph_1, struct graph *graph_2) {
     assert(graph_1 != NULL);
     assert(graph_2 != NULL);
-    assert(graph_1->structure->n == graph_2->structure->n);
+    assert(graph_1->structure.n == graph_2->structure.n);
     
-    add_graph(graph_1->edges, graph_2->edges, graph_1->structure->n);
+    add_graph(&graph_1->edges, &graph_2->edges, graph_1->structure.n);
 }
 
 static inline
 bool are_equal_test(struct graph *graph_1, struct graph *graph_2) {
     assert(graph_1 != NULL);
     assert(graph_2 != NULL);
-    assert(graph_1->structure->n == graph_2->structure->n);
+    assert(graph_1->structure.n == graph_2->structure.n);
 
-    return are_equal(graph_1->edges, graph_2->edges, graph_1->structure->n);
+    return are_equal(&graph_1->edges, &graph_2->edges, graph_1->structure.n);
 }
 
 // Helper method for debugging

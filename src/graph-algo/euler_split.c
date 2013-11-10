@@ -40,6 +40,6 @@ void split_test(struct graph *graph_in, struct graph *graph_1,
     assert(graph_1 != NULL);
     assert(graph_2 != NULL);
 
-    split(graph_in->structure, graph_in->edges, graph_1->edges,
-          graph_2->edges);
+    split(&graph_in->structure, &graph_in->edges, &graph_1->edges,
+          &graph_2->edges);
 }

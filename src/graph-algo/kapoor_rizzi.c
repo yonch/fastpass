@@ -20,12 +20,12 @@ void kr_init(struct kr *kr, uint8_t degree) {
 
 // Splits graph_in into matchings, using the arbitary matching
 // Uses the approximate method
-void solve(struct kr *kr, struct graph *graph_in, struct graph *arbitrary,
-           struct matching_set *solution)
+void solve(struct kr *kr, struct graph_edges *edges_in,
+           struct graph_edges *edges_arbitrary, struct matching_set *solution)
 {
     assert(kr != NULL);
-    assert(graph_in != NULL);
-    assert(arbitrary != NULL);
+    assert(edges_in != NULL);
+    assert(edges_arbitrary != NULL);
     assert(solution != NULL);
 
     uint8_t num_matchings = kr->degree + 1;
@@ -33,16 +33,17 @@ void solve(struct kr *kr, struct graph *graph_in, struct graph *arbitrary,
     // Initialize the graphs
     int i;
     for (i = 0; i < MAX_MATCHINGS; i++)
-        graph_init(&solution->matchings[i], graph_in->n);
+        graph_edges_init(&solution->matchings[i], solution->structure.n);
 
     // Copy input graph and arbitrary matching to correct locations in solution
-    add_graph(&solution->matchings[num_matchings], graph_in);
-    add_graph(&solution->matchings[0], arbitrary);
+    add_graph(&solution->matchings[num_matchings], edges_in, solution->structure.n);
+    add_graph(&solution->matchings[0], edges_arbitrary, solution->structure.n);
 
     for (i = 0; i < kr->num_steps; i++) {
         struct kr_step *step = &kr->steps[i];
 
-        split(&solution->matchings[step->src_index],
+        split(&solution->structure,
+              &solution->matchings[step->src_index],
               &solution->matchings[step->dst1_index],
               &solution->matchings[step->dst2_index]);
     }
@@ -108,7 +109,7 @@ uint8_t get_num_matchings(struct matching_set *solution) {
 }
 
 // Return a pointer to a matching in the solution
-struct graph *get_matching(struct matching_set *solution, uint8_t index) {
+struct graph_edges *get_matching(struct matching_set *solution, uint8_t index) {
     assert(solution != NULL);
     assert(index < solution->num_matchings);
 

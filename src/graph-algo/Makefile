@@ -1,6 +1,9 @@
 # Macros
-CC = gcc
+#CC = gcc
+CC = /mnt/sdb1/bin/icc
 CCFLAGS = -g
+CCFLAGS += -DNDEBUG
+CCFLAGS += -O3
 LDFLAGS =
 
 # Pattern rule

@@ -49,7 +49,9 @@ int main(void) {
 
     // Simple test of complete bipartite graphs
     int n;
-    for (n = 2; n < 20; n += 2) {
+    int it;
+    for (it = 0; it <= 100000; it++) 
+    for (n = 20; n <= 20; n += 2) {
         graph_init(&g, n);
         graph_init(&g_copy, n);
         graph_init(&g1, n);

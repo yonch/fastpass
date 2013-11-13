@@ -10,7 +10,8 @@
 
 #include "graph.h"
 
-// Splits graph_in into graph_1 and graph_2
-void split(struct graph *graph_in, struct graph *graph_1, struct graph *graph_2);
+// Splits edges_in into edges_1 and edges_2
+void split(struct graph_structure *structure, struct graph_edges *edges_in,
+           struct graph_edges *edges_1, struct graph_edges *edges_2);
 
 #endif /* EULER_SPLIT_H_ */

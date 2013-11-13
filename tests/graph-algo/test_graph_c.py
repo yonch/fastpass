@@ -23,27 +23,24 @@ class Test(unittest.TestCase):
             for n_side in xrange(2*deg+4,33,7):
                 g_p = generator.generate_random_regular_bipartite(n_side, deg)
 
-                g_c = graph.create_graph_test(n_side)
+                g_c_structure = graph.create_graph_structure_test(n_side)
+                g_c = graph.create_graph_edges_test(n_side)
                 
                 # Create the graph in C
                 # first n vertices are on left, second n are on right
                 for edge in g_p.edges_iter():
-                    if (edge[0] < edge[1]):
-                        graph.add_edge(g_c, edge[0], edge[1])
-                    else:
-                        graph.add_edge(g_c, edge[1], edge[0])
-                self.assertEqual(deg, graph.get_max_degree(g_c))
+                    graph.add_edge(g_c_structure, g_c, edge[0], edge[1])
                     
                 # Check that graph in C matches the graph in Python
                 for node in xrange(2 * n_side):
                     self.assertEqual(g_p.degree(node), graph.get_degree(g_c, node))
-
-                for node in xrange(2 * n_side):
-                    if (graph.get_degree(g_c, node) > 0):
-                        neighbor = graph.get_neighbor(g_c, node)
-                        self.assertIn(neighbor, g_p.neighbors(node))
                 
-                graph.destroy_graph_test(g_c)
+                for node in xrange(2 * n_side):
+                    if (g_p.degree(node) > 0):
+                        self.assertTrue(graph.has_neighbor(g_c, node))
+
+                graph.destroy_graph_structure_test(g_c_structure)
+                graph.destroy_graph_edges_test(g_c)
         pass
 
         # TODO: could write more tests

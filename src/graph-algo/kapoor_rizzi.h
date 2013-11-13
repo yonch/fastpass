@@ -29,7 +29,7 @@ struct kr {
 
 struct matching_set {
     uint8_t num_matchings;
-    struct graph matchings [MAX_MATCHINGS];
+    struct graph_edges matchings [MAX_MATCHINGS];
 };
 
 // Initialize a KR
@@ -37,7 +37,8 @@ void kr_init(struct kr *kr, uint8_t degree);
 
 // Splits graph_in into matchings, using the arbitary_matching
 // Uses the approximate method
-void solve(struct kr *kr, struct graph *graph_in, struct graph *arbitrary,
+void solve(struct kr *kr, struct graph_structure *structure,
+           struct graph_edges *edges_in, struct graph_edges *edges_arbitrary,
            struct matching_set *solution);
 
 // Helper methods for creating/destroying KR's from Python code
@@ -61,6 +62,6 @@ void destroy_matching_set(struct matching_set *solution);
 uint8_t get_num_matchings(struct matching_set *solution);
 
 // Return a pointer to a matching in the solution
-struct graph *get_matching(struct matching_set *solution, uint8_t index);
+struct graph_edges *get_matching(struct matching_set *solution, uint8_t index);
 
 #endif /* KAPOOR_RIZZI_H_ */

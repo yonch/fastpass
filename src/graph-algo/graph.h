@@ -13,7 +13,6 @@
 #include <stdbool.h>
 #include <stdio.h>
 #include <stdlib.h>
-#include <string.h> /* ffsll */
 
 #define MAX(X, Y) ((X) > (Y) ? (X) : (Y))
 #define MAX_DEGREE 64  // This cannot exceed 64, the width of the bitmaps
@@ -46,19 +45,6 @@ struct graph {
 
 // Helper method for debugging
 static void print_graph(struct graph_structure *structure, struct graph_edges *edges);
-
-// Temporary helper function because I get an error when I try to compile with ffsll:
-// warning: implicit declaration of function 'ffsll' is invalid in C99 [-Wimplicit-function-declaration]
-static inline
-int ffsll(uint64_t input) {
-    uint32_t low = (input & 0xffffffffULL);
-    uint32_t high = (input >> 32);
-
-    if (low != 0)
-        return ffsl(low);
-    else
-        return ffsl(high);
-}
 
 // Initialize the bipartite graph structure
 static inline
@@ -132,11 +118,11 @@ uint8_t split_edge(struct graph_structure *structure, struct graph_edges *src_ed
 
     // Find a neighbor
     uint64_t u_bitmap = src_edges->neighbor_bitmaps[u];
-    uint8_t edge_index_u = ffsll(u_bitmap) - 1;
+    uint8_t edge_index_u = __builtin_ffsll(u_bitmap) - 1;
     uint8_t v = structure->vertices[u].neighbors[edge_index_u];
     uint8_t edge_index_v = structure->vertices[u].indices[edge_index_u];
     uint64_t v_bitmap = src_edges->neighbor_bitmaps[v];
-
+    
     // Remove the edge in both source bitmaps
     src_edges->neighbor_bitmaps[u] = u_bitmap & ~(0x1ULL << edge_index_u);
     src_edges->neighbor_bitmaps[v] = v_bitmap & ~(0x1ULL << edge_index_v);
@@ -162,9 +148,9 @@ void add_edge(struct graph_structure *structure, struct graph_edges *edges,
  
     // Find empty spots for the edge
     uint64_t u_bitmap = edges->neighbor_bitmaps[u];
-    uint8_t edge_index_u = ffsll(~u_bitmap) - 1;
+    uint8_t edge_index_u = __builtin_ffsll(~u_bitmap) - 1;
     uint64_t v_bitmap = edges->neighbor_bitmaps[v];
-    uint8_t edge_index_v = ffsll(~v_bitmap) - 1;
+    uint8_t edge_index_v = __builtin_ffsll(~v_bitmap) - 1;
 
     // Add edge to edges
     edges->neighbor_bitmaps[u] = u_bitmap | (0x1ULL << edge_index_u);
@@ -181,7 +167,7 @@ void add_edge(struct graph_structure *structure, struct graph_edges *edges,
 
 // Adds the edges from graph_2 to graph_1
 static inline
-void add_graph(struct graph_edges *edges_1, struct graph_edges *edges_2,
+void add_edges(struct graph_edges *edges_1, struct graph_edges *edges_2,
                uint8_t n) {
     assert(edges_1 != NULL);
     assert(edges_2 != NULL);
@@ -193,6 +179,42 @@ void add_graph(struct graph_edges *edges_1, struct graph_edges *edges_2,
         uint64_t bitmap_2 = edges_2->neighbor_bitmaps[i];
         assert((bitmap_1 & bitmap_2) == 0);
         edges_1->neighbor_bitmaps[i] = bitmap_1 | bitmap_2;
+    }
+}
+
+// Copies an edge set
+static inline
+void copy_edges(struct graph_edges *src_edges, struct graph_edges *dst_edges,
+                uint8_t n) {
+    assert(src_edges != NULL);
+    assert(dst_edges != NULL);
+
+    int i;
+    for (i = 0; i < 2 * n; i++)
+        dst_edges->neighbor_bitmaps[i] = src_edges->neighbor_bitmaps[i];
+}
+
+// Finds an edge from u to v and marks it as set. Excludes edges set in existing_edges
+// Assumes the edge already exists in the structure!
+static inline
+void set_edge(struct graph_structure *structure, struct graph_edges *existing_edges,
+              struct graph_edges *edges, uint8_t u, uint8_t v) {
+    assert(structure != NULL);
+    assert(existing_edges != NULL);
+    assert(edges != NULL);
+
+    struct vertex_info *u_info = &structure->vertices[u];
+    uint64_t u_bitmap_existing = existing_edges->neighbor_bitmaps[u];
+    uint64_t u_bitmap = edges->neighbor_bitmaps[u];
+    uint64_t v_bitmap = edges->neighbor_bitmaps[v];
+    int i;
+    for (i = 0; i < MAX_DEGREE; i++) {
+        if ((u_info->neighbors[i] == v) && !(u_bitmap & (0x1ULL << i)) &&
+            !(u_bitmap_existing & (0x1ULL << i))) {
+            edges->neighbor_bitmaps[u] = u_bitmap | (0x1ULL << i);
+            edges->neighbor_bitmaps[v] = v_bitmap | (0x1ULL << u_info->indices[i]);
+            return;
+        }
     }
 }
 
@@ -230,66 +252,35 @@ bool is_perfect_matching(struct graph_edges *edges, uint8_t n) {
 
 // Helper methods for testing in python
 static inline
-struct graph *create_graph_test(uint8_t n) {
-    struct graph *graph_out = malloc(sizeof(struct graph));
+struct graph_structure *create_graph_structure_test(uint8_t n) {
 
-    graph_structure_init(&graph_out->structure, n);
-    graph_edges_init(&graph_out->edges, n);
+    struct graph_structure *structure_out = malloc(sizeof(struct graph_structure));
+    graph_structure_init(structure_out, n);
 
-    return graph_out;
+    return structure_out;
 }
 
 static inline
-void destroy_graph_test(struct graph *graph) {
-    assert(graph != NULL);
+void destroy_graph_structure_test(struct graph_structure *structure) {
+    assert(structure != NULL);
 
-    free(graph);
+    free(structure);
 }
 
 static inline
-void add_edge_test(struct graph *graph, uint8_t u, uint8_t v) {
-    assert(graph != NULL);
+struct graph_edges *create_graph_edges_test(uint8_t n) {
 
-    add_edge(&graph->structure, &graph->edges, u, v);
+    struct graph_edges *edges_out = malloc(sizeof(struct graph_edges));
+    graph_edges_init(edges_out, n);
+
+    return edges_out;
 }
 
 static inline
-bool has_neighbor_test(struct graph *graph, uint8_t vertex) {
-    assert(graph != NULL);
-    
-    return has_neighbor(&graph->edges, vertex);
-}
+void destroy_graph_edges_test(struct graph_edges *edges) {
+    assert(edges != NULL);
 
-static inline
-uint8_t get_degree_test(struct graph *graph, uint8_t vertex) {
-    assert(graph != NULL);
-
-    return get_degree(&graph->edges, vertex);
-}
-
-static inline
-uint8_t get_max_degree_test(struct graph *graph) {
-    assert(graph != NULL);
-
-    return get_degree(&graph->edges, graph->structure.n);
-}
-
-static inline
-void add_graph_test(struct graph *graph_1, struct graph *graph_2) {
-    assert(graph_1 != NULL);
-    assert(graph_2 != NULL);
-    assert(graph_1->structure.n == graph_2->structure.n);
-    
-    add_graph(&graph_1->edges, &graph_2->edges, graph_1->structure.n);
-}
-
-static inline
-bool are_equal_test(struct graph *graph_1, struct graph *graph_2) {
-    assert(graph_1 != NULL);
-    assert(graph_2 != NULL);
-    assert(graph_1->structure.n == graph_2->structure.n);
-
-    return are_equal(&graph_1->edges, &graph_2->edges, graph_1->structure.n);
+    free(edges);
 }
 
 // Helper method for debugging
@@ -302,7 +293,7 @@ void print_graph(struct graph_structure *structure, struct graph_edges *edges) {
     int i, j;
     for (i = 0; i < 2 * structure->n; i++) {
         struct vertex_info *v_info = &structure->vertices[i];
-        printf("neighbors of %d:", i);
+        printf("neighbors of %d: %"PRIx64"\t", i, edges->neighbor_bitmaps[i]);
         for (j = 0; j < MAX_DEGREE; j++) {
             if ((edges->neighbor_bitmaps[i] >> j) & 0x1ULL)
                 printf("%d (%d), ", v_info->neighbors[j], v_info->indices[j]);

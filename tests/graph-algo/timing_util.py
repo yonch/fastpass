@@ -29,18 +29,23 @@ class c_timing_util(object):
         arbitrary_p = graph_util().generate_random_regular_bipartite(n_nodes, 1)
         
         # create the C versions of the graphs
-        self.g_c = graph.create_graph_test(n_nodes)
+        self.g_c_structure = graph.create_graph_structure_test(n_nodes)
+        self.g_c = graph.create_graph_edges_test(n_nodes)
+        self.g_c_copy = graph.create_graph_edges_test(n_nodes)
         for edge in g_p.edges_iter():
-            graph.add_edge(self.g_c, edge[0], edge[1])
-        self.arbitrary_c = graph.create_graph_test(n_nodes)
+            graph.add_edge(self.g_c_structure, self.g_c, edge[0], edge[1])
+        graph.copy_edges(self.g_c, self.g_c_copy, n_nodes)
+ 
+        self.arbitrary_c = graph.create_graph_edges_test(n_nodes)
         for edge in arbitrary_p.edges_iter():
-            graph.add_edge(self.arbitrary_c, edge[0], edge[1])
+            graph.add_edge(self.g_c_structure, self.g_c, edge[0], edge[1])
+            graph.set_edge(self.g_c_structure, self.g_c_copy, self.arbitrary_c, edge[0], edge[1])
 
         # allocate solution
         self.solution = kapoorrizzi.create_matching_set()
 
     def solve(self):
-        kapoorrizzi.solve(self.kr, self.g_c, self.arbitrary_c, self.solution)
+        kapoorrizzi.solve(self.kr, self.g_c_structure, self.g_c_copy, self.arbitrary_c, self.solution)
 
 class python_timing_util(object):
     '''

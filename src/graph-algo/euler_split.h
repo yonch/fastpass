@@ -14,8 +14,4 @@
 void split(struct graph_structure *structure, struct graph_edges *edges_in,
            struct graph_edges *edges_1, struct graph_edges *edges_2);
 
-// Helper method for testing
-void split_test(struct graph *graph_in, struct graph *graph_1,
-                struct graph *graph_2);
-
 #endif /* EULER_SPLIT_H_ */

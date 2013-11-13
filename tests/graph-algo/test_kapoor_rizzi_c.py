@@ -29,34 +29,26 @@ class Test(unittest.TestCase):
         # generate graph and arbitrary matching
         g_p = graph_util().generate_random_regular_bipartite(n_nodes, degree)
         arbitrary_p = graph_util().generate_random_regular_bipartite(n_nodes, 1)
-        
+
         # create the C versions of the graphs, and copies
-        g_c = graph.create_graph_test(n_nodes)
-        g_c_copy = graph.create_graph_test(n_nodes)
+        g_c_structure = graph.create_graph_structure_test(n_nodes)
+        g_c = graph.create_graph_edges_test(n_nodes)
+        g_c_copy = graph.create_graph_edges_test(n_nodes)
         for edge in g_p.edges_iter():
-            if (edge[0] < edge[1]):
-                graph.add_edge(g_c, edge[0], edge[1])
-                graph.add_edge(g_c_copy, edge[0], edge[1])
-            else:
-                graph.add_edge(g_c, edge[1], edge[0])
-                graph.add_edge(g_c_copy, edge[1], edge[0])
-        self.assertEqual(graph.get_max_degree(g_c), degree)
-        self.assertEqual(graph.get_max_degree(g_c_copy), degree)
+            graph.add_edge(g_c_structure, g_c, edge[0], edge[1])
+        graph.copy_edges(g_c, g_c_copy, n_nodes)
+        self.assertEqual(graph.get_max_degree(g_c, n_nodes), degree)
+        self.assertEqual(graph.get_max_degree(g_c_copy, n_nodes), degree)
 
-        arbitrary_c = graph.create_graph_test(n_nodes)
+        arbitrary_c = graph.create_graph_edges_test(n_nodes)
         for edge in arbitrary_p.edges_iter():
-            if (edge[0] < edge[1]):
-                graph.add_edge(arbitrary_c, edge[0], edge[1])
-            else:
-                graph.add_edge(arbitrary_c, edge[1], edge[0])
-        self.assertEqual(graph.get_max_degree(arbitrary_c), 1)
+            graph.add_edge(g_c_structure, g_c, edge[0], edge[1])
+            graph.set_edge(g_c_structure, g_c_copy, arbitrary_c, edge[0], edge[1])
+        self.assertEqual(graph.get_max_degree(arbitrary_c, n_nodes), 1)
 
-        # save original graph in g_c
-        graph.add_graph(g_c, arbitrary_c)
- 
         # solve
         solution = kapoorrizzi.create_matching_set()
-        kapoorrizzi.solve(kr, g_c_copy, arbitrary_c, solution)
+        kapoorrizzi.solve(kr, g_c_structure, g_c_copy, arbitrary_c, solution)
 
         # check solution
 
@@ -67,18 +59,22 @@ class Test(unittest.TestCase):
         # check that each matching is a perfect matching
         for i in range(num_matchings):
             matching = kapoorrizzi.get_matching(solution, i)
-            self.assertTrue(graph.is_perfect_matching(matching))
+            self.assertTrue(graph.is_perfect_matching(matching, n_nodes))
 
         # check sum of matchings equals the original graph
-        matchings_graph_c = graph.create_graph_test(n_nodes)
+        matchings_graph_c = graph.create_graph_edges_test(n_nodes)
         for i in range(num_matchings):
             matching = kapoorrizzi.get_matching(solution, i)
-            graph.add_graph(matchings_graph_c, matching)
-        self.assertTrue(graph.are_equal(matchings_graph_c, g_c))
+            graph.add_edges(matchings_graph_c, matching, n_nodes)
+        self.assertTrue(graph.are_equal(matchings_graph_c, g_c, n_nodes))
 
         # clean up
         kapoorrizzi.destroy_kr(kr)
         kapoorrizzi.destroy_matching_set(solution)
+        graph.destroy_graph_structure_test(g_c_structure)
+        graph.destroy_graph_edges_test(g_c)
+        graph.destroy_graph_edges_test(g_c_copy)
+        graph.destroy_graph_edges_test(arbitrary_c)
 
         pass
 

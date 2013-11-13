@@ -20,8 +20,9 @@ void kr_init(struct kr *kr, uint8_t degree) {
 
 // Splits graph_in into matchings, using the arbitary matching
 // Uses the approximate method
-void solve(struct kr *kr, struct graph_edges *edges_in,
-           struct graph_edges *edges_arbitrary, struct matching_set *solution)
+void solve(struct kr *kr, struct graph_structure *structure,
+           struct graph_edges *edges_in, struct graph_edges *edges_arbitrary,
+           struct matching_set *solution)
 {
     assert(kr != NULL);
     assert(edges_in != NULL);
@@ -33,16 +34,16 @@ void solve(struct kr *kr, struct graph_edges *edges_in,
     // Initialize the graphs
     int i;
     for (i = 0; i < MAX_MATCHINGS; i++)
-        graph_edges_init(&solution->matchings[i], solution->structure.n);
+        graph_edges_init(&solution->matchings[i], structure->n);
 
     // Copy input graph and arbitrary matching to correct locations in solution
-    add_graph(&solution->matchings[num_matchings], edges_in, solution->structure.n);
-    add_graph(&solution->matchings[0], edges_arbitrary, solution->structure.n);
+    add_edges(&solution->matchings[num_matchings], edges_in, structure->n);
+    add_edges(&solution->matchings[0], edges_arbitrary, structure->n);
 
     for (i = 0; i < kr->num_steps; i++) {
         struct kr_step *step = &kr->steps[i];
 
-        split(&solution->structure,
+        split(structure,
               &solution->matchings[step->src_index],
               &solution->matchings[step->dst1_index],
               &solution->matchings[step->dst2_index]);

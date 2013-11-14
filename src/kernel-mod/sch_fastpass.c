@@ -121,6 +121,7 @@ struct fp_sched_data {
 	u64		stat_allocation_errors;
 	u64		stat_missed_timeslots;
 	u64		stat_used_timeslots;
+	u64		stat_requests;
 };
 
 /* special value to mark a flow should not be scheduled */
@@ -139,7 +140,7 @@ static void horizon_advance(struct fp_timeslot_horizon *h, u32 num_tslots) {
 
 /* find the first time slot in the future (x>0) that is set, returns -1 if none */
 static u32 horizon_future_ffs(struct fp_timeslot_horizon *h) {
-	return h->mask ? __ffs64(h->mask & ~1ULL) : -1;
+	return (h->mask & ~1ULL) ? __ffs64(h->mask & ~1ULL) : -1;
 }
 
 static void fp_flow_add_tail(struct fp_flow_head *head, struct fp_flow *flow)
@@ -308,7 +309,7 @@ static struct sk_buff *flow_dequeue_skb(struct Qdisc *sch, struct fp_flow *flow)
 static void flow_inc_unrequested(struct fp_sched_data *q,
 		struct fp_flow *flow)
 {
-	if (flow->unreq_tslots == 0 && flow->next != &do_not_schedule) {
+	if (flow->unreq_tslots == 0) {
 		/* flow not on scheduling queue yet, enqueue */
 		BUG_ON(flow->next != NULL);
 		fp_flow_add_tail(&q->unreq_flows, flow);
@@ -342,21 +343,24 @@ static void flow_enqueue_skb(struct Qdisc *sch, struct fp_flow *flow,
 		flow->tail = skb;
 	}
 
-	/* if credit relates to an old slot, discard it */
-	if (unlikely(flow->unreq_tslots == 0 && flow->last_sch_tslot <= q->horizon.timeslot))
-		flow->credit = 0;
+	if (flow->next != &do_not_schedule) {
+		/* if credit relates to an old slot, discard it */
+		if (unlikely(flow->unreq_tslots == 0 &&
+				time_before_eq64(flow->last_sch_tslot, q->horizon.timeslot)))
+			flow->credit = 0;
 
-	/* check if need to request a new slot */
-	if (cost > flow->credit) {
-		flow_inc_unrequested(q, flow);
-		flow->credit = q->tslot_len;
+		/* check if need to request a new slot */
+		if (cost > flow->credit) {
+			flow_inc_unrequested(q, flow);
+			flow->credit = q->tslot_len;
+		}
+		flow->credit -= cost;
 	}
 
 	/* if queue was empty before, decrease inactive flow count */
 	if (flow->qlen == 0)
 		q->inactive_flows--;
 
-	flow->credit -= cost;
 	flow->qlen++;
 	sch->q.qlen++;
 	sch->qstats.backlog += qdisc_pkt_len(skb);
@@ -430,12 +434,12 @@ begin:
 	/* is current slot an empty slot? */
 	if (next_slot <= 0 || time_before64(now, next_slot_start)) {
 		/* find the current timeslot's index */
-		next_slot = now - q->tslot_start_time;
-		do_div(next_slot, q->tslot_len);
+		u64 tslot_advance = now - q->tslot_start_time;
+		do_div(tslot_advance, q->tslot_len);
 
 		/* move to the new slot */
-		q->tslot_start_time += next_slot * q->tslot_len;
-		horizon_advance(&q->horizon, next_slot);
+		q->tslot_start_time += tslot_advance * q->tslot_len;
+		horizon_advance(&q->horizon, tslot_advance);
 		return;
 	}
 
@@ -471,9 +475,9 @@ static void fp_do_request(struct fp_sched_data *q, u64 now)
 	printk("fp_do_request start unreq_flows=%u, unreq_tslots=%u\n",
 			q->n_unreq_flows, q->unreq_tslots);
 
-	while (q->unreq_flows.first && (~q->horizon.mask & ~1ULL)) {
+	while (q->unreq_flows.first && (~q->horizon.mask & ~0xffULL)) {
 		f = q->unreq_flows.first;
-		empty_slot = __ffs64(~q->horizon.mask & ~1ULL);
+		empty_slot = __ffs64(~q->horizon.mask & ~0xffULL);
 		printk("fp_do_request empty_slot=%d horizon=%llx ~h=%llx, ~1=%llx, &=%llx\n",
 				empty_slot, q->horizon.mask, ~q->horizon.mask, ~1ULL, ~q->horizon.mask & ~1ULL);
 
@@ -483,6 +487,8 @@ static void fp_do_request(struct fp_sched_data *q, u64 now)
 		q->horizon.mask |= (1ULL << empty_slot);
 		f->unreq_tslots--;
 		q->unreq_tslots--;
+		f->last_sch_tslot = max_t(u64, f->last_sch_tslot,
+									   q->horizon.timeslot + empty_slot);
 		/* if we were receiving an allocation packet here, we would also
 		 * make sure that at the end, the queue is unthrottled or the watchdog
 		 * is at the correct time */
@@ -498,9 +504,10 @@ static void fp_do_request(struct fp_sched_data *q, u64 now)
 	printk("fp_do_request end unreq_flows=%u, unreq_tslots=%u\n",
 			q->n_unreq_flows, q->unreq_tslots);
 
-	/* update credits */
+	/* update request credits */
 	q->req_t = max_t(u64, q->req_t, now - q->req_bucketlen) + q->req_cost;
 	compute_time_next_req(q, now);
+	q->stat_requests++;
 }
 
 static struct sk_buff *fastpass_dequeue(struct Qdisc *sch)
@@ -742,6 +749,7 @@ static void fastpass_destroy(struct Qdisc *sch)
 static int fastpass_init(struct Qdisc *sch, struct nlattr *opt)
 {
 	struct fp_sched_data *q = qdisc_priv(sch);
+	u64 now = ktime_to_ns(ktime_get());
 	struct tc_ratespec data_rate_spec ={
 			.linklayer = TC_LINKLAYER_ETHERNET,
 			.rate = 1e9/8,
@@ -761,6 +769,8 @@ static int fastpass_init(struct Qdisc *sch, struct nlattr *opt)
 	q->unreq_flows.first	= NULL;
 	q->internal.next = &do_not_schedule;
 	q->time_next_req = ~0ULL;
+	q->tslot_start_time = now;			/* timeslot 0 starts now */
+	q->req_t = now - q->req_bucketlen;	/* start with full bucket */
 	qdisc_watchdog_init(&q->watchdog, sch);
 
 	if (opt)
@@ -810,7 +820,8 @@ static int fastpass_dump_stats(struct Qdisc *sch, struct gnet_dump *d)
 		.used_timeslots		= q->stat_used_timeslots,
 		.current_timeslot	= q->horizon.timeslot,
 		.horizon_mask		= q->horizon.mask,
-		.time_next_request	= q->time_next_req - now,
+		.time_next_request	= q->time_next_req - ( ~q->time_next_req ? now : 0),
+		.requests			= q->stat_requests,
 		.flows				= q->flows,
 		.inactive_flows		= q->inactive_flows,
 		.unrequested_flows	= q->n_unreq_flows,
@@ -836,6 +847,8 @@ static struct Qdisc_ops fastpass_qdisc_ops __read_mostly = {
 	.owner		=	THIS_MODULE,
 };
 
+extern void __init fastpass_proto_register(void);
+
 static int __init fastpass_module_init(void)
 {
 	int ret;
@@ -849,6 +862,8 @@ static int __init fastpass_module_init(void)
 	ret = register_qdisc(&fastpass_qdisc_ops);
 	if (ret)
 		kmem_cache_destroy(fp_flow_cachep);
+
+	fastpass_proto_register();
 
 	return ret;
 }

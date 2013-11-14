@@ -6,4 +6,6 @@
 
 %include "stdint.i"
 
+#define __attribute__(x)
+
 %include "../../src/graph-algo/graph.h"

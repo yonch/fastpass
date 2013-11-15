@@ -21,13 +21,18 @@
 // The active edges in this graph
 struct graph_edges {
     uint64_t neighbor_bitmaps[2 * MAX_NODES];
-};
+} __attribute__((__packed__));
+
+// This tracks the id and index of a neighbor
+struct neighbor {
+    uint8_t id;
+    uint8_t index;
+} __attribute__((__packed__));
 
 // This tracks the neighbors of this vertex
 struct vertex_info {
-    uint8_t neighbors[MAX_DEGREE];
-    uint8_t indices[MAX_DEGREE];
-};
+    struct neighbor neighbors[MAX_DEGREE];
+} __attribute__((__packed__));
 
 // Graph representation. Possible edges are stored in adjacency lists
 // Active edges in a specific graph are stored in a graph_edges struct
@@ -35,13 +40,7 @@ struct vertex_info {
 struct graph_structure {
     uint8_t n;
     struct vertex_info vertices[2 * MAX_NODES];
-};
-
-// Wrapper struct for a graph object.
-struct graph {
-    struct graph_structure structure;
-    struct graph_edges edges;
-};
+} __attribute__((__packed__));
 
 // Helper method for debugging
 static void print_graph(struct graph_structure *structure, struct graph_edges *edges);
@@ -118,9 +117,13 @@ uint8_t split_edge(struct graph_structure *structure, struct graph_edges *src_ed
 
     // Find a neighbor
     uint64_t u_bitmap = src_edges->neighbor_bitmaps[u];
-    uint8_t edge_index_u = __builtin_ffsll(u_bitmap) - 1;
-    uint8_t v = structure->vertices[u].neighbors[edge_index_u];
-    uint8_t edge_index_v = structure->vertices[u].indices[edge_index_u];
+    assert(u_bitmap != 0);  // otherwise, results of bsfq are undefined
+    uint64_t result;
+    asm("bsfq %1,%0" : "=r"(result) : "r"(u_bitmap));
+    uint8_t edge_index_u = (uint8_t) result;
+
+    uint8_t v = structure->vertices[u].neighbors[edge_index_u].id;
+    uint8_t edge_index_v = structure->vertices[u].neighbors[edge_index_u].index;
     uint64_t v_bitmap = src_edges->neighbor_bitmaps[v];
     
     // Remove the edge in both source bitmaps
@@ -148,21 +151,27 @@ void add_edge(struct graph_structure *structure, struct graph_edges *edges,
  
     // Find empty spots for the edge
     uint64_t u_bitmap = edges->neighbor_bitmaps[u];
-    uint8_t edge_index_u = __builtin_ffsll(~u_bitmap) - 1;
-    uint64_t v_bitmap = edges->neighbor_bitmaps[v];
-    uint8_t edge_index_v = __builtin_ffsll(~v_bitmap) - 1;
+    assert(~u_bitmap != 0);  // otherwise, results of bsfq are undefined
+    uint64_t result;
+    asm("bsfq %1,%0" : "=r"(result) : "r"(~u_bitmap));
+    uint8_t edge_index_u = (uint8_t) result;
 
+    uint64_t v_bitmap = edges->neighbor_bitmaps[v];
+    assert(~v_bitmap != 0);
+    asm("bsfq %1,%0" : "=r"(result) : "r"(~v_bitmap));
+    uint8_t edge_index_v = (uint8_t) result;
+ 
     // Add edge to edges
     edges->neighbor_bitmaps[u] = u_bitmap | (0x1ULL << edge_index_u);
     edges->neighbor_bitmaps[v] = v_bitmap | (0x1ULL << edge_index_v);
 
     // Add edge to structure
     struct vertex_info *u_info = &structure->vertices[u];
-    u_info->neighbors[edge_index_u] = v;
-    u_info->indices[edge_index_u] = edge_index_v;
+    u_info->neighbors[edge_index_u].id = v;
+    u_info->neighbors[edge_index_u].index = edge_index_v;
     struct vertex_info *v_info = &structure->vertices[v];
-    v_info->neighbors[edge_index_v] = u;
-    v_info->indices[edge_index_v] = edge_index_u;
+    v_info->neighbors[edge_index_v].id = u;
+    v_info->neighbors[edge_index_v].index = edge_index_u;
 }
 
 // Adds the edges from graph_2 to graph_1
@@ -172,7 +181,6 @@ void add_edges(struct graph_edges *edges_1, struct graph_edges *edges_2,
     assert(edges_1 != NULL);
     assert(edges_2 != NULL);
 
-    struct vertex_info *vertex_info;
     int i;
     for (i = 0; i < 2 * n; i++) {
         uint64_t bitmap_1 = edges_1->neighbor_bitmaps[i];
@@ -209,10 +217,10 @@ void set_edge(struct graph_structure *structure, struct graph_edges *existing_ed
     uint64_t v_bitmap = edges->neighbor_bitmaps[v];
     int i;
     for (i = 0; i < MAX_DEGREE; i++) {
-        if ((u_info->neighbors[i] == v) && !(u_bitmap & (0x1ULL << i)) &&
+        if ((u_info->neighbors[i].id == v) && !(u_bitmap & (0x1ULL << i)) &&
             !(u_bitmap_existing & (0x1ULL << i))) {
             edges->neighbor_bitmaps[u] = u_bitmap | (0x1ULL << i);
-            edges->neighbor_bitmaps[v] = v_bitmap | (0x1ULL << u_info->indices[i]);
+            edges->neighbor_bitmaps[v] = v_bitmap | (0x1ULL << u_info->neighbors[i].index);
             return;
         }
     }
@@ -296,7 +304,7 @@ void print_graph(struct graph_structure *structure, struct graph_edges *edges) {
         printf("neighbors of %d: %"PRIx64"\t", i, edges->neighbor_bitmaps[i]);
         for (j = 0; j < MAX_DEGREE; j++) {
             if ((edges->neighbor_bitmaps[i] >> j) & 0x1ULL)
-                printf("%d (%d), ", v_info->neighbors[j], v_info->indices[j]);
+                printf("%d (%d), ", v_info->neighbors[j].id, v_info->neighbors[j].index);
         }
         printf("\n");
     }

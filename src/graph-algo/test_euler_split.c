@@ -52,7 +52,7 @@ int main(void) {
     // Simple test of complete bipartite graphs
     int n;
     int it;
-    for (it = 0; it <= 100000; it++) { 
+    for (it = 0; it <= 1000000; it++) { 
         for (n = 20; n <= 20; n += 2) {
             graph_structure_init(&g_structure, n);
             graph_edges_init(&g, n);

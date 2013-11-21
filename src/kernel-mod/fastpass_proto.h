@@ -13,6 +13,37 @@
 #define MAX_FASTPASS_ONLY_HEADER (sizeof(struct fastpass_req_hdr))
 #define MAX_TOTAL_FASTPASS_HEADERS (MAX_FASTPASS_ONLY_HEADER + MAX_HEADER)
 
+/*
+ * 	Warning and debugging macros, (originally taken from DCCP)
+ */
+#define FASTPASS_WARN(fmt, a...) LIMIT_NETDEBUG(KERN_WARNING "%s: " fmt,       \
+							__func__, ##a)
+#define FASTPASS_CRIT(fmt, a...) printk(KERN_CRIT fmt " at %s:%d/%s()\n", ##a, \
+					 __FILE__, __LINE__, __func__)
+#define FASTPASS_BUG(a...)       do { FASTPASS_CRIT("BUG: " a); dump_stack(); } while(0)
+#define FASTPASS_BUG_ON(cond)    do { if (unlikely((cond) != 0))		   \
+				     FASTPASS_BUG("\"%s\" holds (exception!)", \
+					      __stringify(cond));          \
+			     } while (0)
+
+#define FASTPASS_PRINTK(enable, fmt, args...)	do { if (enable)	     \
+							printk(fmt, ##args); \
+						} while(0)
+#define FASTPASS_PR_DEBUG(enable, fmt, a...)	FASTPASS_PRINTK(enable, KERN_DEBUG \
+						  "%s: " fmt, __func__, ##a)
+
+#ifdef CONFIG_IP_FASTPASS_DEBUG
+extern bool fastpass_debug;
+#define fastpass_pr_debug(format, a...)	  FASTPASS_PR_DEBUG(fastpass_debug, format, ##a)
+#define fastpass_pr_debug_cat(format, a...)   FASTPASS_PRINTK(fastpass_debug, format, ##a)
+#define fastpass_debug(fmt, a...)		  fastpass_pr_debug_cat(KERN_DEBUG fmt, ##a)
+#else
+#define fastpass_pr_debug(format, a...)
+#define fastpass_pr_debug_cat(format, a...)
+#define fastpass_debug(format, a...)
+#endif
+
+
 struct fastpass_sock {
 	/* inet_sock has to be the first member */
 	struct inet_sock inet;

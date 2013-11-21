@@ -13,16 +13,45 @@
 #include <net/protocol.h>
 #include <net/ip.h>
 #include <net/inet_common.h>
+#include <net/inet_hashtables.h>
 
 #include "fastpass_proto.h"
 
-int fastpass_rcv(struct sk_buff *skb) {
-	BUG();
-	return -ENOTSUPP;
+struct inet_hashinfo fastpass_hashinfo;
+EXPORT_SYMBOL_GPL(fastpass_hashinfo);
+#define FASTPASS_EHASH_NBUCKETS 16
+
+#define FASTPASS_DEFAULT_PORT_NETORDER 1
+
+#ifdef CONFIG_IP_FASTPASS_DEBUG
+bool fastpass_debug;
+module_param(fastpass_debug, bool, 0644);
+MODULE_PARM_DESC(fastpass_debug, "Enable debug messages");
+
+EXPORT_SYMBOL_GPL(fastpass_debug);
+#endif
+
+int fastpass_rcv(struct sk_buff *skb)
+{
+	struct sock *sk;
+
+	sk = __inet_lookup_skb(&fastpass_hashinfo, skb,
+			FASTPASS_DEFAULT_PORT_NETORDER /*sport*/,
+			FASTPASS_DEFAULT_PORT_NETORDER /*dport*/);
+
+	if (sk == NULL) {
+		fastpass_pr_debug("got packet on non-connected socket\n");
+		kfree_skb(skb);
+		return 0;
+	}
+
+	return sk_receive_skb(sk, skb, 1);
 }
 
 static void fastpass_proto_close(struct sock *sk, long timeout)
 {
+	pr_err("%s: visited\n", __func__);
+
 	sk_common_release(sk);
 }
 
@@ -33,8 +62,8 @@ static int fastpass_sk_init(struct sock *sk)
 	pr_err("%s: visited\n", __func__);
 
 	/* bind all sockets to port 1, to avoid inet_autobind */
-	inet_sk(sk)->inet_num = 1;
-	inet_sk(sk)->inet_sport = htons(inet_sk(sk)->inet_num);
+	inet_sk(sk)->inet_num = ntohs(FASTPASS_DEFAULT_PORT_NETORDER);
+	inet_sk(sk)->inet_sport = FASTPASS_DEFAULT_PORT_NETORDER;
 
 	fp->mss_cache = 536;
 
@@ -182,20 +211,35 @@ static int fastpass_recvmsg(struct kiocb *iocb, struct sock *sk,
 	return 0;
 }
 
-static int fastpass_queue_rcv_skb(struct sock *sk, struct sk_buff *skb)
+static int fastpass_rcv_skb(struct sock *sk, struct sk_buff *skb)
 {
-	BUG();
-	return -ENOTSUPP;
+	pr_err("%s: visited\n", __func__);
+	__kfree_skb(skb);
+	return 0;
 }
+
 static inline void fastpass_hash(struct sock *sk)
 {
-	BUG();
+	pr_err("%s: visited\n", __func__);
+	inet_hash(sk);
 }
 static void fastpass_unhash(struct sock *sk)
 {
 	pr_err("%s: visited\n", __func__);
+	inet_unhash(sk);
 }
+static void fastpass_rehash(struct sock *sk)
+{
+	pr_err("%s: before %X\n", __func__, sk->sk_hash);
+	sk->sk_prot->unhash(sk);
 
+	sk->sk_state = TCP_ESTABLISHED;
+	inet_sk(sk)->inet_dport = FASTPASS_DEFAULT_PORT_NETORDER;
+	inet_sk(sk)->inet_daddr = inet_sk(sk)->cork.fl.u.ip4.daddr;
+	sk->sk_prot->hash(sk);
+
+	pr_err("%s: after %X\n", __func__, sk->sk_hash);
+}
 static int fastpass_bind(struct sock *sk, struct sockaddr *uaddr,
 		int addr_len)
 {
@@ -223,12 +267,14 @@ struct proto	fastpass_prot = {
 	.sendmsg	   = fastpass_sendmsg,
 	.recvmsg	   = fastpass_recvmsg,
 	.bind		   = fastpass_bind,
-	.backlog_rcv	   = fastpass_queue_rcv_skb,
+	.backlog_rcv   = fastpass_rcv_skb,
 	.hash		   = fastpass_hash,
 	.unhash		   = fastpass_unhash,
+	.rehash		   = fastpass_rehash,
 	.max_header	   = MAX_TOTAL_FASTPASS_HEADERS,
 	.obj_size	   = sizeof(struct fastpass_sock),
 	.slab_flags	   = SLAB_DESTROY_BY_RCU,
+	.h.hashinfo		= &fastpass_hashinfo,
 #ifdef CONFIG_COMPAT
 	.compat_setsockopt = compat_ip_setsockopt,
 	.compat_getsockopt = compat_ip_getsockopt,
@@ -251,9 +297,43 @@ struct fastpass_proto_data {
 
 };
 
+static int init_hashinfo(void)
+{
+	int i;
+
+	inet_hashinfo_init(&fastpass_hashinfo);
+	fastpass_hashinfo.ehash_mask = FASTPASS_EHASH_NBUCKETS - 1;
+	fastpass_hashinfo.ehash = kzalloc(
+			FASTPASS_EHASH_NBUCKETS * sizeof(struct inet_ehash_bucket),
+			GFP_KERNEL);
+
+	if (!fastpass_hashinfo.ehash) {
+		FASTPASS_CRIT("Failed to allocate ehash buckets");
+		return ENOMEM;
+	}
+
+	fastpass_hashinfo.ehash_locks = kmalloc(sizeof(spinlock_t), GFP_KERNEL);
+	fastpass_hashinfo.ehash_locks_mask = 0;
+	if (!fastpass_hashinfo.ehash_locks) {
+		FASTPASS_CRIT("Failed to allocate ehash locks");
+		kfree(fastpass_hashinfo.ehash);
+		return ENOMEM;
+	}
+	spin_lock_init(&fastpass_hashinfo.ehash_locks[0]);
+
+	for (i = 0; i <= fastpass_hashinfo.ehash_mask; i++) {
+			INIT_HLIST_NULLS_HEAD(&fastpass_hashinfo.ehash[i].chain, i);
+			INIT_HLIST_NULLS_HEAD(&fastpass_hashinfo.ehash[i].twchain, i);
+	}
+	return 0;
+}
+
 
 void __init fastpass_proto_register(void)
 {
+	if (init_hashinfo())
+		goto out_mem_err;
+
 	if (proto_register(&fastpass_prot, 1))
 		goto out_register_err;
 
@@ -268,5 +348,9 @@ out_unregister_proto:
 	proto_unregister(&fastpass_prot);
 out_register_err:
 	pr_crit("%s: Cannot add FastPass/IP protocol\n", __func__);
+	return;
+out_mem_err:
+	pr_crit("%s: Cannot allocate hashinfo tables\n", __func__);
+	return;
 }
 

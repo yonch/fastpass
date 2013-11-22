@@ -30,6 +30,8 @@
 #include <net/tcp_states.h>
 #include <net/sch_generic.h>
 
+#include "fastpass_proto.h"
+
 /*
  * FastPass client qdisc
  *
@@ -90,6 +92,7 @@ struct fp_sched_data {
 	u32		req_bucketlen;				/* the max number of tokens to burst */
 	u32		req_min_gap;				/* min delay between requests (ns) */
 	u32		gc_age;						/* number of tslots to keep empty flows */
+	__be32	ctrl_addr_netorder;			/* IP of the controller, network byte order */
 
 	/* state */
 	struct rb_root	*flow_hash_tbl;		/* table of rb-trees of flows */
@@ -105,6 +108,7 @@ struct fp_sched_data {
 
 	u64		req_t;						/* time when request credits = zero */
 	u64		time_next_req;				/* time to send next request */
+	struct socket	*ctrl_sock;			/* socket to the controller */
 
 	struct qdisc_watchdog watchdog;
 
@@ -544,6 +548,48 @@ out:
 
 }
 
+/* reconnects the control socket to the controller */
+static int fastpass_reconnect(struct Qdisc *sch)
+{
+	struct fp_sched_data *q = qdisc_priv(sch);
+	int rc;
+	struct sockaddr_in sock_addr = {
+			.sin_family = AF_INET,
+			.sin_port = FASTPASS_DEFAULT_PORT_NETORDER
+	};
+
+	/* if socket exists, close it */
+	if (q->ctrl_sock) {
+		sock_release(q->ctrl_sock);
+		q->ctrl_sock = NULL;
+	}
+
+	/* create socket */
+	rc = __sock_create(dev_net(qdisc_dev(sch)), AF_INET, SOCK_DGRAM,
+			   IPPROTO_FASTPASS, &q->ctrl_sock, 1);
+	if (rc != 0) {
+		FASTPASS_WARN("Error %d creating socket\n", rc);
+		q->ctrl_sock = NULL;
+		return rc;
+	}
+
+	/* connect */
+	sock_addr.sin_addr.s_addr = q->ctrl_addr_netorder;
+	rc = kernel_connect(q->ctrl_sock, (struct sockaddr *)&sock_addr,
+			sizeof(sock_addr), 0);
+	if (rc != 0)
+		goto err_release;
+
+	return 0;
+
+err_release:
+	FASTPASS_WARN("Error %d trying to connect to addr 0x%X (in netorder)\n",
+			rc, q->ctrl_addr_netorder);
+	sock_release(q->ctrl_sock);
+	q->ctrl_sock = NULL;
+	return rc;
+}
+
 static void fastpass_reset(struct Qdisc *sch)
 {
 	struct fp_sched_data *q = qdisc_priv(sch);
@@ -661,6 +707,7 @@ static const struct nla_policy fp_policy[TCA_FASTPASS_MAX + 1] = {
 	[TCA_FASTPASS_REQUEST_COST]		= { .type = NLA_U32 },
 	[TCA_FASTPASS_REQUEST_BUCKET]	= { .type = NLA_U32 },
 	[TCA_FASTPASS_REQUEST_GAP]		= { .type = NLA_U32 },
+	[TCA_FASTPASS_CONTROLLER_IP]	= { .type = NLA_U32 },
 };
 
 static int fastpass_change(struct Qdisc *sch, struct nlattr *opt)
@@ -669,6 +716,7 @@ static int fastpass_change(struct Qdisc *sch, struct nlattr *opt)
 	struct nlattr *tb[TCA_FASTPASS_MAX + 1];
 	int err, drop_count = 0;
 	u32 fp_log;
+	bool should_reconnect = false;
 	struct tc_ratespec data_rate_spec ={
 			.linklayer = TC_LINKLAYER_ETHERNET,
 			.overhead = 24};
@@ -720,6 +768,14 @@ static int fastpass_change(struct Qdisc *sch, struct nlattr *opt)
 		q->gc_age = DIV_ROUND_UP(FP_GC_NUM_SECS * NSEC_PER_SEC, q->tslot_len);
 	}
 
+	if (tb[TCA_FASTPASS_CONTROLLER_IP]) {
+		q->ctrl_addr_netorder = nla_get_u32(tb[TCA_FASTPASS_CONTROLLER_IP]);
+		should_reconnect = true;
+	}
+
+	if (!err && (should_reconnect || !q->ctrl_sock))
+		err = fastpass_reconnect(sch);
+
 	if (!err)
 		err = fp_resize(q, fp_log);
 
@@ -765,18 +821,23 @@ static int fastpass_init(struct Qdisc *sch, struct nlattr *opt)
 	q->req_bucketlen	= 4 * q->req_cost;
 	q->req_min_gap		= 1000;
 	q->gc_age = DIV_ROUND_UP(FP_GC_NUM_SECS * NSEC_PER_SEC, q->tslot_len);
-	q->flow_hash_tbl		= NULL;
-	q->unreq_flows.first	= NULL;
+	q->ctrl_addr_netorder = htonl(0x7F000001); /* need sensible default? */
+	q->flow_hash_tbl	= NULL;
+	q->unreq_flows.first= NULL;
 	q->internal.next = &do_not_schedule;
 	q->time_next_req = ~0ULL;
 	q->tslot_start_time = now;			/* timeslot 0 starts now */
 	q->req_t = now - q->req_bucketlen;	/* start with full bucket */
+	q->ctrl_sock		= NULL;
 	qdisc_watchdog_init(&q->watchdog, sch);
 
-	if (opt)
+	if (opt) {
 		err = fastpass_change(sch, opt);
-	else
-		err = fp_resize(q, q->hash_tbl_log);
+	} else {
+		err = fastpass_reconnect(sch);
+		if (!err)
+			err = fp_resize(q, q->hash_tbl_log);
+	}
 
 	return err;
 }

@@ -8,7 +8,11 @@
 #ifndef FASTPASS_PROTO_H_
 #define FASTPASS_PROTO_H_
 
+#include <net/inet_sock.h>
+
 #define IPPROTO_FASTPASS 222
+
+#define FASTPASS_DEFAULT_PORT_NETORDER 1
 
 #define MAX_FASTPASS_ONLY_HEADER (sizeof(struct fastpass_req_hdr))
 #define MAX_TOTAL_FASTPASS_HEADERS (MAX_FASTPASS_ONLY_HEADER + MAX_HEADER)

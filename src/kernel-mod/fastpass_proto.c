@@ -21,8 +21,6 @@ struct inet_hashinfo fastpass_hashinfo;
 EXPORT_SYMBOL_GPL(fastpass_hashinfo);
 #define FASTPASS_EHASH_NBUCKETS 16
 
-#define FASTPASS_DEFAULT_PORT_NETORDER 1
-
 #ifdef CONFIG_IP_FASTPASS_DEBUG
 bool fastpass_debug;
 module_param(fastpass_debug, bool, 0644);

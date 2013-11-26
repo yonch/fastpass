@@ -681,7 +681,7 @@ static int fp_resize(struct fp_sched_data *q, u32 log)
 	if (q->flow_hash_tbl && log == q->hash_tbl_log)
 		return 0;
 
-	array = kmalloc(sizeof(struct rb_root) << log, GFP_KERNEL);
+	array = kmalloc(sizeof(struct rb_root) << log, GFP_ATOMIC);
 	if (!array)
 		return -ENOMEM;
 

@@ -54,8 +54,7 @@
  * Per flow structure, dynamically allocated
  */
 struct fp_flow {
-	struct sock	*sk;		/* flow identifier */
-	u32		skb_hash;	/* sk_hash, detect reuse of sk after free+alloc */
+	u64		src_dst_key;		/* flow identifier */
 
 	struct rb_node	fp_node; 	/* anchor in fp_root[] trees */
 	struct fp_flow	*next;		/* singly linked pointer into q->unreq_flows */
@@ -80,6 +79,10 @@ struct fp_flow_head {
 struct fp_timeslot_horizon {
 	u64 timeslot;
 	u64 mask;
+};
+
+struct fp_req_ack_info {
+
 };
 
 struct fp_sched_data {
@@ -126,6 +129,7 @@ struct fp_sched_data {
 	u64		stat_missed_timeslots;
 	u64		stat_used_timeslots;
 	u64		stat_requests;
+	u64		stat_classify_errors;
 };
 
 /* special value to mark a flow should not be scheduled */
@@ -192,7 +196,7 @@ static bool fp_gc_candidate(const struct fp_sched_data *q,
 
 static void fp_gc(struct fp_sched_data *q,
 		  struct rb_root *root,
-		  u32 skb_hash,
+		  u64 src_dst_key,
 		  struct sock *sk)
 {
 	struct fp_flow *f, *tofree[FP_GC_MAX];
@@ -205,7 +209,7 @@ static void fp_gc(struct fp_sched_data *q,
 		parent = *p;
 
 		f = container_of(parent, struct fp_flow, fp_node);
-		if (f->skb_hash == skb_hash && f->sk == sk)
+		if (f->src_dst_key == src_dst_key)
 			break;
 
 		if (fp_gc_candidate(q, f)) {
@@ -214,7 +218,7 @@ static void fp_gc(struct fp_sched_data *q,
 				break;
 		}
 
-		if (f->skb_hash > skb_hash || (f->skb_hash == skb_hash && f->sk > sk))
+		if (f->src_dst_key > src_dst_key)
 			p = &parent->rb_right;
 		else
 			p = &parent->rb_left;
@@ -242,6 +246,8 @@ static struct fp_flow *fp_classify(struct sk_buff *skb, struct fp_sched_data *q)
 	struct rb_root *root;
 	struct fp_flow *f;
 	int band;
+	struct flow_keys keys;
+	u64 src_dst_key;
 	u32 skb_hash;
 
 	/* warning: no starvation prevention... */
@@ -249,16 +255,26 @@ static struct fp_flow *fp_classify(struct sk_buff *skb, struct fp_sched_data *q)
 	if (unlikely(band == 0))
 		return &q->internal;
 
-	if (unlikely(!sk))
-		skb_hash = skb_get_rxhash(skb);
-	else
-		skb_hash = sk->sk_hash;
+	/* get source and destination IPs */
+	if (likely(   sk
+			   && (sk->sk_family == AF_INET)
+			   && (sk->sk_protocol == IPPROTO_TCP))) {
+		keys.src = inet_sk(sk)->inet_saddr;
+		keys.dst = inet_sk(sk)->inet_daddr;
+	} else {
+		if (!skb_flow_dissect(skb, &keys))
+			goto cannot_classify;
+	}
+
+	/* get the skb's key (src_dst_key) and the key's hash (skb_hash) */
+	src_dst_key = ((u64)keys.src) << 32 | keys.dst;
+	skb_hash = jhash_2words(keys.src, keys.dst, 0);
 
 	root = &q->flow_hash_tbl[skb_hash >> (32 - q->hash_tbl_log)];
 
 	if (q->flows >= (2U << q->hash_tbl_log) &&
 	    q->inactive_flows > q->flows/2)
-		fp_gc(q, root, skb_hash, sk);
+		fp_gc(q, root, src_dst_key, sk);
 
 	p = &root->rb_node;
 	parent = NULL;
@@ -266,22 +282,22 @@ static struct fp_flow *fp_classify(struct sk_buff *skb, struct fp_sched_data *q)
 		parent = *p;
 
 		f = container_of(parent, struct fp_flow, fp_node);
-		if (f->skb_hash == skb_hash && f->sk == sk)
+		if (f->src_dst_key == src_dst_key)
 			return f;
 
-		if (f->skb_hash > skb_hash || (f->skb_hash == skb_hash && f->sk > sk))
+		if (f->src_dst_key > src_dst_key)
 			p = &parent->rb_right;
 		else
 			p = &parent->rb_left;
 	}
 
+	/* did not find existing entry, allocate a new one */
 	f = kmem_cache_zalloc(fp_flow_cachep, GFP_ATOMIC | __GFP_NOWARN);
 	if (unlikely(!f)) {
 		q->stat_allocation_errors++;
 		return &q->internal;
 	}
-	f->sk = sk;
-	f->skb_hash = skb_hash;
+	f->src_dst_key = src_dst_key;
 
 	rb_link_node(&f->fp_node, parent, p);
 	rb_insert_color(&f->fp_node, root);
@@ -289,6 +305,12 @@ static struct fp_flow *fp_classify(struct sk_buff *skb, struct fp_sched_data *q)
 	q->flows++;
 	q->inactive_flows++;
 	return f;
+
+cannot_classify:
+	// ARP packets should not count as classify errors
+	if (unlikely(skb->protocol != ETH_P_ARP))
+		q->stat_classify_errors++;
+	return &q->internal;
 }
 
 
@@ -472,12 +494,16 @@ static void fp_do_request(struct fp_sched_data *q, u64 now)
 {
 	struct fp_flow *f;
 	int empty_slot;
+	struct fp_flow *head;
 
 	BUG_ON(q->req_t + q->req_cost > now);
 	BUG_ON(!q->unreq_flows.first);
 
-	printk("fp_do_request start unreq_flows=%u, unreq_tslots=%u\n",
+	fastpass_pr_debug("fp_do_request start unreq_flows=%u, unreq_tslots=%u\n",
 			q->n_unreq_flows, q->unreq_tslots);
+
+	//head = q->unreq_flows.first;
+
 
 	while (q->unreq_flows.first && (~q->horizon.mask & ~0xffULL)) {
 		f = q->unreq_flows.first;
@@ -636,6 +662,7 @@ static void fp_rehash(struct fp_sched_data *q,
 	struct fp_flow *of, *nf;
 	int fcnt = 0;
 	u32 idx;
+	u32 skb_hash;
 
 	for (idx = 0; idx < (1U << old_log); idx++) {
 		oroot = &old_array[idx];
@@ -647,7 +674,9 @@ static void fp_rehash(struct fp_sched_data *q,
 				kmem_cache_free(fp_flow_cachep, of);
 				continue;
 			}
-			nroot = &new_array[of->skb_hash >> (32 - new_log)];
+			skb_hash = jhash_2words((__be32)(of->src_dst_key >> 32),
+					(__be32)of->src_dst_key, 0);
+			nroot = &new_array[skb_hash >> (32 - new_log)];
 
 			np = &nroot->rb_node;
 			parent = NULL;
@@ -655,10 +684,9 @@ static void fp_rehash(struct fp_sched_data *q,
 				parent = *np;
 
 				nf = container_of(parent, struct fp_flow, fp_node);
-				BUG_ON(nf->skb_hash == of->skb_hash && nf->sk == of->sk);
+				BUG_ON(nf->src_dst_key == of->src_dst_key);
 
-				if ( nf->skb_hash > of->skb_hash ||
-					(nf->skb_hash == of->skb_hash && nf->sk > of->sk))
+				if (nf->src_dst_key > of->src_dst_key)
 					np = &parent->rb_right;
 				else
 					np = &parent->rb_left;
@@ -858,7 +886,8 @@ static int fastpass_dump(struct Qdisc *sch, struct sk_buff *skb)
 	    nla_put_u32(skb, TCA_FASTPASS_TIMESLOT_NSEC, q->tslot_len) ||
 	    nla_put_u32(skb, TCA_FASTPASS_REQUEST_COST, q->req_cost) ||
 	    nla_put_u32(skb, TCA_FASTPASS_REQUEST_BUCKET, q->req_bucketlen) ||
-	    nla_put_u32(skb, TCA_FASTPASS_REQUEST_GAP, q->req_min_gap))
+	    nla_put_u32(skb, TCA_FASTPASS_REQUEST_GAP, q->req_min_gap) ||
+	    nla_put_u32(skb, TCA_FASTPASS_CONTROLLER_IP, q->ctrl_addr_netorder))
 		goto nla_put_failure;
 
 	nla_nest_end(skb, opts);
@@ -883,6 +912,7 @@ static int fastpass_dump_stats(struct Qdisc *sch, struct gnet_dump *d)
 		.horizon_mask		= q->horizon.mask,
 		.time_next_request	= q->time_next_req - ( ~q->time_next_req ? now : 0),
 		.requests			= q->stat_requests,
+		.classify_errors	= q->stat_classify_errors,
 		.flows				= q->flows,
 		.inactive_flows		= q->inactive_flows,
 		.unrequested_flows	= q->n_unreq_flows,

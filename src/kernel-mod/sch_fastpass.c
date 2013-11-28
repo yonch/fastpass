@@ -130,6 +130,9 @@ struct fp_sched_data {
 	u64		stat_used_timeslots;
 	u64		stat_requests;
 	u64		stat_classify_errors;
+	u64		stat_req_allocation_errors; /* TODO: report */
+	u64		stat_req_send_failures; /* TODO: report */
+	u64		stat_non_control_high_prio_packets; /* TODO: report */
 };
 
 /* special value to mark a flow should not be scheduled */
@@ -252,8 +255,11 @@ static struct fp_flow *fp_classify(struct sk_buff *skb, struct fp_sched_data *q)
 
 	/* warning: no starvation prevention... */
 	band = prio2band[skb->priority & TC_PRIO_MAX];
-	if (unlikely(band == 0))
+	if (unlikely(band == 0)) {
+		if (unlikely(skb->sk != q->ctrl_sock->sk))
+			q->stat_non_control_high_prio_packets++;
 		return &q->internal;
+	}
 
 	/* get source and destination IPs */
 	if (likely(   sk
@@ -494,7 +500,12 @@ static void fp_do_request(struct fp_sched_data *q, u64 now)
 {
 	struct fp_flow *f;
 	int empty_slot;
-	struct fp_flow *head;
+
+	struct sk_buff *skb;
+	const int max_payload_len = 40;
+	int max_header;
+	int payload_len = 0;
+	int err;
 
 	BUG_ON(q->req_t + q->req_cost > now);
 	BUG_ON(!q->unreq_flows.first);
@@ -502,8 +513,28 @@ static void fp_do_request(struct fp_sched_data *q, u64 now)
 	fastpass_pr_debug("fp_do_request start unreq_flows=%u, unreq_tslots=%u\n",
 			q->n_unreq_flows, q->unreq_tslots);
 
-	//head = q->unreq_flows.first;
+	BUG_ON(!q->ctrl_sock);
 
+	/* allocate request skb */
+	max_header = q->ctrl_sock->sk->sk_prot->max_header;
+	skb = sock_alloc_send_skb(q->ctrl_sock->sk, max_payload_len + max_header, 1, &err);
+	if (!skb)
+		goto alloc_err;
+	skb_reserve(skb, max_header);
+
+	f = q->unreq_flows.first;
+	while (payload_len + 4 < max_payload_len && f) {
+		skb_put(skb, 4);
+		skb->data[payload_len++] = (f->src_dst_key >> 32) & 0xFF;
+		skb->data[payload_len++] = (f->src_dst_key >> 40) & 0xFF;
+		skb->data[payload_len++] = (f->unreq_tslots     ) & 0xFF;
+		skb->data[payload_len++] = (f->unreq_tslots >> 8) & 0xFF;
+		f = f->next;
+	}
+
+	err = fastpass_send_skb(q->ctrl_sock->sk, skb);
+	if (err != 0)
+		goto send_err;
 
 	while (q->unreq_flows.first && (~q->horizon.mask & ~0xffULL)) {
 		f = q->unreq_flows.first;
@@ -534,10 +565,22 @@ static void fp_do_request(struct fp_sched_data *q, u64 now)
 	printk("fp_do_request end unreq_flows=%u, unreq_tslots=%u\n",
 			q->n_unreq_flows, q->unreq_tslots);
 
+	q->stat_requests++;
+
+update_credits:
 	/* update request credits */
 	q->req_t = max_t(u64, q->req_t, now - q->req_bucketlen) + q->req_cost;
 	compute_time_next_req(q, now);
-	q->stat_requests++;
+	return;
+
+alloc_err:
+	q->stat_req_allocation_errors++;
+	fastpass_pr_debug("%s: request allocation failed, err %d\n", __func__, err);
+	goto update_credits;
+send_err:
+	q->stat_req_send_failures++;
+	fastpass_pr_debug("%s: request send failed, err %d\n", __func__, err);
+	goto update_credits;
 }
 
 static struct sk_buff *fastpass_dequeue(struct Qdisc *sch)
@@ -598,6 +641,12 @@ static int fastpass_reconnect(struct Qdisc *sch)
 		q->ctrl_sock = NULL;
 		return rc;
 	}
+
+	/* set socket priority */
+	q->ctrl_sock->sk->sk_priority = TC_PRIO_CONTROL;
+
+	/* skb allocation must be atomic (done under the qdisc lock) */
+	q->ctrl_sock->sk->sk_allocation = GFP_ATOMIC;
 
 	/* connect */
 	sock_addr.sin_addr.s_addr = q->ctrl_addr_netorder;

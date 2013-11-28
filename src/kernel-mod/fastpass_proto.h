@@ -54,6 +54,8 @@ struct fastpass_sock {
 	__u32 mss_cache;
 };
 
+int fastpass_send_skb(struct sock *sk, struct sk_buff *skb);
+
 static inline struct fastpass_sock *fastpass_sk(const struct sock *sk)
 {
 	return (struct fastpass_sock *)sk;

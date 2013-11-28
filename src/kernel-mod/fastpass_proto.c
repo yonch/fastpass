@@ -144,7 +144,6 @@ void fastpass_v4_send_check(struct sock *sk, struct sk_buff *skb)
 			skb->len, IPPROTO_DCCP, skb->csum);
 }
 
-
 static int fastpass_sendmsg(struct kiocb *iocb, struct sock *sk,
 		struct msghdr *msg, size_t len)
 {
@@ -201,6 +200,36 @@ out_discard:
 	kfree_skb(skb);
 	goto out_release;
 }
+
+int fastpass_send_skb(struct sock *sk, struct sk_buff *skb)
+{
+	struct inet_sock *inet = inet_sk(sk);
+	int rc;
+
+	pr_err("%s: visited\n", __func__);
+
+	bh_lock_sock(sk);
+
+	/* write the fastpass header */
+	rc = fastpass_build_header(sk, skb);
+	if (rc != 0)
+		goto out_discard;
+
+	/* checksum */
+	fastpass_v4_send_check(sk, skb);
+
+	/* send onwards */
+	rc = ip_queue_xmit(skb, &inet->cork.fl);
+	rc = net_xmit_eval(rc);
+
+out_release:
+	bh_unlock_sock(sk);
+	return rc;
+out_discard:
+	kfree_skb(skb);
+	goto out_release;
+}
+
 
 static int fastpass_recvmsg(struct kiocb *iocb, struct sock *sk,
 		struct msghdr *msg, size_t len, int noblock, int flags, int *addr_len)

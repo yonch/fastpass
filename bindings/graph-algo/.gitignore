@@ -1,4 +1,2 @@
-graph.py
-eulersplit.py
-kapoorrizzi.py
+*.py
 *_wrap.c

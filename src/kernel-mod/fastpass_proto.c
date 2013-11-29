@@ -53,20 +53,6 @@ static void fastpass_proto_close(struct sock *sk, long timeout)
 	sk_common_release(sk);
 }
 
-static int fastpass_sk_init(struct sock *sk)
-{
-	struct fastpass_sock *fp = fastpass_sk(sk);
-
-	pr_err("%s: visited\n", __func__);
-
-	/* bind all sockets to port 1, to avoid inet_autobind */
-	inet_sk(sk)->inet_num = ntohs(FASTPASS_DEFAULT_PORT_NETORDER);
-	inet_sk(sk)->inet_sport = FASTPASS_DEFAULT_PORT_NETORDER;
-
-	fp->mss_cache = 536;
-
-	return 0;
-}
 static int fastpass_proto_disconnect(struct sock *sk, int flags)
 {
 	struct inet_sock *inet = inet_sk(sk);
@@ -94,7 +80,6 @@ static void fastpass_destroy_sock(struct sock *sk)
 	pr_err("%s: visited\n", __func__);
 }
 
-
 static int fastpass_build_header(struct sock *sk, struct sk_buff *skb)
 {
 //	struct fastpass_sock *fp = fastpass_sk(sk);
@@ -103,7 +88,7 @@ static int fastpass_build_header(struct sock *sk, struct sk_buff *skb)
 
 	BUG_ON(skb == NULL);
 
-	/* Build DCCP header and checksum it. */
+	/* Build header and checksum it. */
 	skb_push(skb, fastpass_header_size);
 	skb_reset_transport_header(skb);
 	fh = memset(skb_transport_header(skb), 0, fastpass_header_size);
@@ -142,6 +127,66 @@ void fastpass_v4_send_check(struct sock *sk, struct sk_buff *skb)
 	skb->csum = skb_checksum(skb, 0, skb->len, 0);
 	fh->checksum = csum_tcpudp_magic(inet->inet_saddr, inet->inet_daddr,
 			skb->len, IPPROTO_DCCP, skb->csum);
+}
+
+static void fastpass_write_queue_tasklet(unsigned long int param)
+{
+	struct sock *sk = (struct sock *)param;
+	struct fastpass_sock *fp = fastpass_sk(sk);
+	struct inet_sock *inet = inet_sk(sk);
+	struct sk_buff *skb;
+	int rc;
+
+	pr_err("%s: visited\n", __func__);
+
+	bh_lock_sock(sk);
+
+	fp->stat_tasklet_runs++;
+
+	while ((skb = __skb_dequeue_tail(&sk->sk_write_queue)) != NULL) {
+		/* write the fastpass header */
+		rc = fastpass_build_header(sk, skb);
+		if (unlikely(rc != 0)) {
+			kfree_skb(skb);
+			fp->stat_build_header_errors++;
+			fastpass_pr_debug("%s: got error %d while building header\n",
+					__func__, rc);
+			continue;
+		}
+
+		/* checksum */
+		fastpass_v4_send_check(sk, skb);
+
+		/* send onwards */
+		rc = ip_queue_xmit(skb, &inet->cork.fl);
+		rc = net_xmit_eval(rc);
+		if (unlikely(rc != 0)) {
+			fp->stat_xmit_errors++;
+			fastpass_pr_debug("%s: got error %d from ip_queue_xmit\n",
+					__func__, rc);
+		}
+	}
+
+	bh_unlock_sock(sk);
+}
+
+static int fastpass_sk_init(struct sock *sk)
+{
+	struct fastpass_sock *fp = fastpass_sk(sk);
+
+	pr_err("%s: visited\n", __func__);
+
+	/* bind all sockets to port 1, to avoid inet_autobind */
+	inet_sk(sk)->inet_num = ntohs(FASTPASS_DEFAULT_PORT_NETORDER);
+	inet_sk(sk)->inet_sport = FASTPASS_DEFAULT_PORT_NETORDER;
+
+	fp->mss_cache = 536;
+
+	/* initialize tasklet */
+	tasklet_init(&fp->tasklet, &fastpass_write_queue_tasklet,
+			(unsigned long int)fp);
+
+	return 0;
 }
 
 static int fastpass_sendmsg(struct kiocb *iocb, struct sock *sk,
@@ -201,33 +246,19 @@ out_discard:
 	goto out_release;
 }
 
-int fastpass_send_skb(struct sock *sk, struct sk_buff *skb)
+void fastpass_send_skb_via_tasklet(struct sock *sk, struct sk_buff *skb)
 {
-	struct inet_sock *inet = inet_sk(sk);
-	int rc;
+	struct fastpass_sock *fp = fastpass_sk(sk);
 
 	pr_err("%s: visited\n", __func__);
 
+	/* enqueue to write queue */
 	bh_lock_sock(sk);
-
-	/* write the fastpass header */
-	rc = fastpass_build_header(sk, skb);
-	if (rc != 0)
-		goto out_discard;
-
-	/* checksum */
-	fastpass_v4_send_check(sk, skb);
-
-	/* send onwards */
-	rc = ip_queue_xmit(skb, &inet->cork.fl);
-	rc = net_xmit_eval(rc);
-
-out_release:
+	__skb_queue_tail(&sk->sk_write_queue, skb);
 	bh_unlock_sock(sk);
-	return rc;
-out_discard:
-	kfree_skb(skb);
-	goto out_release;
+
+	/* schedule tasklet to write from the queue */
+	tasklet_schedule(&fp->tasklet);
 }
 
 

@@ -130,9 +130,8 @@ struct fp_sched_data {
 	u64		stat_used_timeslots;
 	u64		stat_requests;
 	u64		stat_classify_errors;
-	u64		stat_req_allocation_errors; /* TODO: report */
-	u64		stat_req_send_failures; /* TODO: report */
-	u64		stat_non_control_high_prio_packets; /* TODO: report */
+	u64		stat_req_alloc_errors;
+	u64		stat_non_ctrl_highprio_pkts;
 };
 
 /* special value to mark a flow should not be scheduled */
@@ -257,7 +256,7 @@ static struct fp_flow *fp_classify(struct sk_buff *skb, struct fp_sched_data *q)
 	band = prio2band[skb->priority & TC_PRIO_MAX];
 	if (unlikely(band == 0)) {
 		if (unlikely(skb->sk != q->ctrl_sock->sk))
-			q->stat_non_control_high_prio_packets++;
+			q->stat_non_ctrl_highprio_pkts++;
 		return &q->internal;
 	}
 
@@ -524,17 +523,16 @@ static void fp_do_request(struct fp_sched_data *q, u64 now)
 
 	f = q->unreq_flows.first;
 	while (payload_len + 4 < max_payload_len && f) {
+		u32 dst_addr = ntohl((u32)f->src_dst_key);
 		skb_put(skb, 4);
-		skb->data[payload_len++] = (f->src_dst_key >> 32) & 0xFF;
-		skb->data[payload_len++] = (f->src_dst_key >> 40) & 0xFF;
+		skb->data[payload_len++] = (dst_addr     ) & 0xFF;
+		skb->data[payload_len++] = (dst_addr >> 8) & 0xFF;
 		skb->data[payload_len++] = (f->unreq_tslots     ) & 0xFF;
 		skb->data[payload_len++] = (f->unreq_tslots >> 8) & 0xFF;
 		f = f->next;
 	}
 
-	err = fastpass_send_skb(q->ctrl_sock->sk, skb);
-	if (err != 0)
-		goto send_err;
+	fastpass_send_skb_via_tasklet(q->ctrl_sock->sk, skb);
 
 	while (q->unreq_flows.first && (~q->horizon.mask & ~0xffULL)) {
 		f = q->unreq_flows.first;
@@ -574,12 +572,8 @@ update_credits:
 	return;
 
 alloc_err:
-	q->stat_req_allocation_errors++;
+	q->stat_req_alloc_errors++;
 	fastpass_pr_debug("%s: request allocation failed, err %d\n", __func__, err);
-	goto update_credits;
-send_err:
-	q->stat_req_send_failures++;
-	fastpass_pr_debug("%s: request send failed, err %d\n", __func__, err);
 	goto update_credits;
 }
 
@@ -875,6 +869,8 @@ static void fastpass_destroy(struct Qdisc *sch)
 	struct fp_sched_data *q = qdisc_priv(sch);
 
 	fastpass_reset(sch);
+	if (q->ctrl_sock)
+		sock_release(q->ctrl_sock);
 	kfree(q->flow_hash_tbl);
 	qdisc_watchdog_cancel(&q->watchdog);
 }
@@ -966,7 +962,24 @@ static int fastpass_dump_stats(struct Qdisc *sch, struct gnet_dump *d)
 		.inactive_flows		= q->inactive_flows,
 		.unrequested_flows	= q->n_unreq_flows,
 		.unrequested_tslots	= q->unreq_tslots,
+		.req_alloc_errors	= q->stat_req_alloc_errors,
+		.non_ctrl_highprio_pkts	= q->stat_non_ctrl_highprio_pkts,
+		.socket_tasklet_runs = ~0ULL,
+		.socket_build_header_errors = ~0ULL,
+		.socket_xmit_errors = ~0ULL,
 	};
+
+	/* gather socket statistics */
+	if (q->ctrl_sock) {
+		struct sock *sk = q->ctrl_sock->sk;
+		struct fastpass_sock *fp = fastpass_sk(sk);
+
+		bh_lock_sock(sk);
+		st.socket_tasklet_runs = fp->stat_tasklet_runs;
+		st.socket_build_header_errors = fp->stat_build_header_errors;
+		st.socket_xmit_errors = fp->stat_xmit_errors;
+		bh_unlock_sock(sk);
+	}
 
 	return gnet_stats_copy_app(d, &st, sizeof(st));
 }

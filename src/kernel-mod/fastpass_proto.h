@@ -9,6 +9,7 @@
 #define FASTPASS_PROTO_H_
 
 #include <net/inet_sock.h>
+#include <linux/interrupt.h>
 
 #define IPPROTO_FASTPASS 222
 
@@ -52,9 +53,13 @@ struct fastpass_sock {
 	/* inet_sock has to be the first member */
 	struct inet_sock inet;
 	__u32 mss_cache;
+	struct tasklet_struct tasklet;
+	u64 stat_tasklet_runs;
+	u64 stat_build_header_errors;
+	u64 stat_xmit_errors;
 };
 
-int fastpass_send_skb(struct sock *sk, struct sk_buff *skb);
+void fastpass_send_skb_via_tasklet(struct sock *sk, struct sk_buff *skb);
 
 static inline struct fastpass_sock *fastpass_sk(const struct sock *sk)
 {

@@ -10,13 +10,21 @@
 
 #include <net/inet_sock.h>
 #include <linux/interrupt.h>
+#include <linux/hrtimer.h>
 
 #define IPPROTO_FASTPASS 222
 
 #define FASTPASS_DEFAULT_PORT_NETORDER 1
 
-#define MAX_FASTPASS_ONLY_HEADER (sizeof(struct fastpass_req_hdr))
+#define FASTPASS_REQ_HDR_SIZE 4
+#define FASTPASS_RSTREQ_HDR_SIZE 12
+#define MAX_FASTPASS_ONLY_HEADER (max(FASTPASS_REQ_HDR_SIZE,FASTPASS_RSTREQ_HDR_SIZE))
 #define MAX_TOTAL_FASTPASS_HEADERS (MAX_FASTPASS_ONLY_HEADER + MAX_HEADER)
+
+#define FASTPASS_PTYPE_CTRL 			0
+#define FASTPASS_PSUBTYPE_RESET_REQ 	0
+#define FASTPASS_PSUBTYPE_RESET 		1
+#define FASTPASS_PTYPE_REQUEST			1
 
 /*
  * 	Warning and debugging macros, (originally taken from DCCP)
@@ -48,12 +56,32 @@ extern bool fastpass_debug;
 #define fastpass_debug(format, a...)
 #endif
 
-
+/**
+ * @inet: the IPv4 socket information
+ * @mss_cache: maximum segment size cache
+ * @tasklet: tasklet that writes the skb queue to the IP stack
+ * @timer: timer for full timeslots
+ * @qdisc: the qdisc that owns the socket
+ * @last_reset_time: the time used in the last sent reset
+ *
+ * Statistics:
+ * @stat_tasklet_runs: the number of times the tasklet ran
+ * @stat_build_header_errors: #egress failures due to header building
+ * @stat_xmit_errors: #egress failures due to IP stack
+ */
 struct fastpass_sock {
 	/* inet_sock has to be the first member */
-	struct inet_sock inet;
-	__u32 mss_cache;
-	struct tasklet_struct tasklet;
+	struct inet_sock 		inet;
+	__u32 					mss_cache;
+	struct tasklet_struct 	tasklet;
+	struct hrtimer 			timer;
+	struct Qdisc			*qdisc;
+	u64						last_reset_time;
+	u64						next_seqno;
+	u32						in_sync:1;
+
+
+	/* statistics */
 	u64 stat_tasklet_runs;
 	u64 stat_build_header_errors;
 	u64 stat_xmit_errors;
@@ -72,17 +100,24 @@ enum {
 };
 
 /**
- * struct fastpass_req_hdr - FastPass request packet header
+ * struct fastpass_hdr - FastPass request packet header
  */
-struct fastpass_req_hdr {
+struct fastpass_hdr {
+	__u8	subtype:4,
+			type:4;
+	union {
+		__u8	seq;
+		__u8	subtype2:4,
+				type2:4;
+	};
 	__sum16	checksum;
-	__u8	seq;
 };
 
-static inline struct fastpass_req_hdr *fastpass_req_hdr(
+
+static inline struct fastpass_hdr *fastpass_hdr(
 		const struct sk_buff *skb)
 {
-	return (struct fastpass_req_hdr *)skb_transport_header(skb);
+	return (struct fastpass_hdr *)skb_transport_header(skb);
 }
 
 #endif /* FASTPASS_PROTO_H_ */

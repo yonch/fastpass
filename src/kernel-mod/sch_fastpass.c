@@ -642,6 +642,9 @@ static int fastpass_reconnect(struct Qdisc *sch)
 	/* skb allocation must be atomic (done under the qdisc lock) */
 	q->ctrl_sock->sk->sk_allocation = GFP_ATOMIC;
 
+	/* give socket a reference to this qdisc for watchdog */
+	fastpass_sk(q->ctrl_sock->sk)->qdisc = q;
+
 	/* connect */
 	sock_addr.sin_addr.s_addr = q->ctrl_addr_netorder;
 	rc = kernel_connect(q->ctrl_sock, (struct sockaddr *)&sock_addr,

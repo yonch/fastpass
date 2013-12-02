@@ -14,6 +14,7 @@
 #include <net/ip.h>
 #include <net/inet_common.h>
 #include <net/inet_hashtables.h>
+#include <net/sch_generic.h>
 
 #include "fastpass_proto.h"
 
@@ -28,6 +29,12 @@ MODULE_PARM_DESC(fastpass_debug, "Enable debug messages");
 
 EXPORT_SYMBOL_GPL(fastpass_debug);
 #endif
+
+/* returns the current time, for socket reset */
+static u64 fp_sync_get_time()
+{
+	return ktime_to_ns(ktime_get_real());
+}
 
 int fastpass_rcv(struct sk_buff *skb)
 {
@@ -77,22 +84,40 @@ static int fastpass_proto_disconnect(struct sock *sk, int flags)
 }
 static void fastpass_destroy_sock(struct sock *sk)
 {
+	struct fastpass_sock *fp = fastpass_sk(sk);
+
 	pr_err("%s: visited\n", __func__);
+
+	hrtimer_cancel(&fp->timer);
+	fp->qdisc = NULL;
 }
 
 static int fastpass_build_header(struct sock *sk, struct sk_buff *skb)
 {
-//	struct fastpass_sock *fp = fastpass_sk(sk);
-	struct fastpass_req_hdr *fh;
+	struct fastpass_sock *fp = fastpass_sk(sk);
+	struct fastpass_hdr *fh;
 	const u32 fastpass_header_size = sizeof(*fh);
 
 	BUG_ON(skb == NULL);
 
 	/* Build header and checksum it. */
-	skb_push(skb, fastpass_header_size);
-	skb_reset_transport_header(skb);
-	fh = memset(skb_transport_header(skb), 0, fastpass_header_size);
-	fh->seq = 42;
+	if (likely(fp->in_sync)) {
+		skb_push(skb, FASTPASS_REQ_HDR_SIZE);
+		skb_reset_transport_header(skb);
+		fh = memset(skb_transport_header(skb), 0, FASTPASS_REQ_HDR_SIZE);
+		fh->type = FASTPASS_PTYPE_REQUEST;
+		fh->subtype = 0;
+		fh->seq = (u8)(fp->next_seqno++);
+	} else {
+		skb_push(skb, FASTPASS_RSTREQ_HDR_SIZE);
+		skb_reset_transport_header(skb);
+		fh = memset(skb_transport_header(skb), 0, FASTPASS_RSTREQ_HDR_SIZE);
+		fh->type = FASTPASS_PTYPE_CTRL;
+		fh->subtype = FASTPASS_PSUBTYPE_RESET_REQ;
+		fh->type2 = FASTPASS_PTYPE_REQUEST;
+		fh->subtype2 = 0;
+		*(__be64 *)&skb_transport_header(skb)[4] = fp->last_reset_time;
+	}
 
 	/* These could be useful for updating state */
 //	dccp_update_gss(sk, dcb->dccpd_seq);
@@ -122,14 +147,14 @@ static int fastpass_build_header(struct sock *sk, struct sk_buff *skb)
 void fastpass_v4_send_check(struct sock *sk, struct sk_buff *skb)
 {
 	const struct inet_sock *inet = inet_sk(sk);
-	struct fastpass_req_hdr *fh = fastpass_req_hdr(skb);
+	struct fastpass_hdr *fh = fastpass_hdr(skb);
 
 	skb->csum = skb_checksum(skb, 0, skb->len, 0);
 	fh->checksum = csum_tcpudp_magic(inet->inet_saddr, inet->inet_daddr,
 			skb->len, IPPROTO_DCCP, skb->csum);
 }
 
-static void fastpass_write_queue_tasklet(unsigned long int param)
+static void fastpass_tasklet_func(unsigned long int param)
 {
 	struct sock *sk = (struct sock *)param;
 	struct fastpass_sock *fp = fastpass_sk(sk);
@@ -170,6 +195,28 @@ static void fastpass_write_queue_tasklet(unsigned long int param)
 	bh_unlock_sock(sk);
 }
 
+static enum hrtimer_restart fastpass_timer_func(struct hrtimer *timer)
+{
+	struct fastpass_sock *fp = container_of(timer, struct fastpass_sock,
+						 timer);
+	struct Qdisc *q = fp->qdisc;
+
+	if (q) {
+		qdisc_unthrottled(q);
+		__netif_schedule(qdisc_root(q));
+	}
+
+	return HRTIMER_NORESTART;
+}
+
+static int do_proto_reset(struct fastpass_sock *fp, u64 reset_time)
+{
+	fp->last_reset_time = reset_time;
+	fp->next_seqno = reset_time +
+			((u64)jhash_1word((u32)reset_time, reset_time >> 32) << 32);
+	fp->in_sync = 0;
+}
+
 static int fastpass_sk_init(struct sock *sk)
 {
 	struct fastpass_sock *fp = fastpass_sk(sk);
@@ -183,8 +230,16 @@ static int fastpass_sk_init(struct sock *sk)
 	fp->mss_cache = 536;
 
 	/* initialize tasklet */
-	tasklet_init(&fp->tasklet, &fastpass_write_queue_tasklet,
+	tasklet_init(&fp->tasklet, &fastpass_tasklet_func,
 			(unsigned long int)fp);
+
+	/* initialize hrtimer */
+	hrtimer_init(&fp->timer, CLOCK_MONOTONIC, HRTIMER_MODE_ABS);
+	fp->timer.function = fastpass_timer_func;
+	fp->qdisc = NULL;
+
+	/* choose reset time */
+	do_proto_reset(false);
 
 	return 0;
 }

@@ -50,8 +50,9 @@ struct admitted_bitmap {
     uint64_t dsts [MAX_NODES >> 6];
 };
 
-// For all src/dst pairs, gives the timeslot we last sent in
+// For all src/dst pairs, gives the timeslot we last sent in, also the current timeslot
 struct flow_status {
+    uint16_t current_timeslot;
     uint16_t timeslots[MAX_NODES * MAX_NODES];
 };
 
@@ -146,6 +147,76 @@ void dequeue_backlog(struct backlog_queue *queue) {
     queue->head++;
 }
 
+// Swap two backlog edges. Used in quicksort.
+static inline
+void swap_backlog_edges(struct backlog_edge *edge_0, struct backlog_edge *edge_1) {
+    assert(edge_0 != NULL);
+    assert(edge_1 != NULL);
+
+    struct backlog_edge temp;
+    temp.src = edge_0->src;
+    temp.dst = edge_0->dst;
+    temp.backlog = edge_0->backlog;
+    temp.timeslot = edge_0->timeslot;
+
+    edge_0->src = edge_1->src;
+    edge_0->dst = edge_1->dst;
+    edge_0->backlog = edge_1->backlog;
+    edge_0->timeslot = edge_1->timeslot;
+
+    edge_1->src = temp.src;
+    edge_1->dst = temp.dst;
+    edge_1->backlog = temp.backlog;
+    edge_1->timeslot = temp.timeslot;
+}
+
+// Recursive quicksort on a backlog_queue, using the compare function above
+static inline
+void quicksort_backlog(struct backlog_edge *edges, uint16_t size) {
+    assert(edges != NULL);
+
+    // Store partition element
+    struct backlog_edge *partition = &edges[0];
+    
+    struct backlog_edge *low = partition + 1;
+    struct backlog_edge *high = partition + size - 1;
+    while (low < high) {
+        // Find an out of place low element and high element
+        while (compare_backlog_edges(low, partition) <= 0 && low < high)
+            low++;
+        while (compare_backlog_edges(high, partition) >= 0 && low < high)
+            high--;
+
+        // Swap low and high
+        swap_backlog_edges(low, high);
+    }
+
+    // Swap partition into place
+    struct backlog_edge *partition_location = high;
+    if (low == high && compare_backlog_edges(low, partition) > 0)
+        partition_location = high - 1;
+    swap_backlog_edges(partition_location, partition);
+
+    // Recursively sort portions
+    uint16_t size_0 = partition_location - partition;
+    if (size_0 >= 2)
+        quicksort_backlog(edges, size_0);
+    if (size - size_0 - 1 >= 2)
+        quicksort_backlog(partition_location + 1, size - size_0 - 1);
+}
+
+// Sorts a backlog queue using the compare function above
+static inline
+void sort_backlog(struct backlog_queue *queue) {
+    assert(queue != NULL);
+
+    if (queue->tail - queue->head <= 1)
+        return;
+
+    // Recursively performs quicksort on the backlog queue
+    quicksort_backlog(queue->edges, queue->tail - queue->head);
+}
+
 // Initialize an admitted bitmap;
 static inline
 void init_admitted_bitmap(struct admitted_bitmap *admitted) {
@@ -198,6 +269,8 @@ void set_dst_admitted(struct admitted_bitmap *admitted, uint16_t dst) {
 static inline
 void init_flow_status(struct flow_status *status) {
     assert(status != NULL);
+
+    status->current_timeslot = 1;
 
     uint16_t i;
     for (i = 0; i < MAX_NODES * MAX_NODES; i++)

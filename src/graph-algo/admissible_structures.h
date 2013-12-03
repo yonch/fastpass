@@ -13,8 +13,8 @@
 #include <stdbool.h>
 #include <stdlib.h>
 
-#define MAX_NODES 64  // should be a multiple of 64, due to bitmaps
-#define NODES_SHIFT 6  // 2^NODES_SHIFT = MAX_NODES
+#define MAX_NODES 128  // should be a multiple of 64, due to bitmaps
+#define NODES_SHIFT 7  // 2^NODES_SHIFT = MAX_NODES
 
 struct admitted_edge {
     uint16_t src;

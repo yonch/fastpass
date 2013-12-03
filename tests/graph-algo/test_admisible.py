@@ -5,6 +5,7 @@ Created on November 27, 2013
 '''
 import random
 import sys
+import timeit
 import unittest
 
 sys.path.insert(0, '../../bindings/graph-algo')
@@ -12,6 +13,7 @@ sys.path.insert(0, '../../src/graph-algo')
 
 import structures
 import admissible
+from timing_util import *
 
 class Test(unittest.TestCase):
     
@@ -171,6 +173,26 @@ class Test(unittest.TestCase):
 
         pass
 
+    def test_timing(self):
+        """ Tests how long it takes on average per timeslot to determine admissible traffic."""
+        num_nodes = [16, 32, 64, 128]
+        experiments = 5
+        duration = 10000
+
+        for n in num_nodes:
+            print "\nnodes=%d" % n
+
+            times = []
+            for i in range(experiments):
+                t = timeit.Timer('timer.run()',
+                                 'import timing_util; timer = timing_util.admissible_timing_util(%d, %d)' % (n, duration))
+                times.append(t.timeit(1) / duration)
+
+            avg = sum(times) / len(times)
+            print "min avg time per timeslot: \t(%f)" % min(times)
+            print "max avg time per timeslot: \t(%f)" % max(times)
+            print "avg time per timeslot: \t\t(%f)" % avg
+
     def test_backlog_sorting_1_item(self):
         """Tests sorting of backlogs with 1 item."""
 
@@ -229,8 +251,6 @@ class Test(unittest.TestCase):
             self.assertEqual(len(timeslots), 0)
 
         pass
-
- 
 
     # TODO: write more tests
                         

@@ -1,0 +1,26 @@
+/*
+ * admissible_traffic.h
+ *
+ *  Created on: November 19, 2013
+ *      Author: aousterh
+ */
+
+#ifndef ADMISSIBLE_TRAFFIC_H_
+#define ADMISSIBLE_TRAFFIC_H_
+
+#include "admissible_structures.h"
+
+#include <inttypes.h>
+
+// Request num_slots additional timeslots from src to dst
+void request_timeslots(struct backlog_queue *new_requests, struct flow_status *status,
+                       uint16_t src, uint16_t dst, uint16_t num_slots);
+
+// Populate traffic_out with the admissible traffic for one timeslot from queue_in
+void get_admissible_traffic(struct backlog_queue *queue_in,
+                            struct backlog_queue *queue_out,
+                            struct backlog_queue *new_requests,
+                            struct admitted_traffic *traffic_out,
+                            struct flow_status *status);
+
+#endif /* ADMISSIBLE_TRAFFIC_H_ */

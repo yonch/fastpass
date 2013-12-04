@@ -13,8 +13,8 @@
 #include <stdbool.h>
 #include <stdlib.h>
 
-#define MAX_NODES 128  // should be a multiple of 64, due to bitmaps
-#define NODES_SHIFT 7  // 2^NODES_SHIFT = MAX_NODES
+#define MAX_NODES 256  // should be a multiple of 64, due to bitmaps
+#define NODES_SHIFT 8  // 2^NODES_SHIFT = MAX_NODES
 
 struct admitted_edge {
     uint16_t src;
@@ -24,7 +24,7 @@ struct admitted_edge {
 
 // Admitted traffic
 struct admitted_traffic {
-    uint8_t size;
+    uint16_t size;
     struct admitted_edge edges[MAX_NODES];
 };
 
@@ -272,7 +272,7 @@ void init_flow_status(struct flow_status *status) {
 
     status->current_timeslot = 1;
 
-    uint16_t i;
+    uint32_t i;
     for (i = 0; i < MAX_NODES * MAX_NODES; i++)
         status->timeslots[i] = 0;
 }

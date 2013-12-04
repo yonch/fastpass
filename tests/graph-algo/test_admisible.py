@@ -175,7 +175,7 @@ class Test(unittest.TestCase):
 
     def test_timing(self):
         """ Tests how long it takes on average per timeslot to determine admissible traffic."""
-        num_nodes = [16, 32, 64, 128]
+        num_nodes = [16, 32, 64, 128, 256]
         experiments = 5
         duration = 10000
 

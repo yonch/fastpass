@@ -18,13 +18,12 @@
 
 #define FASTPASS_REQ_HDR_SIZE 4
 #define FASTPASS_RSTREQ_HDR_SIZE 12
-#define MAX_FASTPASS_ONLY_HEADER (max(FASTPASS_REQ_HDR_SIZE,FASTPASS_RSTREQ_HDR_SIZE))
+#define MAX_FASTPASS_ONLY_HEADER 12
 #define MAX_TOTAL_FASTPASS_HEADERS (MAX_FASTPASS_ONLY_HEADER + MAX_HEADER)
 
-#define FASTPASS_PTYPE_CTRL 			0
-#define FASTPASS_PSUBTYPE_RESET_REQ 	0
-#define FASTPASS_PSUBTYPE_RESET 		1
-#define FASTPASS_PTYPE_REQUEST			1
+#define FASTPASS_PTYPE_RSTREQ		0x0
+#define FASTPASS_PTYPE_RESET 		0x1
+#define FASTPASS_PTYPE_REQUEST		0x2
 
 /*
  * 	Warning and debugging macros, (originally taken from DCCP)
@@ -68,6 +67,8 @@ extern bool fastpass_debug;
  * @stat_tasklet_runs: the number of times the tasklet ran
  * @stat_build_header_errors: #egress failures due to header building
  * @stat_xmit_errors: #egress failures due to IP stack
+ * @stat_invalid_rx_pkts: #invalid rx packets
+ * @stat_redundant_reset: #times got reset for last_reset_time
  */
 struct fastpass_sock {
 	/* inet_sock has to be the first member */
@@ -85,9 +86,13 @@ struct fastpass_sock {
 	u64 stat_tasklet_runs;
 	u64 stat_build_header_errors;
 	u64 stat_xmit_errors;
+	u64 stat_invalid_rx_pkts;
+	u64 stat_redundant_reset;
 };
 
 void fastpass_send_skb_via_tasklet(struct sock *sk, struct sk_buff *skb);
+
+u16 fp_ip_to_id(__be32 ipaddr);
 
 static inline struct fastpass_sock *fastpass_sk(const struct sock *sk)
 {
@@ -103,14 +108,19 @@ enum {
  * struct fastpass_hdr - FastPass request packet header
  */
 struct fastpass_hdr {
-	__u8	subtype:4,
-			type:4;
-	union {
-		__u8	seq;
-		__u8	subtype2:4,
-				type2:4;
-	};
+	__be16	seq;
 	__sum16	checksum;
+	union {
+		struct {
+			__be32		hi;
+			__be32		lo;
+		} rstreq;
+	};
+};
+
+struct fastpass_areq {
+	__be16	dst;
+	__be16	count;
 };
 
 
@@ -119,5 +129,6 @@ static inline struct fastpass_hdr *fastpass_hdr(
 {
 	return (struct fastpass_hdr *)skb_transport_header(skb);
 }
+
 
 #endif /* FASTPASS_PROTO_H_ */

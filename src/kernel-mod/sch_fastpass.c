@@ -502,6 +502,7 @@ static void fp_do_request(struct fp_sched_data *q, u64 now)
 
 	struct sk_buff *skb;
 	const int max_payload_len = 40;
+	struct fastpass_areq *areq;
 	int max_header;
 	int payload_len = 0;
 	int err;
@@ -520,17 +521,20 @@ static void fp_do_request(struct fp_sched_data *q, u64 now)
 	if (!skb)
 		goto alloc_err;
 	skb_reserve(skb, max_header);
+	skb_reserve(skb, 2);
 
 	f = q->unreq_flows.first;
 	while (payload_len + 4 < max_payload_len && f) {
-		u32 dst_addr = ntohl((u32)f->src_dst_key);
 		skb_put(skb, 4);
-		skb->data[payload_len++] = (dst_addr     ) & 0xFF;
-		skb->data[payload_len++] = (dst_addr >> 8) & 0xFF;
-		skb->data[payload_len++] = (f->unreq_tslots     ) & 0xFF;
-		skb->data[payload_len++] = (f->unreq_tslots >> 8) & 0xFF;
+		areq = (struct fastpass_areq *)&skb->data[payload_len];
+		areq->dst = htons(fp_ip_to_id((__be32)f->src_dst_key));
+		areq->count = htons((u16)f->unreq_tslots);
 		f = f->next;
+		payload_len += 4;
 	}
+	skb_push(skb, 2);
+	*(__be16 *)&skb->data[0] = htons((FASTPASS_PTYPE_REQUEST << 12) |
+			((payload_len >> 2) & 0x3F));
 
 	fastpass_send_skb_via_tasklet(q->ctrl_sock->sk, skb);
 
@@ -643,7 +647,7 @@ static int fastpass_reconnect(struct Qdisc *sch)
 	q->ctrl_sock->sk->sk_allocation = GFP_ATOMIC;
 
 	/* give socket a reference to this qdisc for watchdog */
-	fastpass_sk(q->ctrl_sock->sk)->qdisc = q;
+	fastpass_sk(q->ctrl_sock->sk)->qdisc = sch;
 
 	/* connect */
 	sock_addr.sin_addr.s_addr = q->ctrl_addr_netorder;

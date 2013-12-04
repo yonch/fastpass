@@ -31,18 +31,29 @@ EXPORT_SYMBOL_GPL(fastpass_debug);
 #endif
 
 /* returns the current time, for socket reset */
-static u64 fp_sync_get_time()
+static u64 fp_sync_get_time(void)
 {
 	return ktime_to_ns(ktime_get_real());
+}
+
+u16 fp_ip_to_id(__be32 ipaddr) {
+	return (u16)ntohl(ipaddr);
 }
 
 int fastpass_rcv(struct sk_buff *skb)
 {
 	struct sock *sk;
+	struct fastpass_sock *fp;
+	struct fastpass_hdr *hdr;
+	u16 payload_type;
+	u64 rst_tstamp;
+
+	pr_err("%s: visited\n", __func__);
 
 	sk = __inet_lookup_skb(&fastpass_hashinfo, skb,
 			FASTPASS_DEFAULT_PORT_NETORDER /*sport*/,
 			FASTPASS_DEFAULT_PORT_NETORDER /*dport*/);
+	fp = fastpass_sk(sk);
 
 	if (sk == NULL) {
 		fastpass_pr_debug("got packet on non-connected socket\n");
@@ -50,7 +61,71 @@ int fastpass_rcv(struct sk_buff *skb)
 		return 0;
 	}
 
-	return sk_receive_skb(sk, skb, 1);
+	bh_lock_sock(sk);
+
+	if (skb->len < 6)
+		goto packet_too_short;
+
+	hdr = (struct fastpass_hdr *)skb->data;
+	payload_type = skb->data[4] >> 4;
+
+	switch (payload_type) {
+	case FASTPASS_PTYPE_RESET:
+		if (skb->len < 12)
+			goto incomplete_reset_payload;
+
+		rst_tstamp = ((u64)(ntohl(hdr->rstreq.hi) & ((1 << 24) - 1)) << 32) |
+				ntohl(hdr->rstreq.lo);
+
+		fastpass_pr_debug("got RESET 0x%llX, last is 0x%llX\n", rst_tstamp,
+				fp->last_reset_time);
+
+		if (rst_tstamp == fp->last_reset_time) {
+			if (!fp->in_sync) {
+				fp->in_sync = 1;
+			} else {
+				fastpass_pr_debug("rx redundant reset\n");
+				fp->stat_redundant_reset++;
+			}
+			break;
+		}
+
+		/* reject resets outside the time window */
+		/* TODO */
+
+		/* need to process reset */
+		//if (rst_tstamp > fp->last_reset_time)
+
+		break;
+
+	default:
+		goto unknown_payload_type;
+	}
+
+
+
+cleanup:
+	bh_unlock_sock(sk);
+	sock_put(sk);
+	__kfree_skb(skb);
+	return NET_RX_SUCCESS;
+
+unknown_payload_type:
+	fastpass_pr_debug("got unknown payload type %d\n", payload_type);
+	goto invalid_pkt;
+
+incomplete_reset_payload:
+	fastpass_pr_debug("packet has reset payload, but is too short (len=%d)\n",
+			skb->len);
+	goto invalid_pkt;
+
+packet_too_short:
+	fastpass_pr_debug("packet less than minimal size (len=%d)\n", skb->len);
+	goto invalid_pkt;
+
+invalid_pkt:
+	fp->stat_invalid_rx_pkts++;
+	goto cleanup;
 }
 
 static void fastpass_proto_close(struct sock *sk, long timeout)
@@ -88,15 +163,16 @@ static void fastpass_destroy_sock(struct sock *sk)
 
 	pr_err("%s: visited\n", __func__);
 
+	bh_lock_sock(sk);
 	hrtimer_cancel(&fp->timer);
 	fp->qdisc = NULL;
+	bh_unlock_sock(sk);
 }
 
 static int fastpass_build_header(struct sock *sk, struct sk_buff *skb)
 {
 	struct fastpass_sock *fp = fastpass_sk(sk);
 	struct fastpass_hdr *fh;
-	const u32 fastpass_header_size = sizeof(*fh);
 
 	BUG_ON(skb == NULL);
 
@@ -105,19 +181,18 @@ static int fastpass_build_header(struct sock *sk, struct sk_buff *skb)
 		skb_push(skb, FASTPASS_REQ_HDR_SIZE);
 		skb_reset_transport_header(skb);
 		fh = memset(skb_transport_header(skb), 0, FASTPASS_REQ_HDR_SIZE);
-		fh->type = FASTPASS_PTYPE_REQUEST;
-		fh->subtype = 0;
-		fh->seq = (u8)(fp->next_seqno++);
 	} else {
+		u32 hi_word;
 		skb_push(skb, FASTPASS_RSTREQ_HDR_SIZE);
 		skb_reset_transport_header(skb);
 		fh = memset(skb_transport_header(skb), 0, FASTPASS_RSTREQ_HDR_SIZE);
-		fh->type = FASTPASS_PTYPE_CTRL;
-		fh->subtype = FASTPASS_PSUBTYPE_RESET_REQ;
-		fh->type2 = FASTPASS_PTYPE_REQUEST;
-		fh->subtype2 = 0;
-		*(__be64 *)&skb_transport_header(skb)[4] = fp->last_reset_time;
+		hi_word = (FASTPASS_PTYPE_RSTREQ << 28) |
+					((fp->last_reset_time >> 32) & 0x00FFFFFF);
+		fh->rstreq.hi = htonl(hi_word);
+		fh->rstreq.lo = htonl((u32)fp->last_reset_time);
 	}
+
+	fh->seq = htons((u16)(fp->next_seqno++));
 
 	/* These could be useful for updating state */
 //	dccp_update_gss(sk, dcb->dccpd_seq);
@@ -209,9 +284,9 @@ static enum hrtimer_restart fastpass_timer_func(struct hrtimer *timer)
 	return HRTIMER_NORESTART;
 }
 
-static int do_proto_reset(struct fastpass_sock *fp, u64 reset_time)
+static void do_proto_reset(struct fastpass_sock *fp, u64 reset_time)
 {
-	fp->last_reset_time = reset_time;
+	fp->last_reset_time = reset_time & ((1ULL << 56) - 1);
 	fp->next_seqno = reset_time +
 			((u64)jhash_1word((u32)reset_time, reset_time >> 32) << 32);
 	fp->in_sync = 0;
@@ -239,7 +314,7 @@ static int fastpass_sk_init(struct sock *sk)
 	fp->qdisc = NULL;
 
 	/* choose reset time */
-	do_proto_reset(false);
+	do_proto_reset(fp, fp_sync_get_time());
 
 	return 0;
 }
@@ -326,8 +401,7 @@ static int fastpass_recvmsg(struct kiocb *iocb, struct sock *sk,
 
 static int fastpass_rcv_skb(struct sock *sk, struct sk_buff *skb)
 {
-	pr_err("%s: visited\n", __func__);
-	__kfree_skb(skb);
+	BUG();
 	return 0;
 }
 

@@ -11,20 +11,21 @@
 #include <assert.h>
 #include <inttypes.h>
 #include <stdbool.h>
+#include <stdio.h>
 #include <stdlib.h>
 
-#define MAX_NODES 128  // should be a multiple of 64, due to bitmaps
-#define NODES_SHIFT 7  // 2^NODES_SHIFT = MAX_NODES
+#define MAX_NODES 256  // should be a multiple of 64, due to bitmaps
+#define NODES_SHIFT 8  // 2^NODES_SHIFT = MAX_NODES
+#define MAX_TIME 66535
 
 struct admitted_edge {
     uint16_t src;
     uint16_t dst;
-    uint16_t remaining_backlog;
 };
 
 // Admitted traffic
 struct admitted_traffic {
-    uint8_t size;
+    uint16_t size;
     struct admitted_edge edges[MAX_NODES];
 };
 
@@ -50,11 +51,19 @@ struct admitted_bitmap {
     uint64_t dsts [MAX_NODES >> 6];
 };
 
-// For all src/dst pairs, gives the timeslot we last sent in, also the current timeslot
+// For all src/dst pairs, gives the timeslot we last sent in
+// Also stores the current timeslot and oldest timeslot with outstanding requests
 struct flow_status {
-    uint16_t current_timeslot;
-    uint16_t timeslots[MAX_NODES * MAX_NODES];
+    uint64_t current_timeslot;
+    uint64_t oldest_timeslot;
+    uint64_t timeslots[MAX_NODES * MAX_NODES];
 };
+
+
+// Forward declarations
+static bool out_of_order(struct backlog_queue *queue, bool duplicates_allowed);
+static void print_backlog(struct backlog_queue *queue);
+
 
 // Initialize a list of a traffic admitted in a timeslot
 static inline
@@ -67,7 +76,7 @@ void init_admitted_traffic(struct admitted_traffic *admitted) {
 // Insert an edge into the admitted traffic
 static inline
 void insert_admitted_edge(struct admitted_traffic *admitted, uint16_t src,
-                          uint16_t dst, uint16_t backlog) {
+                          uint16_t dst) {
     assert(admitted != NULL);
     assert(admitted->size < MAX_NODES);
     assert(src < MAX_NODES);
@@ -76,7 +85,6 @@ void insert_admitted_edge(struct admitted_traffic *admitted, uint16_t src,
     struct admitted_edge *edge = &admitted->edges[admitted->size];
     edge->src = src;
     edge->dst = dst;
-    edge->remaining_backlog = backlog;
     admitted->size++;
 }
 
@@ -122,19 +130,29 @@ struct backlog_edge *peek_head_backlog(struct backlog_queue *queue) {
 }
 
 // Compare two backlog edges
-// Returns a positive value if edge1 > edge2, 0 if they're equal, and a negative value if edge1 < edge2
+// Returns a positive value if edge1 > edge2, 0 if they're equal, and a
+// negative value if edge1 < edge2
 // Establishes a total ordering over all backlog edges
+// Min time gives the time that should be considered earliest (to handle overflow)
 static inline
-int64_t compare_backlog_edges(struct backlog_edge *edge1, struct backlog_edge *edge2) {
+int64_t compare_backlog_edges(struct backlog_edge *edge1, struct backlog_edge *edge2,
+                              uint16_t min_time) {
     assert(edge1 != NULL);
     assert(edge2 != NULL);
 
-    // TODO: is there a way to do this without requiring an if statement?
-    if (edge1->timeslot != edge2->timeslot)
-        return edge1->timeslot - edge2->timeslot;
+    // TODO: can this be simplified?
+    if (edge1->timeslot != edge2->timeslot) {
+        if ((edge1->timeslot >= min_time && edge2->timeslot >= min_time) ||
+            (edge1->timeslot < min_time && edge2->timeslot < min_time))
+            return edge1->timeslot - edge2->timeslot;
+        else if (edge1->timeslot > edge2->timeslot)
+            return -1;
+        else
+            return 1;
+    }
 
-    uint32_t edge1_num = (edge1->src << NODES_SHIFT) + edge1->dst;
-    uint32_t edge2_num = (edge2->src << NODES_SHIFT) + edge2->dst;
+    int64_t edge1_num = (edge1->src << NODES_SHIFT) + edge1->dst;
+    int64_t edge2_num = (edge2->src << NODES_SHIFT) + edge2->dst;
     return edge1_num - edge2_num;
 }
 
@@ -172,7 +190,7 @@ void swap_backlog_edges(struct backlog_edge *edge_0, struct backlog_edge *edge_1
 
 // Recursive quicksort on a backlog_queue, using the compare function above
 static inline
-void quicksort_backlog(struct backlog_edge *edges, uint16_t size) {
+void quicksort_backlog(struct backlog_edge *edges, uint16_t size, uint16_t min_time) {
     assert(edges != NULL);
 
     // Store partition element
@@ -182,9 +200,9 @@ void quicksort_backlog(struct backlog_edge *edges, uint16_t size) {
     struct backlog_edge *high = partition + size - 1;
     while (low < high) {
         // Find an out of place low element and high element
-        while (compare_backlog_edges(low, partition) <= 0 && low < high)
+        while (compare_backlog_edges(low, partition, min_time) <= 0 && low < high)
             low++;
-        while (compare_backlog_edges(high, partition) >= 0 && low < high)
+        while (compare_backlog_edges(high, partition, min_time) >= 0 && low < high)
             high--;
 
         // Swap low and high
@@ -193,28 +211,84 @@ void quicksort_backlog(struct backlog_edge *edges, uint16_t size) {
 
     // Swap partition into place
     struct backlog_edge *partition_location = high;
-    if (low == high && compare_backlog_edges(low, partition) > 0)
+    if (low == high && compare_backlog_edges(low, partition, min_time) > 0)
         partition_location = high - 1;
     swap_backlog_edges(partition_location, partition);
 
     // Recursively sort portions
     uint16_t size_0 = partition_location - partition;
     if (size_0 >= 2)
-        quicksort_backlog(edges, size_0);
+        quicksort_backlog(edges, size_0, min_time);
     if (size - size_0 - 1 >= 2)
-        quicksort_backlog(partition_location + 1, size - size_0 - 1);
+        quicksort_backlog(partition_location + 1, size - size_0 - 1, min_time);
 }
 
 // Sorts a backlog queue using the compare function above
 static inline
-void sort_backlog(struct backlog_queue *queue) {
+void sort_backlog(struct backlog_queue *queue, uint16_t min_time) {
     assert(queue != NULL);
 
     if (queue->tail - queue->head <= 1)
         return;
 
     // Recursively performs quicksort on the backlog queue
-    quicksort_backlog(queue->edges, queue->tail - queue->head);
+    quicksort_backlog(queue->edges, queue->tail - queue->head, min_time);
+
+    assert(!out_of_order(queue, true));
+}
+
+// Prints the contents of a backlog queue, useful for debugging
+static inline
+void print_backlog(struct backlog_queue *queue) {
+    assert(queue != NULL);
+
+    printf("printing backlog queue %x\n", (int) queue);
+    struct backlog_edge *edge;
+    for (edge = &queue->edges[queue->head]; edge < &queue->edges[queue->tail]; edge++)
+        printf("\t%d\t%d\t%d\t%d\n", edge->src, edge->dst, edge->backlog, edge->timeslot);
+}
+
+// Returns true if this backlog queue contains duplicate entries for a src/dst pair
+// Used for debugging
+// Note this runs in n^2 time - super slow
+static inline
+bool has_duplicates(struct backlog_queue *queue) {
+    assert(queue != NULL);
+    
+    uint16_t index;
+    for (index = queue->head; index < queue->tail - 1; index++) {
+        struct backlog_edge *edge = &queue->edges[index];
+        
+        uint16_t index2;
+        for (index2 = index + 1; index2 < queue->tail; index2++) {
+            struct backlog_edge *edge2 = &queue->edges[index2];
+            if (edge->src == edge2->src && edge->dst == edge2->dst)
+                return true;
+        }
+    }
+    return false;
+}
+
+// Returns true if this queue is out of order
+// Used for debugging
+static inline
+bool out_of_order(struct backlog_queue *queue, bool duplicates_allowed) {
+    assert(queue != NULL);
+
+    if (queue->tail - queue->head <= 1)
+        return false;
+
+    struct backlog_edge *edge_0 = &queue->edges[queue->head];
+    struct backlog_edge *edge_1 = &queue->edges[queue->head + 1];
+    uint16_t min_time = edge_0->timeslot;
+    while (edge_1 < &queue->edges[queue->tail]) {
+        if (compare_backlog_edges(edge_0, edge_1, min_time) > 0 ||
+            (!duplicates_allowed && compare_backlog_edges(edge_0, edge_1, min_time) == 0))
+            return true;
+        edge_0 = edge_1;
+        edge_1++;
+    }
+    return false;
 }
 
 // Initialize an admitted bitmap;
@@ -271,15 +345,16 @@ void init_flow_status(struct flow_status *status) {
     assert(status != NULL);
 
     status->current_timeslot = 1;
+    status->oldest_timeslot = 1;
 
-    uint16_t i;
+    uint32_t i;
     for (i = 0; i < MAX_NODES * MAX_NODES; i++)
         status->timeslots[i] = 0;
 }
 
 // Returns the last timeslot we transmitted in for this src/dst pair
 static inline
-uint16_t get_last_timeslot(struct flow_status *status, uint16_t src, uint16_t dst) {
+uint64_t get_last_timeslot(struct flow_status *status, uint16_t src, uint16_t dst) {
     assert(status != NULL);
 
     return status->timeslots[src * MAX_NODES + dst];
@@ -288,7 +363,7 @@ uint16_t get_last_timeslot(struct flow_status *status, uint16_t src, uint16_t ds
 // Sets the last timeslot we transmitted in for this src/dst pair
 static inline
 void set_last_timeslot(struct flow_status *status, uint16_t src, uint16_t dst,
-                       uint16_t timeslot) {
+                       uint64_t timeslot) {
     assert(status != NULL);
 
     status->timeslots[src * MAX_NODES + dst] = timeslot;

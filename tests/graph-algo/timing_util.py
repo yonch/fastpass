@@ -90,7 +90,8 @@ class admissible_timing_util(object):
         # note: over long time scales, we should just barely be able to admit
         # all traffic
         mean = 20
-        packets_requested = mean
+        fraction = 0.95
+        packets_requested = int(mean * fraction)
         for src in range(n):
             t = self.gen_exponential_variate(mean)
             while (t < self.duration):

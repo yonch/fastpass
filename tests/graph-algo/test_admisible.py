@@ -43,7 +43,6 @@ class Test(unittest.TestCase):
         self.assertEqual(admitted.size, 1)
         self.assertEqual(admitted.edges.src, 0)
         self.assertEqual(admitted.edges.dst, 1)
-        self.assertEqual(admitted.edges.remaining_backlog, 4)
         self.assertEqual(queue_0.head, 0)
         self.assertEqual(queue_0.tail, 0)
         self.assertEqual(queue_1.head, 0)
@@ -175,7 +174,7 @@ class Test(unittest.TestCase):
 
     def test_timing(self):
         """ Tests how long it takes on average per timeslot to determine admissible traffic."""
-        num_nodes = [16, 32, 64, 128]
+        num_nodes = [16, 32, 64, 128, 256]
         experiments = 5
         duration = 10000
 
@@ -202,7 +201,7 @@ class Test(unittest.TestCase):
         structures.enqueue_backlog(queue, 0, 1, 2, 3)
 
         # Sort
-        structures.sort_backlog(queue)
+        structures.sort_backlog(queue, 0)
        
         # Check order
         edge = structures.peek_head_backlog(queue)
@@ -231,7 +230,7 @@ class Test(unittest.TestCase):
                 timeslots.append(t)
 
             # Sort
-            structures.sort_backlog(queue)
+            structures.sort_backlog(queue, 0)
 
             # Check order and validity of timeslots
             edge_1 = structures.peek_head_backlog(queue)
@@ -251,6 +250,68 @@ class Test(unittest.TestCase):
             self.assertEqual(len(timeslots), 0)
 
         pass
+
+    def test_backlog_sorting_with_wraparound(self):
+        """Tests sorting of backlogs with overflowed timeslots."""
+
+        for num_items in xrange(2, 50, 3):
+            queue = structures.create_backlog_queue()
+
+            # Choose a minimum time
+            min_time = random.randint(0, num_items)
+
+            # Enqueue items
+            timeslots_early = []
+            timeslots_late = []
+            for i in xrange(num_items):
+                t = random.randint(0, num_items)
+                structures.enqueue_backlog(queue, 0, 1, 1, t)
+                if (t >= min_time):
+                    timeslots_early.append(t)
+                else:
+                    timeslots_late.append(t)
+
+            # Sort
+            structures.sort_backlog(queue, min_time)
+
+            # Check order and validity of timeslots
+            edge_1 = structures.peek_head_backlog(queue)
+            structures.dequeue_backlog(queue)
+            if (len(timeslots_early) > 0):
+                self.assertIn(edge_1.timeslot, timeslots_early)
+                timeslots_early.remove(edge_1.timeslot)
+            else:
+                self.assertIn(edge_1.timeslot, timeslots_late)
+                timeslots_late.remove(edge_1.timeslot)
+
+            # Check early timeslots
+            while structures.is_empty_backlog(queue) == False and len(timeslots_early) > 0:
+                edge_0 = edge_1
+                edge_1 = structures.peek_head_backlog(queue)
+                structures.dequeue_backlog(queue)
+                self.assertTrue(edge_0.timeslot <= edge_1.timeslot)
+                
+                self.assertIn(edge_1.timeslot, timeslots_early)
+                timeslots_early.remove(edge_1.timeslot)
+
+            # Check late timeslots
+            first = True
+            while structures.is_empty_backlog(queue) == False:
+                edge_0 = edge_1
+                edge_1 = structures.peek_head_backlog(queue)
+                structures.dequeue_backlog(queue)
+                self.assertTrue(first or (edge_0.timeslot <= edge_1.timeslot))
+                first = False
+                
+                self.assertIn(edge_1.timeslot, timeslots_late)
+                timeslots_late.remove(edge_1.timeslot)
+
+            self.assertEqual(structures.is_empty_backlog(queue), True)
+            self.assertEqual(len(timeslots_early), 0)
+            self.assertEqual(len(timeslots_late), 0)
+
+        pass
+  
 
     # TODO: write more tests
                         

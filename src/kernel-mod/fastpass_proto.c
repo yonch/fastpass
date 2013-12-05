@@ -36,10 +36,12 @@ static u64 fp_sync_get_time(void)
 	return ktime_to_ns(ktime_get_real());
 }
 
+/* translates IP address to short FastPass ID */
 u16 fp_ip_to_id(__be32 ipaddr) {
 	return (u16)ntohl(ipaddr);
 }
 
+/* locks the qdisc associated with the fastpass socket */
 static struct Qdisc *fastpass_lock_sock(struct sock *sk)
 {
 	struct fastpass_sock *fp = fastpass_sk(sk);
@@ -58,6 +60,7 @@ static struct Qdisc *fastpass_lock_sock(struct sock *sk)
 	return q;
 }
 
+/* unlocks the qdisc associated with the fastpass socket */
 static void fastpass_unlock_sock(struct Qdisc *q)
 {
 	if (unlikely(q == NULL))
@@ -67,6 +70,7 @@ static void fastpass_unlock_sock(struct Qdisc *q)
 	rcu_read_unlock_bh();
 }
 
+/* configures which qdisc is associated with the fastpass socket */
 void fastpass_sock_set_qdisc(struct sock *sk, struct Qdisc *new_qdisc)
 {
 	struct fastpass_sock *fp = fastpass_sk(sk);
@@ -98,6 +102,9 @@ static void fastpass_process_reset(struct fastpass_sock *fp, u64 tstamp)
 	//if (rst_tstamp > fp->last_reset_time)
 }
 
+/**
+ * Handles an ALLOC payload
+ */
 static void fastpass_process_alloc(struct fastpass_sock *fp, u16 cur_tslot,
 		u16 *dst, int n_dst, u8 *tslots, int n_tslots)
 {
@@ -134,6 +141,9 @@ static void fastpass_process_alloc(struct fastpass_sock *fp, u16 cur_tslot,
 }
 
 
+/**
+ * Receives a packet destined for the protocol. (part of inet socket API)
+ */
 int fastpass_rcv(struct sk_buff *skb)
 {
 	struct sock *sk;
@@ -249,6 +259,7 @@ invalid_pkt:
 	goto cleanup;
 }
 
+/* close the socket */
 static void fastpass_proto_close(struct sock *sk, long timeout)
 {
 	pr_err("%s: visited\n", __func__);
@@ -256,6 +267,7 @@ static void fastpass_proto_close(struct sock *sk, long timeout)
 	sk_common_release(sk);
 }
 
+/* disconnect (happens if called connect with AF_UNSPEC family) */
 static int fastpass_proto_disconnect(struct sock *sk, int flags)
 {
 	struct inet_sock *inet = inet_sk(sk);

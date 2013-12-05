@@ -583,10 +583,10 @@ static void fastpass_handle_alloc(struct Qdisc *sch,
 
 	for (i = 0; i < n_tslots; i++) {
 		spec = tslots[i];
-		cur_tslot += spec & 0xF;
 		dst_ind = spec >> 4;
 
 		if (dst_ind == 0) {
+			cur_tslot += 16 * (1 + (spec & 0xF));
 			fastpass_pr_debug("ALLOC skip to timeslot %d (no allocation)\n", cur_tslot);
 			continue;
 		}
@@ -598,6 +598,7 @@ static void fastpass_handle_alloc(struct Qdisc *sch,
 			return;
 		}
 
+		cur_tslot += 1 + (spec & 0xF);
 		fastpass_pr_debug("Allocated timeslot %d to destination 0x%04x (%d)\n",
 				cur_tslot, dst[dst_ind - 1], dst[dst_ind - 1]);
 	}

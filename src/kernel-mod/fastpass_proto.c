@@ -155,6 +155,7 @@ handle_payload:
 
 		/* get base timeslot */
 		alloc_base_tslot = ntohs(*(u16 *)data);
+		alloc_base_tslot <<= 4;
 		data += 2;
 
 		/* convert destinations from network byte-order */

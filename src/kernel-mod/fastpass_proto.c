@@ -15,6 +15,7 @@
 #include <net/inet_common.h>
 #include <net/inet_hashtables.h>
 #include <net/sch_generic.h>
+#include <net/pkt_sched.h>
 
 #include "fastpass_proto.h"
 
@@ -48,16 +49,28 @@ static struct Qdisc *fpproto_lock_qdisc(struct sock *sk)
 	struct Qdisc *sch;
 	spinlock_t *root_lock;
 
+
 	rcu_read_lock_bh();
 
 	sch = rcu_dereference_bh(fp->qdisc);
 
-	if (likely(sch != NULL)) {
-		root_lock = qdisc_lock(qdisc_root(sch));
-		spin_lock_bh(root_lock);
-	}
+	if (unlikely(sch == NULL))
+		goto unsuccessful;
+
+	root_lock = qdisc_lock(qdisc_root(sch));
+	spin_lock_bh(root_lock);
+
+	/* Check that the qdisc destroy func didn't race ahead of us */
+	if (unlikely(sch->limit == 0))
+		goto raced_with_destroy;
 
 	return sch;
+
+raced_with_destroy:
+	spin_unlock_bh(root_lock);
+unsuccessful:
+	rcu_read_unlock_bh();
+	return NULL;
 }
 
 /* unlocks the qdisc associated with the fastpass socket */

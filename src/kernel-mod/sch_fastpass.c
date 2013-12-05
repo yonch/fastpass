@@ -934,8 +934,14 @@ static int fastpass_change(struct Qdisc *sch, struct nlattr *opt)
 
 	fp_log = q->hash_tbl_log;
 
-	if (tb[TCA_FASTPASS_BUCKETS_LOG])
-		sch->limit = nla_get_u32(tb[TCA_FASTPASS_BUCKETS_LOG]);
+	if (tb[TCA_FASTPASS_PLIMIT]) {
+		u32 nval = nla_get_u32(tb[TCA_FASTPASS_PLIMIT]);
+
+		if (nval > 0)
+			sch->limit = nval;
+		else
+			err = -EINVAL;
+	}
 
 	if (tb[TCA_FASTPASS_FLOW_PLIMIT])
 		q->flow_plimit = nla_get_u32(tb[TCA_FASTPASS_FLOW_PLIMIT]);
@@ -1000,17 +1006,19 @@ static void fastpass_destroy(struct Qdisc *sch)
 	struct fp_sched_data *q = qdisc_priv(sch);
 	spinlock_t *root_lock = qdisc_root_lock(sch);
 
-	sock_release(q->ctrl_sock);
-
 	/* Apparently no lock protection here. Lock to prevent races */
 	spin_lock_bh(root_lock);
 
+	/* Notify fpproto that qdisc is being destroyed */
+	sch->limit = 0;
+
 	fastpass_reset(sch);
-	q->ctrl_sock = NULL;
 	kfree(q->flow_hash_tbl);
 	qdisc_watchdog_cancel(&q->watchdog);
 
 	spin_unlock_bh(root_lock);
+
+	sock_release(q->ctrl_sock);
 
 }
 

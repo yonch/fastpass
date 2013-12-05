@@ -37,11 +37,6 @@ static u64 fp_sync_get_time(void)
 	return ktime_to_ns(ktime_get_real());
 }
 
-/* translates IP address to short FastPass ID */
-u16 fp_ip_to_id(__be32 ipaddr) {
-	return (u16)ntohl(ipaddr);
-}
-
 /* locks the qdisc associated with the fastpass socket */
 static struct Qdisc *fpproto_lock_qdisc(struct sock *sk)
 {

@@ -139,6 +139,11 @@ static struct fp_flow do_not_schedule;
 
 static struct kmem_cache *fp_flow_cachep __read_mostly;
 
+/* translates IP address to short FastPass ID */
+u16 fp_ip_to_id(__be32 ipaddr) {
+	return (u16)ntohl(ipaddr);
+}
+
 /* hashes a flow key into a u32, for lookup in the hash tables */
 static inline u32 fp_src_dst_hash(u64 src_dst_key) {
 	return jhash_2words((__be32)(src_dst_key >> 32),

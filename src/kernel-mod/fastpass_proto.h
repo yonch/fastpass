@@ -107,8 +107,6 @@ void fpproto_set_qdisc(struct sock *sk, struct Qdisc *new_qdisc);
 
 void fpproto_send_skb_via_tasklet(struct sock *sk, struct sk_buff *skb);
 
-u16 fp_ip_to_id(__be32 ipaddr);
-
 static inline struct fastpass_sock *fastpass_sk(const struct sock *sk)
 {
 	return (struct fastpass_sock *)sk;

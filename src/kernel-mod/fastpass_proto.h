@@ -57,6 +57,16 @@ extern bool fastpass_debug;
 #endif
 
 /**
+ * Operations executed by the protocol
+ */
+struct fpproto_ops {
+	void 	(*handle_reset)(struct Qdisc *q, u64 tstamp);
+
+	void	(*handle_alloc)(struct Qdisc *q, u16 base_tslot,
+			u16 *dst, int n_dst, u8 *tslots, int n_tslots);
+};
+
+/**
  * @inet: the IPv4 socket information
  * @mss_cache: maximum segment size cache
  * @tasklet: tasklet that writes the skb queue to the IP stack
@@ -81,7 +91,7 @@ struct fastpass_sock {
 	u64						last_reset_time;
 	u64						next_seqno;
 	u32						in_sync:1;
-
+	struct fpproto_ops		*ops;
 
 	/* statistics */
 	u64 stat_tasklet_runs;

@@ -45,28 +45,28 @@ u16 fp_ip_to_id(__be32 ipaddr) {
 static struct Qdisc *fpproto_lock_qdisc(struct sock *sk)
 {
 	struct fastpass_sock *fp = fastpass_sk(sk);
-	struct Qdisc *q;
+	struct Qdisc *sch;
 	spinlock_t *root_lock;
 
 	rcu_read_lock_bh();
 
-	q = rcu_dereference_bh(fp->qdisc);
+	sch = rcu_dereference_bh(fp->qdisc);
 
-	if (likely(q != NULL)) {
-		root_lock = qdisc_lock(qdisc_root(q));
+	if (likely(sch != NULL)) {
+		root_lock = qdisc_lock(qdisc_root(sch));
 		spin_lock_bh(root_lock);
 	}
 
-	return q;
+	return sch;
 }
 
 /* unlocks the qdisc associated with the fastpass socket */
-static void fpproto_unlock_qdisc(struct Qdisc *q)
+static void fpproto_unlock_qdisc(struct Qdisc *sch)
 {
-	if (unlikely(q == NULL))
+	if (unlikely(sch == NULL))
 		return;
 
-	spin_unlock_bh(qdisc_lock(qdisc_root(q)));
+	spin_unlock_bh(qdisc_lock(qdisc_root(sch)));
 	rcu_read_unlock_bh();
 }
 
@@ -77,68 +77,6 @@ void fpproto_set_qdisc(struct sock *sk, struct Qdisc *new_qdisc)
 	rcu_assign_pointer(fp->qdisc, new_qdisc);
 }
 
-/**
- * Handles a RESET payload with given timestamp
- */
-static void fastpass_process_reset(struct fastpass_sock *fp, u64 tstamp)
-{
-	fastpass_pr_debug("got RESET 0x%llX, last is 0x%llX\n", tstamp,
-			fp->last_reset_time);
-
-	if (tstamp == fp->last_reset_time) {
-		if (!fp->in_sync) {
-			fp->in_sync = 1;
-		} else {
-			fastpass_pr_debug("rx redundant reset\n");
-			fp->stat_redundant_reset++;
-		}
-		return;
-	}
-
-	/* reject resets outside the time window */
-	/* TODO */
-
-	/* need to process reset */
-	//if (rst_tstamp > fp->last_reset_time)
-}
-
-/**
- * Handles an ALLOC payload
- */
-static void fastpass_process_alloc(struct fastpass_sock *fp, u16 cur_tslot,
-		u16 *dst, int n_dst, u8 *tslots, int n_tslots)
-{
-	int i;
-	u8 spec;
-	int dst_ind;
-
-	(void)fp; /* unused */
-
-	fastpass_pr_debug("got ALLOC for timeslot %d, %d destinations, %d timeslots",
-			cur_tslot, n_dst, n_tslots);
-
-	for (i = 0; i < n_tslots; i++) {
-		spec = tslots[i];
-		cur_tslot += spec & 0xF;
-		dst_ind = spec >> 4;
-
-		if (dst_ind == 0) {
-			fastpass_pr_debug("ALLOC skip to timeslot %d (no allocation)\n", cur_tslot);
-			continue;
-		}
-
-		if (dst_ind > n_dst) {
-			/* invalid destination */
-			fastpass_pr_debug("ALLOC tslot spec 0x%02X has illegal dst, max %d\n",
-					spec, n_dst);
-			return;
-		}
-
-		fastpass_pr_debug("Allocated timeslot %d to destination 0x%04x (%d)\n",
-				cur_tslot, dst[dst_ind - 1], dst[dst_ind - 1]);
-	}
-
-}
 
 
 /**
@@ -149,7 +87,7 @@ int fpproto_rcv(struct sk_buff *skb)
 	struct sock *sk;
 	struct fastpass_sock *fp;
 	struct fastpass_hdr *hdr;
-	struct Qdisc *q;
+	struct Qdisc *sch;
 	u16 payload_type;
 	u64 rst_tstamp;
 	int i;
@@ -172,7 +110,7 @@ int fpproto_rcv(struct sk_buff *skb)
 		return 0;
 	}
 
-	q = fpproto_lock_qdisc(sk);
+	sch = fpproto_lock_qdisc(sk);
 
 	if (skb->len < 6)
 		goto packet_too_short;
@@ -192,7 +130,8 @@ handle_payload:
 		rst_tstamp = ((u64)(ntohl(*(u32 *)data) & ((1 << 24) - 1)) << 32) |
 				ntohl(*(u32 *)(data + 4));
 
-		fastpass_process_reset(fp, rst_tstamp);
+		if (fp->ops->handle_reset)
+			fp->ops->handle_reset(sch, rst_tstamp);
 
 		data += 8;
 		break;
@@ -215,7 +154,8 @@ handle_payload:
 			alloc_dst[i] = ntohs(*(u16 *)data);
 
 		/* process the payload */
-		fastpass_process_alloc(fp, alloc_base_tslot, alloc_dst, alloc_n_dst,
+		if (fp->ops->handle_alloc)
+			fp->ops->handle_alloc(sch, alloc_base_tslot, alloc_dst, alloc_n_dst,
 				data, alloc_n_tslots);
 
 		data += alloc_n_tslots;
@@ -231,7 +171,7 @@ handle_payload:
 
 
 cleanup:
-	fpproto_unlock_qdisc(q);
+	fpproto_unlock_qdisc(sch);
 	sock_put(sk);
 	__kfree_skb(skb);
 	return NET_RX_SUCCESS;
@@ -257,6 +197,79 @@ packet_too_short:
 invalid_pkt:
 	fp->stat_invalid_rx_pkts++;
 	goto cleanup;
+}
+
+/**
+ * Connect a socket.
+ * Based on ip4_datagram_connect, with appropriate locking and additional
+ *    sanity checks
+ */
+int fpproto_connect(struct sock *sk, struct sockaddr *uaddr, int addr_len)
+{
+	struct fastpass_sock *fp = fastpass_sk(sk);
+	struct inet_sock *inet = inet_sk(sk);
+	struct sockaddr_in *usin = (struct sockaddr_in *) uaddr;
+	struct flowi4 *fl4;
+	struct rtable *rt;
+	__be32 saddr;
+	int oif;
+	int err;
+
+	if (addr_len < sizeof(*usin))
+		return -EINVAL;
+
+	if (usin->sin_family != AF_INET)
+		return -EAFNOSUPPORT;
+
+	if (fp->ops == NULL)
+		return -EINVAL;
+
+	sk_dst_reset(sk);
+
+	bh_lock_sock(sk);
+
+	oif = sk->sk_bound_dev_if;
+	saddr = inet->inet_saddr;
+	if (ipv4_is_multicast(usin->sin_addr.s_addr)) {
+		if (!oif)
+			oif = inet->mc_index;
+		if (!saddr)
+			saddr = inet->mc_addr;
+	}
+	fl4 = &inet->cork.fl.u.ip4;
+	rt = ip_route_connect(fl4, usin->sin_addr.s_addr, saddr,
+			      RT_CONN_FLAGS(sk), oif,
+			      sk->sk_protocol,
+			      inet->inet_sport, usin->sin_port, sk, true);
+	if (IS_ERR(rt)) {
+		err = PTR_ERR(rt);
+		if (err == -ENETUNREACH)
+			IP_INC_STATS_BH(sock_net(sk), IPSTATS_MIB_OUTNOROUTES);
+		goto out;
+	}
+
+	if ((rt->rt_flags & RTCF_BROADCAST) && !sock_flag(sk, SOCK_BROADCAST)) {
+		ip_rt_put(rt);
+		err = -EACCES;
+		goto out;
+	}
+	if (!inet->inet_saddr)
+		inet->inet_saddr = fl4->saddr;	/* Update source address */
+	if (!inet->inet_rcv_saddr) {
+		inet->inet_rcv_saddr = fl4->saddr;
+		if (sk->sk_prot->rehash)
+			sk->sk_prot->rehash(sk);
+	}
+	inet->inet_daddr = fl4->daddr;
+	inet->inet_dport = usin->sin_port;
+	sk->sk_state = TCP_ESTABLISHED;
+	inet->inet_id = jiffies;
+
+	sk_dst_set(sk, &rt->dst);
+	err = 0;
+out:
+	bh_unlock_sock(sk);
+	return err;
 }
 
 /* close the socket */
@@ -579,7 +592,7 @@ struct proto	fastpass_prot = {
 	.name = "FastPass",
 	.owner = THIS_MODULE,
 	.close		   = fpproto_close,
-	.connect	   = ip4_datagram_connect,
+	.connect	   = fpproto_connect,
 	.disconnect	   = fpproto_disconnect,
 	.init		   = fpproto_sk_init,
 	.destroy	   = fpproto_destroy_sock,

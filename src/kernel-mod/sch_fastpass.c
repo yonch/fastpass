@@ -534,6 +534,72 @@ begin:
 }
 
 /**
+ * Handles a RESET payload with given timestamp
+ */
+static void fastpass_handle_reset(struct Qdisc *sch, u64 tstamp)
+{
+	struct fp_sched_data *q = qdisc_priv(sch);
+	struct fastpass_sock *fp = fastpass_sk(q->ctrl_sock->sk);
+
+	fastpass_pr_debug("got RESET 0x%llX, last is 0x%llX\n", tstamp,
+			fp->last_reset_time);
+
+	if (tstamp == fp->last_reset_time) {
+		if (!fp->in_sync) {
+			fp->in_sync = 1;
+		} else {
+			fastpass_pr_debug("rx redundant reset\n");
+			fp->stat_redundant_reset++;
+		}
+		return;
+	}
+
+	/* reject resets outside the time window */
+	/* TODO */
+
+	/* need to process reset */
+	//if (rst_tstamp > fp->last_reset_time)
+}
+
+/**
+ * Handles an ALLOC payload
+ */
+static void fastpass_handle_alloc(struct Qdisc *sch,
+		u16 cur_tslot, u16 *dst, int n_dst, u8 *tslots, int n_tslots)
+{
+	int i;
+	u8 spec;
+	int dst_ind;
+
+	(void)sch; /* unused */
+
+	fastpass_pr_debug("got ALLOC for timeslot %d, %d destinations, %d timeslots",
+			cur_tslot, n_dst, n_tslots);
+
+	for (i = 0; i < n_tslots; i++) {
+		spec = tslots[i];
+		cur_tslot += spec & 0xF;
+		dst_ind = spec >> 4;
+
+		if (dst_ind == 0) {
+			fastpass_pr_debug("ALLOC skip to timeslot %d (no allocation)\n", cur_tslot);
+			continue;
+		}
+
+		if (dst_ind > n_dst) {
+			/* invalid destination */
+			fastpass_pr_debug("ALLOC tslot spec 0x%02X has illegal dst, max %d\n",
+					spec, n_dst);
+			return;
+		}
+
+		fastpass_pr_debug("Allocated timeslot %d to destination 0x%04x (%d)\n",
+				cur_tslot, dst[dst_ind - 1], dst[dst_ind - 1]);
+	}
+
+}
+
+/**
  * Send a request packet to the controller
  */
 static void fp_do_request(struct fp_sched_data *q, u64 now)
@@ -657,6 +723,11 @@ out:
 
 }
 
+struct fpproto_ops fastpass_sch_proto_ops = {
+	.handle_reset = &fastpass_handle_reset,
+	.handle_alloc = &fastpass_handle_alloc,
+};
+
 /* reconnects the control socket to the controller */
 static int fastpass_reconnect(struct Qdisc *sch)
 {
@@ -690,6 +761,9 @@ static int fastpass_reconnect(struct Qdisc *sch)
 
 	/* give socket a reference to this qdisc for watchdog */
 	fpproto_set_qdisc(q->ctrl_sock->sk, sch);
+
+	/* set protocol ops */
+	fastpass_sk(q->ctrl_sock->sk)->ops = &fastpass_sch_proto_ops;
 
 	/* connect */
 	sock_addr.sin_addr.s_addr = q->ctrl_addr_netorder;

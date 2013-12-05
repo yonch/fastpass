@@ -533,7 +533,7 @@ static void fp_do_request(struct fp_sched_data *q, u64 now)
 		payload_len += 4;
 	}
 	skb_push(skb, 2);
-	*(__be16 *)&skb->data[0] = htons((FASTPASS_PTYPE_REQUEST << 12) |
+	*(__be16 *)&skb->data[0] = htons((FASTPASS_PTYPE_AREQ << 12) |
 			((payload_len >> 2) & 0x3F));
 
 	fastpass_send_skb_via_tasklet(q->ctrl_sock->sk, skb);
@@ -647,7 +647,7 @@ static int fastpass_reconnect(struct Qdisc *sch)
 	q->ctrl_sock->sk->sk_allocation = GFP_ATOMIC;
 
 	/* give socket a reference to this qdisc for watchdog */
-	fastpass_sk(q->ctrl_sock->sk)->qdisc = sch;
+	fastpass_sock_set_qdisc(q->ctrl_sock->sk, sch);
 
 	/* connect */
 	sock_addr.sin_addr.s_addr = q->ctrl_addr_netorder;
@@ -874,12 +874,21 @@ static int fastpass_change(struct Qdisc *sch, struct nlattr *opt)
 static void fastpass_destroy(struct Qdisc *sch)
 {
 	struct fp_sched_data *q = qdisc_priv(sch);
+	spinlock_t *root_lock = qdisc_root_lock(sch);
+	struct sock *ctrl_sock;
+
+	sock_release(ctrl_sock);
+
+	/* Apparently no lock protection here. Lock to prevent races */
+	spin_lock_bh(root_lock);
 
 	fastpass_reset(sch);
-	if (q->ctrl_sock)
-		sock_release(q->ctrl_sock);
+	q->ctrl_sock = NULL;
 	kfree(q->flow_hash_tbl);
 	qdisc_watchdog_cancel(&q->watchdog);
+
+	spin_unlock_bh(root_lock);
+
 }
 
 static int fastpass_init(struct Qdisc *sch, struct nlattr *opt)

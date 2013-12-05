@@ -23,7 +23,8 @@
 
 #define FASTPASS_PTYPE_RSTREQ		0x0
 #define FASTPASS_PTYPE_RESET 		0x1
-#define FASTPASS_PTYPE_REQUEST		0x2
+#define FASTPASS_PTYPE_AREQ			0x2
+#define FASTPASS_PTYPE_ALLOC		0x3
 
 /*
  * 	Warning and debugging macros, (originally taken from DCCP)
@@ -89,6 +90,8 @@ struct fastpass_sock {
 	u64 stat_invalid_rx_pkts;
 	u64 stat_redundant_reset;
 };
+
+void fastpass_sock_set_qdisc(struct sock *sk, struct Qdisc *new_qdisc);
 
 void fastpass_send_skb_via_tasklet(struct sock *sk, struct sk_buff *skb);
 

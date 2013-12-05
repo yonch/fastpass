@@ -40,13 +40,114 @@ u16 fp_ip_to_id(__be32 ipaddr) {
 	return (u16)ntohl(ipaddr);
 }
 
+static struct Qdisc *fastpass_lock_sock(struct sock *sk)
+{
+	struct fastpass_sock *fp = fastpass_sk(sk);
+	struct Qdisc *q;
+	spinlock_t *root_lock;
+
+	rcu_read_lock_bh();
+
+	q = rcu_dereference_bh(fp->qdisc);
+
+	if (likely(q != NULL)) {
+		root_lock = qdisc_lock(qdisc_root(q));
+		spin_lock_bh(root_lock);
+	}
+
+	return q;
+}
+
+static void fastpass_unlock_sock(struct Qdisc *q)
+{
+	if (unlikely(q == NULL))
+		return;
+
+	spin_unlock_bh(qdisc_lock(qdisc_root(q)));
+	rcu_read_unlock_bh();
+}
+
+void fastpass_sock_set_qdisc(struct sock *sk, struct Qdisc *new_qdisc)
+{
+	struct fastpass_sock *fp = fastpass_sk(sk);
+	rcu_assign_pointer(fp->qdisc, new_qdisc);
+}
+
+/**
+ * Handles a RESET payload with given timestamp
+ */
+static void fastpass_process_reset(struct fastpass_sock *fp, u64 tstamp)
+{
+	fastpass_pr_debug("got RESET 0x%llX, last is 0x%llX\n", tstamp,
+			fp->last_reset_time);
+
+	if (tstamp == fp->last_reset_time) {
+		if (!fp->in_sync) {
+			fp->in_sync = 1;
+		} else {
+			fastpass_pr_debug("rx redundant reset\n");
+			fp->stat_redundant_reset++;
+		}
+		return;
+	}
+
+	/* reject resets outside the time window */
+	/* TODO */
+
+	/* need to process reset */
+	//if (rst_tstamp > fp->last_reset_time)
+}
+
+static void fastpass_process_alloc(struct fastpass_sock *fp, u16 cur_tslot,
+		u16 *dst, int n_dst, u8 *tslots, int n_tslots)
+{
+	int i;
+	u8 spec;
+	int dst_ind;
+
+	(void)fp; /* unused */
+
+	fastpass_pr_debug("got ALLOC for timeslot %d, %d destinations, %d timeslots",
+			cur_tslot, n_dst, n_tslots);
+
+	for (i = 0; i < n_tslots; i++) {
+		spec = tslots[i];
+		cur_tslot += spec & 0xF;
+		dst_ind = spec >> 4;
+
+		if (dst_ind == 0) {
+			fastpass_pr_debug("ALLOC skip to timeslot %d (no allocation)\n", cur_tslot);
+			continue;
+		}
+
+		if (dst_ind > n_dst) {
+			/* invalid destination */
+			fastpass_pr_debug("ALLOC tslot spec 0x%02X has illegal dst, max %d\n",
+					spec, n_dst);
+			return;
+		}
+
+		fastpass_pr_debug("Allocated timeslot %d to destination 0x%04x (%d)\n",
+				cur_tslot, dst[dst_ind - 1], dst[dst_ind - 1]);
+	}
+
+}
+
+
 int fastpass_rcv(struct sk_buff *skb)
 {
 	struct sock *sk;
 	struct fastpass_sock *fp;
 	struct fastpass_hdr *hdr;
+	struct Qdisc *q;
 	u16 payload_type;
 	u64 rst_tstamp;
+	int i;
+	unsigned char *data;
+	unsigned char *data_end;
+	int alloc_n_dst, alloc_n_tslots;
+	u16 alloc_dst[16];
+	u16 alloc_base_tslot;
 
 	pr_err("%s: visited\n", __func__);
 
@@ -61,51 +162,66 @@ int fastpass_rcv(struct sk_buff *skb)
 		return 0;
 	}
 
-	bh_lock_sock(sk);
+	q = fastpass_lock_sock(sk);
 
 	if (skb->len < 6)
 		goto packet_too_short;
 
 	hdr = (struct fastpass_hdr *)skb->data;
-	payload_type = skb->data[4] >> 4;
+	data = &skb->data[4];
+	data_end = &skb->data[skb->len];
+
+handle_payload:
+	payload_type = *data >> 4;
 
 	switch (payload_type) {
 	case FASTPASS_PTYPE_RESET:
-		if (skb->len < 12)
+		if (data + 8 > data_end)
 			goto incomplete_reset_payload;
 
-		rst_tstamp = ((u64)(ntohl(hdr->rstreq.hi) & ((1 << 24) - 1)) << 32) |
-				ntohl(hdr->rstreq.lo);
+		rst_tstamp = ((u64)(ntohl(*(u32 *)data) & ((1 << 24) - 1)) << 32) |
+				ntohl(*(u32 *)(data + 4));
 
-		fastpass_pr_debug("got RESET 0x%llX, last is 0x%llX\n", rst_tstamp,
-				fp->last_reset_time);
+		fastpass_process_reset(fp, rst_tstamp);
 
-		if (rst_tstamp == fp->last_reset_time) {
-			if (!fp->in_sync) {
-				fp->in_sync = 1;
-			} else {
-				fastpass_pr_debug("rx redundant reset\n");
-				fp->stat_redundant_reset++;
-			}
-			break;
-		}
-
-		/* reject resets outside the time window */
-		/* TODO */
-
-		/* need to process reset */
-		//if (rst_tstamp > fp->last_reset_time)
-
+		data += 8;
 		break;
 
+	case FASTPASS_PTYPE_ALLOC:
+		payload_type = ntohs(*(u16 *)data);
+		alloc_n_dst = (payload_type >> 8) & 0xF;
+		alloc_n_tslots = 2 * (payload_type & 0x3F);
+		data += 2;
+
+		if (data + 2 + 2 * alloc_n_dst + alloc_n_tslots > data_end)
+			goto incomplete_alloc_payload;
+
+		/* get base timeslot */
+		alloc_base_tslot = ntohs(*(u16 *)data);
+		data += 2;
+
+		/* convert destinations from network byte-order */
+		for (i = 0; i < alloc_n_dst; i++, data += 2)
+			alloc_dst[i] = ntohs(*(u16 *)data);
+
+		/* process the payload */
+		fastpass_process_alloc(fp, alloc_base_tslot, alloc_dst, alloc_n_dst,
+				data, alloc_n_tslots);
+
+		data += alloc_n_tslots;
+		break;
 	default:
 		goto unknown_payload_type;
 	}
 
+	/* more payloads in packet? */
+	if (data < data_end)
+		goto handle_payload;
+
 
 
 cleanup:
-	bh_unlock_sock(sk);
+	fastpass_unlock_sock(q);
 	sock_put(sk);
 	__kfree_skb(skb);
 	return NET_RX_SUCCESS;
@@ -115,8 +231,13 @@ unknown_payload_type:
 	goto invalid_pkt;
 
 incomplete_reset_payload:
-	fastpass_pr_debug("packet has reset payload, but is too short (len=%d)\n",
-			skb->len);
+	fastpass_pr_debug("RESET payload incomplete, expected 8 bytes, got %d\n",
+			(int)(data_end - data));
+	goto invalid_pkt;
+
+incomplete_alloc_payload:
+	fastpass_pr_debug("ALLOC payload incomplete: expected %d bytes, got %d\n",
+			2 + 2 * alloc_n_dst + alloc_n_tslots, (int)(data_end - data));
 	goto invalid_pkt;
 
 packet_too_short:
@@ -157,16 +278,17 @@ static int fastpass_proto_disconnect(struct sock *sk, int flags)
 
 	return 0;
 }
+
 static void fastpass_destroy_sock(struct sock *sk)
 {
 	struct fastpass_sock *fp = fastpass_sk(sk);
 
 	pr_err("%s: visited\n", __func__);
 
-	bh_lock_sock(sk);
 	hrtimer_cancel(&fp->timer);
-	fp->qdisc = NULL;
-	bh_unlock_sock(sk);
+
+	/* might not be necessary, doing for safety */
+	fastpass_sock_set_qdisc(sk, NULL);
 }
 
 static int fastpass_build_header(struct sock *sk, struct sk_buff *skb)

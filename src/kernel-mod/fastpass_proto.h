@@ -91,9 +91,9 @@ struct fastpass_sock {
 	u64 stat_redundant_reset;
 };
 
-void fastpass_sock_set_qdisc(struct sock *sk, struct Qdisc *new_qdisc);
+void fpproto_set_qdisc(struct sock *sk, struct Qdisc *new_qdisc);
 
-void fastpass_send_skb_via_tasklet(struct sock *sk, struct sk_buff *skb);
+void fpproto_send_skb_via_tasklet(struct sock *sk, struct sk_buff *skb);
 
 u16 fp_ip_to_id(__be32 ipaddr);
 

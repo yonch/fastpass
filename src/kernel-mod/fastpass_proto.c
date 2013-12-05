@@ -42,7 +42,7 @@ u16 fp_ip_to_id(__be32 ipaddr) {
 }
 
 /* locks the qdisc associated with the fastpass socket */
-static struct Qdisc *fastpass_lock_sock(struct sock *sk)
+static struct Qdisc *fpproto_lock_qdisc(struct sock *sk)
 {
 	struct fastpass_sock *fp = fastpass_sk(sk);
 	struct Qdisc *q;
@@ -61,7 +61,7 @@ static struct Qdisc *fastpass_lock_sock(struct sock *sk)
 }
 
 /* unlocks the qdisc associated with the fastpass socket */
-static void fastpass_unlock_sock(struct Qdisc *q)
+static void fpproto_unlock_qdisc(struct Qdisc *q)
 {
 	if (unlikely(q == NULL))
 		return;
@@ -71,7 +71,7 @@ static void fastpass_unlock_sock(struct Qdisc *q)
 }
 
 /* configures which qdisc is associated with the fastpass socket */
-void fastpass_sock_set_qdisc(struct sock *sk, struct Qdisc *new_qdisc)
+void fpproto_set_qdisc(struct sock *sk, struct Qdisc *new_qdisc)
 {
 	struct fastpass_sock *fp = fastpass_sk(sk);
 	rcu_assign_pointer(fp->qdisc, new_qdisc);
@@ -144,7 +144,7 @@ static void fastpass_process_alloc(struct fastpass_sock *fp, u16 cur_tslot,
 /**
  * Receives a packet destined for the protocol. (part of inet socket API)
  */
-int fastpass_rcv(struct sk_buff *skb)
+int fpproto_rcv(struct sk_buff *skb)
 {
 	struct sock *sk;
 	struct fastpass_sock *fp;
@@ -172,7 +172,7 @@ int fastpass_rcv(struct sk_buff *skb)
 		return 0;
 	}
 
-	q = fastpass_lock_sock(sk);
+	q = fpproto_lock_qdisc(sk);
 
 	if (skb->len < 6)
 		goto packet_too_short;
@@ -231,7 +231,7 @@ handle_payload:
 
 
 cleanup:
-	fastpass_unlock_sock(q);
+	fpproto_unlock_qdisc(q);
 	sock_put(sk);
 	__kfree_skb(skb);
 	return NET_RX_SUCCESS;
@@ -260,7 +260,7 @@ invalid_pkt:
 }
 
 /* close the socket */
-static void fastpass_proto_close(struct sock *sk, long timeout)
+static void fpproto_close(struct sock *sk, long timeout)
 {
 	pr_err("%s: visited\n", __func__);
 
@@ -268,7 +268,7 @@ static void fastpass_proto_close(struct sock *sk, long timeout)
 }
 
 /* disconnect (happens if called connect with AF_UNSPEC family) */
-static int fastpass_proto_disconnect(struct sock *sk, int flags)
+static int fpproto_disconnect(struct sock *sk, int flags)
 {
 	struct inet_sock *inet = inet_sk(sk);
 
@@ -291,7 +291,7 @@ static int fastpass_proto_disconnect(struct sock *sk, int flags)
 	return 0;
 }
 
-static void fastpass_destroy_sock(struct sock *sk)
+static void fpproto_destroy_sock(struct sock *sk)
 {
 	struct fastpass_sock *fp = fastpass_sk(sk);
 
@@ -300,10 +300,10 @@ static void fastpass_destroy_sock(struct sock *sk)
 	hrtimer_cancel(&fp->timer);
 
 	/* might not be necessary, doing for safety */
-	fastpass_sock_set_qdisc(sk, NULL);
+	fpproto_set_qdisc(sk, NULL);
 }
 
-static int fastpass_build_header(struct sock *sk, struct sk_buff *skb)
+static int fpproto_build_header(struct sock *sk, struct sk_buff *skb)
 {
 	struct fastpass_sock *fp = fastpass_sk(sk);
 	struct fastpass_hdr *fh;
@@ -353,7 +353,7 @@ static int fastpass_build_header(struct sock *sk, struct sk_buff *skb)
 	return 0;
 }
 
-void fastpass_v4_send_check(struct sock *sk, struct sk_buff *skb)
+void fpproto_egress_checksum(struct sock *sk, struct sk_buff *skb)
 {
 	const struct inet_sock *inet = inet_sk(sk);
 	struct fastpass_hdr *fh = fastpass_hdr(skb);
@@ -363,7 +363,7 @@ void fastpass_v4_send_check(struct sock *sk, struct sk_buff *skb)
 			skb->len, IPPROTO_DCCP, skb->csum);
 }
 
-static void fastpass_tasklet_func(unsigned long int param)
+static void fpproto_tasklet_write_queue(unsigned long int param)
 {
 	struct sock *sk = (struct sock *)param;
 	struct fastpass_sock *fp = fastpass_sk(sk);
@@ -379,7 +379,7 @@ static void fastpass_tasklet_func(unsigned long int param)
 
 	while ((skb = __skb_dequeue_tail(&sk->sk_write_queue)) != NULL) {
 		/* write the fastpass header */
-		rc = fastpass_build_header(sk, skb);
+		rc = fpproto_build_header(sk, skb);
 		if (unlikely(rc != 0)) {
 			kfree_skb(skb);
 			fp->stat_build_header_errors++;
@@ -389,7 +389,7 @@ static void fastpass_tasklet_func(unsigned long int param)
 		}
 
 		/* checksum */
-		fastpass_v4_send_check(sk, skb);
+		fpproto_egress_checksum(sk, skb);
 
 		/* send onwards */
 		rc = ip_queue_xmit(skb, &inet->cork.fl);
@@ -426,7 +426,7 @@ static void do_proto_reset(struct fastpass_sock *fp, u64 reset_time)
 	fp->in_sync = 0;
 }
 
-static int fastpass_sk_init(struct sock *sk)
+static int fpproto_sk_init(struct sock *sk)
 {
 	struct fastpass_sock *fp = fastpass_sk(sk);
 
@@ -439,7 +439,7 @@ static int fastpass_sk_init(struct sock *sk)
 	fp->mss_cache = 536;
 
 	/* initialize tasklet */
-	tasklet_init(&fp->tasklet, &fastpass_tasklet_func,
+	tasklet_init(&fp->tasklet, &fpproto_tasklet_write_queue,
 			(unsigned long int)fp);
 
 	/* initialize hrtimer */
@@ -453,7 +453,7 @@ static int fastpass_sk_init(struct sock *sk)
 	return 0;
 }
 
-static int fastpass_sendmsg(struct kiocb *iocb, struct sock *sk,
+static int fpproto_userspace_sendmsg(struct kiocb *iocb, struct sock *sk,
 		struct msghdr *msg, size_t len)
 {
 	const struct fastpass_sock *fp = fastpass_sk(sk);
@@ -491,12 +491,12 @@ static int fastpass_sendmsg(struct kiocb *iocb, struct sock *sk,
 		goto out_discard;
 
 	/* write the fastpass header */
-	rc = fastpass_build_header(sk, skb);
+	rc = fpproto_build_header(sk, skb);
 	if (rc != 0)
 		goto out_discard;
 
 	/* checksum */
-	fastpass_v4_send_check(sk, skb);
+	fpproto_egress_checksum(sk, skb);
 
 	/* send onwards */
 	rc = ip_queue_xmit(skb, &inet->cork.fl);
@@ -510,7 +510,7 @@ out_discard:
 	goto out_release;
 }
 
-void fastpass_send_skb_via_tasklet(struct sock *sk, struct sk_buff *skb)
+void fpproto_send_skb_via_tasklet(struct sock *sk, struct sk_buff *skb)
 {
 	struct fastpass_sock *fp = fastpass_sk(sk);
 
@@ -525,31 +525,31 @@ void fastpass_send_skb_via_tasklet(struct sock *sk, struct sk_buff *skb)
 	tasklet_schedule(&fp->tasklet);
 }
 
-
-static int fastpass_recvmsg(struct kiocb *iocb, struct sock *sk,
+/* implementation of userspace recv() - unsupported */
+static int fpproto_userspace_recvmsg(struct kiocb *iocb, struct sock *sk,
 		struct msghdr *msg, size_t len, int noblock, int flags, int *addr_len)
 {
-	pr_err("%s: visited\n", __func__);
-	return 0;
+	return -ENOTSUPP;
 }
 
-static int fastpass_rcv_skb(struct sock *sk, struct sk_buff *skb)
+/* backlog_rcv - should never be called */
+static int fpproto_backlog_rcv(struct sock *sk, struct sk_buff *skb)
 {
 	BUG();
 	return 0;
 }
 
-static inline void fastpass_hash(struct sock *sk)
+static inline void fpproto_hash(struct sock *sk)
 {
 	pr_err("%s: visited\n", __func__);
 	inet_hash(sk);
 }
-static void fastpass_unhash(struct sock *sk)
+static void fpproto_unhash(struct sock *sk)
 {
 	pr_err("%s: visited\n", __func__);
 	inet_unhash(sk);
 }
-static void fastpass_rehash(struct sock *sk)
+static void fpproto_rehash(struct sock *sk)
 {
 	pr_err("%s: before %X\n", __func__, sk->sk_hash);
 	sk->sk_prot->unhash(sk);
@@ -561,7 +561,7 @@ static void fastpass_rehash(struct sock *sk)
 
 	pr_err("%s: after %X\n", __func__, sk->sk_hash);
 }
-static int fastpass_bind(struct sock *sk, struct sockaddr *uaddr,
+static int fpproto_bind(struct sock *sk, struct sockaddr *uaddr,
 		int addr_len)
 {
 	return -ENOTSUPP;
@@ -569,7 +569,7 @@ static int fastpass_bind(struct sock *sk, struct sockaddr *uaddr,
 
 /* The interface for receiving packets from IP */
 struct net_protocol fastpass_protocol = {
-	.handler = fastpass_rcv,
+	.handler = fpproto_rcv,
 	.no_policy = 1,
 	.netns_ok = 1,
 };
@@ -578,20 +578,20 @@ struct net_protocol fastpass_protocol = {
 struct proto	fastpass_prot = {
 	.name = "FastPass",
 	.owner = THIS_MODULE,
-	.close		   = fastpass_proto_close,
+	.close		   = fpproto_close,
 	.connect	   = ip4_datagram_connect,
-	.disconnect	   = fastpass_proto_disconnect,
-	.init		   = fastpass_sk_init,
-	.destroy	   = fastpass_destroy_sock,
+	.disconnect	   = fpproto_disconnect,
+	.init		   = fpproto_sk_init,
+	.destroy	   = fpproto_destroy_sock,
 	.setsockopt	   = ip_setsockopt,
 	.getsockopt	   = ip_getsockopt,
-	.sendmsg	   = fastpass_sendmsg,
-	.recvmsg	   = fastpass_recvmsg,
-	.bind		   = fastpass_bind,
-	.backlog_rcv   = fastpass_rcv_skb,
-	.hash		   = fastpass_hash,
-	.unhash		   = fastpass_unhash,
-	.rehash		   = fastpass_rehash,
+	.sendmsg	   = fpproto_userspace_sendmsg,
+	.recvmsg	   = fpproto_userspace_recvmsg,
+	.bind		   = fpproto_bind,
+	.backlog_rcv   = fpproto_backlog_rcv,
+	.hash		   = fpproto_hash,
+	.unhash		   = fpproto_unhash,
+	.rehash		   = fpproto_rehash,
 	.max_header	   = MAX_TOTAL_FASTPASS_HEADERS,
 	.obj_size	   = sizeof(struct fastpass_sock),
 	.slab_flags	   = SLAB_DESTROY_BY_RCU,
@@ -650,7 +650,7 @@ static int init_hashinfo(void)
 }
 
 
-void __init fastpass_proto_register(void)
+void __init fpproto_register(void)
 {
 	if (init_hashinfo())
 		goto out_mem_err;

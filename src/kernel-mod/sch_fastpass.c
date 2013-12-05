@@ -577,7 +577,7 @@ static void fp_do_request(struct fp_sched_data *q, u64 now)
 	*(__be16 *)&skb->data[0] = htons((FASTPASS_PTYPE_AREQ << 12) |
 			((payload_len >> 2) & 0x3F));
 
-	fastpass_send_skb_via_tasklet(q->ctrl_sock->sk, skb);
+	fpproto_send_skb_via_tasklet(q->ctrl_sock->sk, skb);
 
 	while (q->unreq_flows.first && (~q->horizon.mask & ~0xffULL)) {
 		f = q->unreq_flows.first;
@@ -689,7 +689,7 @@ static int fastpass_reconnect(struct Qdisc *sch)
 	q->ctrl_sock->sk->sk_allocation = GFP_ATOMIC;
 
 	/* give socket a reference to this qdisc for watchdog */
-	fastpass_sock_set_qdisc(q->ctrl_sock->sk, sch);
+	fpproto_set_qdisc(q->ctrl_sock->sk, sch);
 
 	/* connect */
 	sock_addr.sin_addr.s_addr = q->ctrl_addr_netorder;
@@ -1069,7 +1069,7 @@ static struct Qdisc_ops fastpass_qdisc_ops __read_mostly = {
 	.owner		=	THIS_MODULE,
 };
 
-extern void __init fastpass_proto_register(void);
+extern void __init fpproto_register(void);
 
 static int __init fastpass_module_init(void)
 {
@@ -1085,7 +1085,7 @@ static int __init fastpass_module_init(void)
 	if (ret)
 		kmem_cache_destroy(fp_flow_cachep);
 
-	fastpass_proto_register();
+	fpproto_register();
 
 	return ret;
 }

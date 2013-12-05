@@ -139,6 +139,11 @@ static struct fp_flow do_not_schedule;
 
 static struct kmem_cache *fp_flow_cachep __read_mostly;
 
+static inline u32 fp_src_dst_hash(u64 src_dst_key) {
+	return jhash_2words((__be32)(src_dst_key >> 32),
+						 (__be32)src_dst_key, 0);
+}
+
 /* advances the horizon 'num_tslots' into the future */
 static void horizon_advance(struct fp_timeslot_horizon *h, u32 num_tslots) {
 	if (unlikely(num_tslots >= 64))
@@ -198,8 +203,7 @@ static bool fp_gc_candidate(const struct fp_sched_data *q,
 
 static void fp_gc(struct fp_sched_data *q,
 		  struct rb_root *root,
-		  u64 src_dst_key,
-		  struct sock *sk)
+		  u64 src_dst_key)
 {
 	struct fp_flow *f, *tofree[FP_GC_MAX];
 	struct rb_node **p, *parent;
@@ -241,16 +245,71 @@ static const u8 prio2band[TC_PRIO_MAX + 1] = {
 	1, 2, 2, 2, 1, 2, 0, 0 , 1, 1, 1, 1, 1, 1, 1, 1
 };
 
-static struct fp_flow *fp_classify(struct sk_buff *skb, struct fp_sched_data *q)
+/**
+ * Lookups the specific key in the flow hash table.
+ *   When the flow is not present:
+ *     If create_if_missing is true, creates a new flow and returns it.
+ *     Otherwise, returns NULL.
+ */
+static struct fp_flow *fp_lookup(struct fp_sched_data *q, u64 src_dst_key,
+		bool create_if_missing)
 {
 	struct rb_node **p, *parent;
-	struct sock *sk = skb->sk;
 	struct rb_root *root;
 	struct fp_flow *f;
+	u32 skb_hash;
+
+	/* get the key's hash */
+	skb_hash = fp_src_dst_hash(src_dst_key);
+
+	root = &q->flow_hash_tbl[skb_hash >> (32 - q->hash_tbl_log)];
+
+	if (q->flows >= (2U << q->hash_tbl_log) &&
+	    q->inactive_flows > q->flows/2)
+		fp_gc(q, root, src_dst_key);
+
+	p = &root->rb_node;
+	parent = NULL;
+	while (*p) {
+		parent = *p;
+
+		f = container_of(parent, struct fp_flow, fp_node);
+		if (f->src_dst_key == src_dst_key)
+			return f;
+
+		if (f->src_dst_key > src_dst_key)
+			p = &parent->rb_right;
+		else
+			p = &parent->rb_left;
+	}
+
+	/* did not find existing entry */
+	if (!create_if_missing)
+		return NULL;
+
+	 /* allocate a new one */
+	f = kmem_cache_zalloc(fp_flow_cachep, GFP_ATOMIC | __GFP_NOWARN);
+	if (unlikely(!f)) {
+		q->stat_allocation_errors++;
+		return &q->internal;
+	}
+	f->src_dst_key = src_dst_key;
+
+	rb_link_node(&f->fp_node, parent, p);
+	rb_insert_color(&f->fp_node, root);
+
+	q->flows++;
+	q->inactive_flows++;
+	return f;
+}
+
+
+static struct fp_flow *fp_classify(struct sk_buff *skb, struct fp_sched_data *q)
+{
+	struct sock *sk = skb->sk;
 	int band;
 	struct flow_keys keys;
 	u64 src_dst_key;
-	u32 skb_hash;
 
 	/* warning: no starvation prevention... */
 	band = prio2band[skb->priority & TC_PRIO_MAX];
@@ -271,45 +330,10 @@ static struct fp_flow *fp_classify(struct sk_buff *skb, struct fp_sched_data *q)
 			goto cannot_classify;
 	}
 
-	/* get the skb's key (src_dst_key) and the key's hash (skb_hash) */
+	/* get the skb's key (src_dst_key) */
 	src_dst_key = ((u64)keys.src) << 32 | keys.dst;
-	skb_hash = jhash_2words(keys.src, keys.dst, 0);
 
-	root = &q->flow_hash_tbl[skb_hash >> (32 - q->hash_tbl_log)];
-
-	if (q->flows >= (2U << q->hash_tbl_log) &&
-	    q->inactive_flows > q->flows/2)
-		fp_gc(q, root, src_dst_key, sk);
-
-	p = &root->rb_node;
-	parent = NULL;
-	while (*p) {
-		parent = *p;
-
-		f = container_of(parent, struct fp_flow, fp_node);
-		if (f->src_dst_key == src_dst_key)
-			return f;
-
-		if (f->src_dst_key > src_dst_key)
-			p = &parent->rb_right;
-		else
-			p = &parent->rb_left;
-	}
-
-	/* did not find existing entry, allocate a new one */
-	f = kmem_cache_zalloc(fp_flow_cachep, GFP_ATOMIC | __GFP_NOWARN);
-	if (unlikely(!f)) {
-		q->stat_allocation_errors++;
-		return &q->internal;
-	}
-	f->src_dst_key = src_dst_key;
-
-	rb_link_node(&f->fp_node, parent, p);
-	rb_insert_color(&f->fp_node, root);
-
-	q->flows++;
-	q->inactive_flows++;
-	return f;
+	return fp_lookup(q, src_dst_key, true);
 
 cannot_classify:
 	// ARP packets should not count as classify errors
@@ -724,8 +748,7 @@ static void fp_rehash(struct fp_sched_data *q,
 				kmem_cache_free(fp_flow_cachep, of);
 				continue;
 			}
-			skb_hash = jhash_2words((__be32)(of->src_dst_key >> 32),
-					(__be32)of->src_dst_key, 0);
+			skb_hash = fp_src_dst_hash(of->src_dst_key);
 			nroot = &new_array[skb_hash >> (32 - new_log)];
 
 			np = &nroot->rb_node;

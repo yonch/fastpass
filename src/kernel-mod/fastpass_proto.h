@@ -91,6 +91,8 @@ struct fastpass_sock {
 	u64 stat_redundant_reset;
 };
 
+extern void __init fpproto_register(void);
+
 void fpproto_set_qdisc(struct sock *sk, struct Qdisc *new_qdisc);
 
 void fpproto_send_skb_via_tasklet(struct sock *sk, struct sk_buff *skb);

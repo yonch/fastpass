@@ -925,9 +925,8 @@ static void fastpass_destroy(struct Qdisc *sch)
 {
 	struct fp_sched_data *q = qdisc_priv(sch);
 	spinlock_t *root_lock = qdisc_root_lock(sch);
-	struct sock *ctrl_sock;
 
-	sock_release(ctrl_sock);
+	sock_release(q->ctrl_sock);
 
 	/* Apparently no lock protection here. Lock to prevent races */
 	spin_lock_bh(root_lock);
@@ -1068,8 +1067,6 @@ static struct Qdisc_ops fastpass_qdisc_ops __read_mostly = {
 	.dump_stats	=	fastpass_dump_stats,
 	.owner		=	THIS_MODULE,
 };
-
-extern void __init fpproto_register(void);
 
 static int __init fastpass_module_init(void)
 {

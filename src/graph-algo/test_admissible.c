@@ -16,6 +16,7 @@ int main(void) {
     uint16_t experiments = 10;
     uint32_t duration = 100000;
     uint32_t num_nodes = 256;
+    double fraction = 0.95;
 
     // Data structures
     struct backlog_queue new_requests;
@@ -39,8 +40,8 @@ int main(void) {
             uint16_t dst = rand() / ((double) RAND_MAX) * (num_nodes - 1);
             if (dst >= src)
                 dst++;
-            request_timeslots(&new_requests, &status, src, dst, num_nodes);
-
+            request_timeslots(&new_requests, &status, src, dst, fraction * num_nodes);
+ 
             // Get admissible traffic
             struct backlog_queue *queue_in = &queue_0;
             struct backlog_queue *queue_out = &queue_1;
@@ -53,6 +54,8 @@ int main(void) {
             get_admissible_traffic(queue_in, queue_out, &new_requests,
                                    &admitted, &status);
             num_admitted += admitted.size;
+            
+            assert(!out_of_order(queue_out, false));
         }
         printf("network utilization: %f\n", ((double) num_admitted) / (duration * num_nodes));
     }

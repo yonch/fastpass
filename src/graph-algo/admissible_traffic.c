@@ -9,6 +9,7 @@
 
 #include <assert.h>
 #include <inttypes.h>
+#include <stdio.h>
 #include <stdlib.h>
 
 // Request num_slots additional timeslots from src to dst
@@ -18,8 +19,15 @@ void request_timeslots(struct backlog_queue *new_requests, struct flow_status *s
     assert(status != NULL);
 
     // Just add this request at the end of the backlog queue - sort later
-    uint16_t last_send_time = get_last_timeslot(status, src, dst);
-    enqueue_backlog(new_requests, src, dst, num_slots, last_send_time);
+    uint64_t last_send_time = get_last_timeslot(status, src, dst);
+    uint16_t last_send_time_abbrv = (uint16_t) last_send_time;
+    if (last_send_time < status->oldest_timeslot)
+        last_send_time_abbrv = (uint16_t) status->oldest_timeslot - 1;
+    enqueue_backlog(new_requests, src, dst, num_slots, last_send_time_abbrv);
+    //   printf("new request:\t%d\t%d\t%d\n", src, dst, last_send_time_abbrv);
+
+    // Note: this does not preserve fair ordering between flows that arrive in the
+    // same timeslot and are older than all currently backlogged flows
 }
 
 // Populate traffic_out with the admissible traffic for one timeslot from queue_in
@@ -36,11 +44,19 @@ void get_admissible_traffic(struct backlog_queue *queue_in,
     assert(traffic_out != NULL);
     assert(status != NULL);
 
+    uint16_t min_time = (uint16_t) status->oldest_timeslot - 1;
+
     // Sort new requests
-    sort_backlog(new_requests);
+    // TODO: consider what happens if request_timeslots is called while
+    // get_admissible_traffic is running. How do you update the last_send_time
+    // correctly?
+    sort_backlog(new_requests, min_time);
 
     struct admitted_bitmap admitted;
     init_admitted_bitmap(&admitted);
+
+    struct backlog_queue admitted_backlog;
+    init_backlog_queue(&admitted_backlog);
 
     while (!is_empty_backlog(queue_in) || !is_empty_backlog(new_requests)) {
         struct backlog_edge *edge = peek_head_backlog(queue_in);
@@ -48,15 +64,15 @@ void get_admissible_traffic(struct backlog_queue *queue_in,
 
         // Check both backlogs and dequeue from the older one, or both
         // if they refer to the same src/dst pair
-        // TODO: what if we receive multiple requests for the same src/dst pair?
         struct backlog_edge *chosen_edge;
         if (is_empty_backlog(queue_in) ||
-            (!is_empty_backlog(new_requests) && compare_backlog_edges(new_edge, edge) < 0)) {
+            (!is_empty_backlog(new_requests) &&
+             compare_backlog_edges(new_edge, edge, min_time) < 0)) {
             chosen_edge = new_edge;
             dequeue_backlog(new_requests);
         }
         else if (is_empty_backlog(new_requests) ||
-                 compare_backlog_edges(new_edge, edge) > 0) {
+                 compare_backlog_edges(new_edge, edge, min_time) > 0) {
             chosen_edge = edge;
             dequeue_backlog(queue_in);
         }
@@ -65,6 +81,13 @@ void get_admissible_traffic(struct backlog_queue *queue_in,
             edge->backlog += new_edge->backlog;
             dequeue_backlog(new_requests);
             dequeue_backlog(queue_in);
+        }
+
+        // Combine any other new requests for the same src/dst pair
+        while (!is_empty_backlog(new_requests) &&
+               compare_backlog_edges(chosen_edge, peek_head_backlog(new_requests), min_time) == 0) {
+            chosen_edge->backlog += peek_head_backlog(new_requests)->backlog;
+            dequeue_backlog(new_requests);
         }
  
         if (src_is_admitted(&admitted, chosen_edge->src) ||
@@ -75,8 +98,10 @@ void get_admissible_traffic(struct backlog_queue *queue_in,
         }
         else {
             // We can allocate this edge now
-            insert_admitted_edge(traffic_out, chosen_edge->src,
-                                 chosen_edge->dst, chosen_edge->backlog - 1);
+            insert_admitted_edge(traffic_out, chosen_edge->src, chosen_edge->dst);
+            if (chosen_edge->backlog > 1)
+                enqueue_backlog(&admitted_backlog, chosen_edge->src, chosen_edge->dst,
+                                chosen_edge->backlog - 1, (uint16_t) status->current_timeslot);
             set_last_timeslot(status, chosen_edge->src, chosen_edge->dst,
                               status->current_timeslot);
             set_src_admitted(&admitted, chosen_edge->src);
@@ -85,15 +110,29 @@ void get_admissible_traffic(struct backlog_queue *queue_in,
     }
 
     // Add backlogs for admitted traffic to end of queue
-    struct admitted_edge *edge = &traffic_out->edges[0];
-    struct admitted_edge *end = &traffic_out->edges[traffic_out->size];
+    // Sort first to preserve ordering of queue
+    sort_backlog(&admitted_backlog, (uint16_t) status->current_timeslot);
+    struct backlog_edge *edge = &admitted_backlog.edges[admitted_backlog.head];
+    struct backlog_edge *end = &admitted_backlog.edges[admitted_backlog.tail];
     while (edge < end) {
-        if (edge->remaining_backlog > 0)
-            enqueue_backlog(queue_out, edge->src, edge->dst,
-                            edge->remaining_backlog, status->current_timeslot);
+        enqueue_backlog(queue_out, edge->src, edge->dst,
+                        edge->backlog, edge->timeslot);
         edge++;
     }
     
+    // Update current timeslot and oldest timeslot
     status->current_timeslot++;
+    if (is_empty_backlog(queue_out))
+        status->oldest_timeslot = status->current_timeslot;
+    else {
+        uint16_t oldest_queued_time = peek_head_backlog(queue_out)->timeslot;
+        uint64_t mask = ~(0xffffULL);
+        if (oldest_queued_time <= (uint16_t) status->current_timeslot)
+            status->oldest_timeslot = status->current_timeslot & mask + oldest_queued_time;
+        else {
+            // current timeslot has wrapped around relative to the oldest queued time
+            status->oldest_timeslot = ((status->current_timeslot - 0x10000ULL) & mask) + oldest_queued_time;
+        }
+    }
 }
 

@@ -386,6 +386,15 @@ void destroy_admitted_traffic(struct admitted_traffic *admitted) {
 }
 
 static inline
+struct admitted_edge *get_admitted_edge(struct admitted_traffic *admitted,
+                                        uint16_t index) {
+    assert(admitted != NULL);
+    assert(index <= admitted->size);
+
+    return &admitted->edges[index];
+}
+
+static inline
 struct backlog_queue *create_backlog_queue() {
     struct backlog_queue *queue = malloc(sizeof(struct backlog_queue));
     init_backlog_queue(queue);

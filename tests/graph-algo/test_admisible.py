@@ -192,6 +192,78 @@ class Test(unittest.TestCase):
             print "max avg time per timeslot: \t(%f)" % max(times)
             print "avg time per timeslot: \t\t(%f)" % avg
 
+    def test_many_requests(self):
+        """Tests the admissible algorithm over a long time."""
+        
+        n_nodes = 32
+        max_r_per_t = 10  # max requests per timeslot
+        duration = 100000
+        max_size = 10
+
+        # Track pending requests - mapping from src/dst to num requested
+        pending_requests = {}
+
+        # initialize structures
+        queue_0 = structures.create_backlog_queue()
+        queue_1 = structures.create_backlog_queue()
+        new_requests = structures.create_backlog_queue()
+        admitted = structures.create_admitted_traffic()
+        status = structures.create_flow_status()
+
+        num_admitted = 0
+        num_requested = 0
+        for t in range(duration):
+            structures.init_backlog_queue(new_requests)
+            # Make some new requests
+            requests_per_timeslot = random.randint(0, max_r_per_t)
+            for r in range(requests_per_timeslot):
+                src = random.randint(0, n_nodes-1)
+                dst = random.randint(0, n_nodes-2)
+                if (dst >= src):
+                    dst += 1 # don't send to self
+                size = random.randint(1, max_size)
+                if (src, dst) in pending_requests.keys():
+                    pending_requests[(src, dst)] = pending_requests[(src, dst)] + size
+                else:
+                    pending_requests[(src, dst)] = size
+                admissible.request_timeslots(new_requests, status,
+                                             src, dst, size)
+                num_requested += size
+            
+            # Get admissible traffic for this timeslot
+            if t % 2 == 0:
+                queue_in = queue_0
+                queue_out = queue_1
+            else:
+                queue_in = queue_1
+                queue_out = queue_0
+
+            structures.init_admitted_traffic(admitted)
+            structures.init_backlog_queue(queue_out)
+            admissible.get_admissible_traffic(queue_in, queue_out, new_requests,
+                                              admitted, status)
+            num_admitted += admitted.size
+
+            # Check all admitted edges - make sure they were requested and have not yet been fulfilled
+            self.assertTrue(admitted.size <= n_nodes)
+            for e in range(admitted.size):
+                edge = structures.get_admitted_edge(admitted, e)
+                pending_count = pending_requests[(edge.src, edge.dst)]
+                self.assertTrue(pending_count >= 1)
+                if pending_count > 1:
+                    pending_requests[(edge.src, edge.dst)] = pending_count - 1
+                else:
+                    del pending_requests[(edge.src, edge.dst)]
+                
+        print 'requested %d, admitted %d, capacity %d' % (num_requested, num_admitted, duration * n_nodes)
+
+        structures.destroy_backlog_queue(queue_0)
+        structures.destroy_backlog_queue(queue_1)
+        structures.destroy_backlog_queue(new_requests)
+        structures.destroy_admitted_traffic(admitted)
+        structures.destroy_flow_status(status)
+
+
     def test_backlog_sorting_1_item(self):
         """Tests sorting of backlogs with 1 item."""
 

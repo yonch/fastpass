@@ -69,8 +69,6 @@ struct fpproto_ops {
 /**
  * @inet: the IPv4 socket information
  * @mss_cache: maximum segment size cache
- * @tasklet: tasklet that writes the skb queue to the IP stack
- * @timer: timer for full timeslots
  * @qdisc: the qdisc that owns the socket
  * @last_reset_time: the time used in the last sent reset
  *
@@ -85,8 +83,6 @@ struct fastpass_sock {
 	/* inet_sock has to be the first member */
 	struct inet_sock 		inet;
 	__u32 					mss_cache;
-	struct tasklet_struct 	tasklet;
-	struct hrtimer 			timer;
 	struct Qdisc			*qdisc;
 	u64						last_reset_time;
 	u64						next_seqno;
@@ -105,7 +101,7 @@ extern void __init fpproto_register(void);
 
 void fpproto_set_qdisc(struct sock *sk, struct Qdisc *new_qdisc);
 
-void fpproto_send_skb_via_tasklet(struct sock *sk, struct sk_buff *skb);
+void fpproto_send_skb(struct sock *sk, struct sk_buff *skb);
 
 static inline struct fastpass_sock *fastpass_sk(const struct sock *sk)
 {

@@ -119,7 +119,10 @@ struct fp_sched_data {
 	u64		time_next_req;				/* time to send next request */
 	struct socket	*ctrl_sock;			/* socket to the controller */
 
-	struct qdisc_watchdog watchdog;
+	struct qdisc_watchdog 	watchdog;
+	struct hrtimer 			request_timer;
+	struct tasklet_struct 	request_tasklet;
+
 
 	/* counters */
 	u32		flows;
@@ -199,13 +202,14 @@ static void fp_flow_add_tail(struct fp_flow_head *head, struct fp_flow *flow)
 }
 
 /* computes the time when next request should go out */
-void compute_time_next_req(struct fp_sched_data* q, u64 now)
+void set_request_timer(struct fp_sched_data* q, u64 now)
 {
-	if (q->n_unreq_flows)
-		q->time_next_req = max_t(u64, q->req_t + q->req_cost,
-									  now + q->req_min_gap);
-	else
-		q->time_next_req = ~0ULL;
+	q->time_next_req = max_t(u64, q->req_t + q->req_cost,
+								  now + q->req_min_gap);
+
+	hrtimer_start(&q->request_timer,
+			      ns_to_ktime(q->time_next_req),
+			      HRTIMER_MODE_ABS);
 }
 
 /* Set watchdog (assuming there are no packets in q->internal) */
@@ -409,10 +413,7 @@ static void flow_inc_unrequested(struct fp_sched_data *q,
 		q->n_unreq_flows++;
 		/* if enqueued only flow in q->unreq_flows, compute next request time */
 		if (q->n_unreq_flows == 1) {
-			compute_time_next_req(q, fp_get_time_ns());
-			/* if we are throttled, watchdog time might need to change. set it */
-			if (q->internal.qlen == 0)
-				set_watchdog(q);
+			set_request_timer(q, fp_get_time_ns());
 		}
 	}
 	flow->total_tslots++;
@@ -666,26 +667,70 @@ static void fastpass_handle_alloc(struct Qdisc *sch,
 
 }
 
-/**
- * Send a request packet to the controller
- */
-static void fp_do_request(struct fp_sched_data *q, u64 now)
+void dummy_allocate_locked(struct fp_sched_data* q)
 {
 	struct fp_flow *f;
 	int empty_slot;
 
-	struct sk_buff *skb;
+	while (q->unreq_flows.first && (~q->horizon.mask & ~0xffULL)) {
+		f = q->unreq_flows.first;
+		empty_slot = __ffs64(~q->horizon.mask & ~0xffULL);
+		printk(
+				"fp_do_request empty_slot=%d horizon=%llx ~h=%llx, ~1=%llx, &=%llx\n",
+				empty_slot, q->horizon.mask, ~q->horizon.mask, ~1ULL,
+				~q->horizon.mask & ~1ULL);
+
+		/* allocate slot to flow */
+		q->schedule[(q->horizon.timeslot + empty_slot) % FASTPASS_HORIZON] =
+				f->src_dst_key;
+		q->horizon.mask |= (1ULL << empty_slot);
+		f->alloc_tslots++;
+		f->requested_tslots++;
+		q->unreq_tslots--;
+		f->last_sch_tslot = max_t(u64, f->last_sch_tslot,
+				q->horizon.timeslot + empty_slot);
+		/* if we were receiving an allocation packet here, we would also
+		 * make sure that at the end, the queue is unthrottled or the watchdog
+		 * is at the correct time */
+
+		if (f->total_tslots == f->alloc_tslots) {
+			/* remove flow from the q->unreq_flows queue */
+			q->unreq_flows.first = f->next;
+			f->next = NULL;
+			q->n_unreq_flows--;
+		}
+	}
+}
+
+/**
+ * Send a request packet to the controller
+ */
+static void fp_do_request(struct Qdisc *sch, u64 now)
+{
+	struct fp_sched_data *q = qdisc_priv(sch);
+	spinlock_t *root_lock = qdisc_lock(qdisc_root(sch));
+
+	struct fp_flow *f;
+	struct sk_buff *skb = NULL;
 	const int max_payload_len = 40;
 	struct fastpass_areq *areq;
 	int max_header;
 	int payload_len = 0;
 	int err;
 
+	spin_lock_bh(root_lock);
+
+	/* Check that the qdisc destroy func didn't race ahead of us */
+	if (unlikely(sch->limit == 0)) {
+		spin_unlock_bh(root_lock);
+		return;
+	}
+
 	BUG_ON(q->req_t + q->req_cost > now);
 	BUG_ON(!q->unreq_flows.first);
 
-	fastpass_pr_debug("fp_do_request start unreq_flows=%u, unreq_tslots=%u\n",
-			q->n_unreq_flows, q->unreq_tslots);
+	fastpass_pr_debug("%s start: unreq_flows=%u, unreq_tslots=%u, now=%llu, scheduled=%llu, diff=%lld\n",
+			__func__, q->n_unreq_flows, q->unreq_tslots, now, q->time_next_req, (s64)now - (s64)q->time_next_req);
 
 	BUG_ON(!q->ctrl_sock);
 
@@ -710,33 +755,7 @@ static void fp_do_request(struct fp_sched_data *q, u64 now)
 	*(__be16 *)&skb->data[0] = htons((FASTPASS_PTYPE_AREQ << 12) |
 			((payload_len >> 2) & 0x3F));
 
-	fpproto_send_skb_via_tasklet(q->ctrl_sock->sk, skb);
-
-	while (q->unreq_flows.first && (~q->horizon.mask & ~0xffULL)) {
-		f = q->unreq_flows.first;
-		empty_slot = __ffs64(~q->horizon.mask & ~0xffULL);
-		printk("fp_do_request empty_slot=%d horizon=%llx ~h=%llx, ~1=%llx, &=%llx\n",
-				empty_slot, q->horizon.mask, ~q->horizon.mask, ~1ULL, ~q->horizon.mask & ~1ULL);
-
-		/* allocate slot to flow */
-		q->schedule[(q->horizon.timeslot + empty_slot) % FASTPASS_HORIZON] = f->src_dst_key;
-		q->horizon.mask |= (1ULL << empty_slot);
-		f->alloc_tslots++;
-		f->requested_tslots++;
-		q->unreq_tslots--;
-		f->last_sch_tslot = max_t(u64, f->last_sch_tslot,
-									   q->horizon.timeslot + empty_slot);
-		/* if we were receiving an allocation packet here, we would also
-		 * make sure that at the end, the queue is unthrottled or the watchdog
-		 * is at the correct time */
-
-		if (f->total_tslots == f->alloc_tslots) {
-			/* remove flow from the q->unreq_flows queue */
-			q->unreq_flows.first = f->next;
-			f->next = NULL;
-			q->n_unreq_flows--;
-		}
-	}
+	dummy_allocate_locked(q);
 
 	printk("fp_do_request end unreq_flows=%u, unreq_tslots=%u\n",
 			q->n_unreq_flows, q->unreq_tslots);
@@ -746,7 +765,17 @@ static void fp_do_request(struct fp_sched_data *q, u64 now)
 update_credits:
 	/* update request credits */
 	q->req_t = max_t(u64, q->req_t, now - q->req_bucketlen) + q->req_cost;
-	compute_time_next_req(q, now);
+	/* set timer for next request, if a request would be required */
+	if (q->n_unreq_flows)
+		set_request_timer(q, now);
+	else
+		q->time_next_req = ~0ULL;
+
+	spin_unlock_bh(root_lock);
+
+	if (likely(skb != NULL))
+		fpproto_send_skb(q->ctrl_sock->sk, skb);
+
 	return;
 
 alloc_err:
@@ -754,6 +783,26 @@ alloc_err:
 	fastpass_pr_debug("%s: request allocation failed, err %d\n", __func__, err);
 	goto update_credits;
 }
+
+static enum hrtimer_restart fp_do_request_timer_func(struct hrtimer *timer)
+{
+	struct fp_sched_data *q =
+			container_of(timer, struct fp_sched_data, request_timer);
+
+	/* schedule tasklet to write request */
+	tasklet_schedule(&q->request_tasklet);
+
+	return HRTIMER_NORESTART;
+}
+
+static void fp_do_request_tasklet(unsigned long int param)
+{
+	struct Qdisc *sch = (struct Qdisc *)param;
+	u64 now = fp_get_time_ns();
+
+	fp_do_request(sch, now);
+}
+
 
 /* Extract packet from the queue (part of the qdisc API) */
 static struct sk_buff *fastpass_dequeue(struct Qdisc *sch)
@@ -769,10 +818,6 @@ static struct sk_buff *fastpass_dequeue(struct Qdisc *sch)
 
 	/* internal queue is empty; update timeslot (may queue skbs in q->internal) */
 	fp_update_timeslot(sch, now);
-
-	/* initiate a request if appropriate */
-	if (now >= q->time_next_req)
-		fp_do_request(q, now);
 
 	/* if packets were queued for this timeslot, send them. */
 	skb = flow_dequeue_skb(sch, &q->internal);
@@ -1071,20 +1116,30 @@ static void fastpass_destroy(struct Qdisc *sch)
 	struct fp_sched_data *q = qdisc_priv(sch);
 	spinlock_t *root_lock = qdisc_root_lock(sch);
 
-	/* Apparently no lock protection here. Lock to prevent races */
+	/* Apparently no lock protection here. We lock to prevent races */
+
+	/* Notify lockers that qdisc is being destroyed */
 	spin_lock_bh(root_lock);
-
-	/* Notify fpproto that qdisc is being destroyed */
 	sch->limit = 0;
+	spin_unlock_bh(root_lock);
 
+	/* close socket. no new packets should arrive afterwards */
+	sock_release(q->ctrl_sock);
+
+	/* eliminate the request timer */
+	hrtimer_cancel(&q->request_timer);
+
+	/**
+	 * make sure there isn't a tasklet running which might try to lock
+	 *   after the the lock is destroyed
+	 */
+	tasklet_kill(&q->request_tasklet);
+
+	spin_lock_bh(root_lock);
 	fastpass_reset(sch);
 	kfree(q->flow_hash_tbl);
 	qdisc_watchdog_cancel(&q->watchdog);
-
 	spin_unlock_bh(root_lock);
-
-	sock_release(q->ctrl_sock);
-
 }
 
 /* initialize a new qdisc (part of qdisc API) */
@@ -1115,7 +1170,19 @@ static int fastpass_init(struct Qdisc *sch, struct nlattr *opt)
 	q->tslot_start_time = now;			/* timeslot 0 starts now */
 	q->req_t = now - q->req_bucketlen;	/* start with full bucket */
 	q->ctrl_sock		= NULL;
+
+	/* initialize watchdog */
 	qdisc_watchdog_init(&q->watchdog, sch);
+	/* hack to get watchdog on realtime clock */
+	//hrtimer_init(&q->watchdog->timer, CLOCK_REALTIME, HRTIMER_MODE_ABS);
+
+	/* initialize request timer */
+	hrtimer_init(&q->request_timer, CLOCK_MONOTONIC, HRTIMER_MODE_ABS);
+	q->request_timer.function = fp_do_request_timer_func;
+
+	/* initialize tasklet */
+	tasklet_init(&q->request_tasklet, &fp_do_request_tasklet,
+			(unsigned long int)sch);
 
 	if (opt) {
 		err = fastpass_change(sch, opt);

@@ -38,7 +38,6 @@ static struct Qdisc *fpproto_lock_qdisc(struct sock *sk)
 	struct Qdisc *sch;
 	spinlock_t *root_lock;
 
-
 	rcu_read_lock_bh();
 
 	sch = rcu_dereference_bh(fp->qdisc);
@@ -309,11 +308,7 @@ static int fpproto_disconnect(struct sock *sk, int flags)
 
 static void fpproto_destroy_sock(struct sock *sk)
 {
-	struct fastpass_sock *fp = fastpass_sk(sk);
-
 	pr_err("%s: visited\n", __func__);
-
-	hrtimer_cancel(&fp->timer);
 
 	/* might not be necessary, doing for safety */
 	fpproto_set_qdisc(sk, NULL);
@@ -379,12 +374,10 @@ void fpproto_egress_checksum(struct sock *sk, struct sk_buff *skb)
 			skb->len, IPPROTO_DCCP, skb->csum);
 }
 
-static void fpproto_tasklet_write_queue(unsigned long int param)
+void fpproto_send_skb(struct sock *sk, struct sk_buff *skb)
 {
-	struct sock *sk = (struct sock *)param;
 	struct fastpass_sock *fp = fastpass_sk(sk);
 	struct inet_sock *inet = inet_sk(sk);
-	struct sk_buff *skb;
 	int rc;
 
 	pr_err("%s: visited\n", __func__);
@@ -393,45 +386,33 @@ static void fpproto_tasklet_write_queue(unsigned long int param)
 
 	fp->stat_tasklet_runs++;
 
-	while ((skb = __skb_dequeue_tail(&sk->sk_write_queue)) != NULL) {
-		/* write the fastpass header */
-		rc = fpproto_build_header(sk, skb);
-		if (unlikely(rc != 0)) {
-			kfree_skb(skb);
-			fp->stat_build_header_errors++;
-			fastpass_pr_debug("%s: got error %d while building header\n",
-					__func__, rc);
-			continue;
-		}
+	/* write the fastpass header */
+	rc = fpproto_build_header(sk, skb);
+	if (unlikely(rc != 0))
+		goto build_header_error;
 
-		/* checksum */
-		fpproto_egress_checksum(sk, skb);
+	/* checksum */
+	fpproto_egress_checksum(sk, skb);
 
-		/* send onwards */
-		rc = ip_queue_xmit(skb, &inet->cork.fl);
-		rc = net_xmit_eval(rc);
-		if (unlikely(rc != 0)) {
-			fp->stat_xmit_errors++;
-			fastpass_pr_debug("%s: got error %d from ip_queue_xmit\n",
-					__func__, rc);
-		}
+	/* send onwards */
+	rc = ip_queue_xmit(skb, &inet->cork.fl);
+	rc = net_xmit_eval(rc);
+	if (unlikely(rc != 0)) {
+		fp->stat_xmit_errors++;
+		fastpass_pr_debug("%s: got error %d from ip_queue_xmit\n",
+				__func__, rc);
 	}
 
+out_unlock:
 	bh_unlock_sock(sk);
-}
+	return;
 
-static enum hrtimer_restart fastpass_timer_func(struct hrtimer *timer)
-{
-	struct fastpass_sock *fp = container_of(timer, struct fastpass_sock,
-						 timer);
-	struct Qdisc *q = fp->qdisc;
-
-	if (q) {
-		qdisc_unthrottled(q);
-		__netif_schedule(qdisc_root(q));
-	}
-
-	return HRTIMER_NORESTART;
+build_header_error:
+	kfree_skb(skb);
+	fp->stat_build_header_errors++;
+	fastpass_pr_debug("%s: got error %d while building header\n",
+			__func__, rc);
+	goto out_unlock;
 }
 
 static void do_proto_reset(struct fastpass_sock *fp, u64 reset_time)
@@ -454,14 +435,7 @@ static int fpproto_sk_init(struct sock *sk)
 
 	fp->mss_cache = 536;
 
-	/* initialize tasklet */
-	tasklet_init(&fp->tasklet, &fpproto_tasklet_write_queue,
-			(unsigned long int)fp);
-
-	/* initialize hrtimer */
-	hrtimer_init(&fp->timer, CLOCK_MONOTONIC, HRTIMER_MODE_ABS);
-	fp->timer.function = fastpass_timer_func;
-	fp->qdisc = NULL;
+	fpproto_set_qdisc(sk, NULL);
 
 	/* choose reset time */
 	do_proto_reset(fp, fp_get_time_ns());
@@ -524,21 +498,6 @@ out_release:
 out_discard:
 	kfree_skb(skb);
 	goto out_release;
-}
-
-void fpproto_send_skb_via_tasklet(struct sock *sk, struct sk_buff *skb)
-{
-	struct fastpass_sock *fp = fastpass_sk(sk);
-
-	pr_err("%s: visited\n", __func__);
-
-	/* enqueue to write queue */
-	bh_lock_sock(sk);
-	__skb_queue_tail(&sk->sk_write_queue, skb);
-	bh_unlock_sock(sk);
-
-	/* schedule tasklet to write from the queue */
-	tasklet_schedule(&fp->tasklet);
 }
 
 /* implementation of userspace recv() - unsupported */

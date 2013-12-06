@@ -409,7 +409,7 @@ static void flow_inc_unrequested(struct fp_sched_data *q,
 		q->n_unreq_flows++;
 		/* if enqueued only flow in q->unreq_flows, compute next request time */
 		if (q->n_unreq_flows == 1) {
-			compute_time_next_req(q, ktime_to_ns(ktime_get()));
+			compute_time_next_req(q, fp_get_time_ns());
 			/* if we are throttled, watchdog time might need to change. set it */
 			if (q->internal.qlen == 0)
 				set_watchdog(q);
@@ -1091,7 +1091,7 @@ static void fastpass_destroy(struct Qdisc *sch)
 static int fastpass_init(struct Qdisc *sch, struct nlattr *opt)
 {
 	struct fp_sched_data *q = qdisc_priv(sch);
-	u64 now = ktime_to_ns(ktime_get());
+	u64 now = fp_get_time_ns();
 	struct tc_ratespec data_rate_spec ={
 			.linklayer = TC_LINKLAYER_ETHERNET,
 			.rate = 1e9/8,
@@ -1160,7 +1160,7 @@ nla_put_failure:
 static int fastpass_dump_stats(struct Qdisc *sch, struct gnet_dump *d)
 {
 	struct fp_sched_data *q = qdisc_priv(sch);
-	u64 now = ktime_to_ns(ktime_get());
+	u64 now = fp_get_time_ns();
 	struct tc_fastpass_qd_stats st = {
 		.gc_flows			= q->stat_gc_flows,
 		.highprio_packets	= q->stat_internal_packets,

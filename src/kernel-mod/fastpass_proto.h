@@ -112,6 +112,13 @@ static inline struct fastpass_sock *fastpass_sk(const struct sock *sk)
 	return (struct fastpass_sock *)sk;
 }
 
+/* returns the current real time (the time that is used to determine timeslots) */
+static inline u64 fp_get_time_ns(void)
+{
+	return ktime_to_ns(ktime_get_real());
+}
+
+
 enum {
 	FASTPASSF_OPEN		      = TCPF_ESTABLISHED,
 	FASTPASSF_CLOSED	      = TCPF_CLOSE,

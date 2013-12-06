@@ -31,12 +31,6 @@ MODULE_PARM_DESC(fastpass_debug, "Enable debug messages");
 EXPORT_SYMBOL_GPL(fastpass_debug);
 #endif
 
-/* returns the current time, for socket reset */
-static u64 fp_sync_get_time(void)
-{
-	return ktime_to_ns(ktime_get_real());
-}
-
 /* locks the qdisc associated with the fastpass socket */
 static struct Qdisc *fpproto_lock_qdisc(struct sock *sk)
 {
@@ -470,7 +464,7 @@ static int fpproto_sk_init(struct sock *sk)
 	fp->qdisc = NULL;
 
 	/* choose reset time */
-	do_proto_reset(fp, fp_sync_get_time());
+	do_proto_reset(fp, fp_get_time_ns());
 
 	return 0;
 }

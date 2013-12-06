@@ -212,23 +212,6 @@ void set_request_timer(struct fp_sched_data* q, u64 now)
 			      HRTIMER_MODE_ABS);
 }
 
-/* Set watchdog (assuming there are no packets in q->internal) */
-void set_watchdog(struct fp_sched_data* q)
-{
-	int next_slot;
-	u64 next_time;
-
-	BUG_ON(q->internal.qlen); /* we should be throttled */
-
-	next_time = q->time_next_req;
-	next_slot = horizon_next_nonempty(&q->horizon);
-	if (next_slot > 0)
-		next_time = min_t(u64, next_time,
-				q->tslot_start_time + next_slot * q->tslot_len);
-
-	qdisc_watchdog_schedule_ns(&q->watchdog, next_time);
-}
-
 /* should the flow be garbage-collected? */
 static bool fp_gc_candidate(const struct fp_sched_data *q,
 		const struct fp_flow *f)
@@ -810,11 +793,12 @@ static struct sk_buff *fastpass_dequeue(struct Qdisc *sch)
 	struct fp_sched_data *q = qdisc_priv(sch);
 	u64 now = fp_get_time_ns();
 	struct sk_buff *skb;
+	int next_slot;
 
 	/* any packets already queued? */
 	skb = flow_dequeue_skb(sch, &q->internal);
 	if (skb)
-		goto out;
+		goto out_got_skb;
 
 	/* internal queue is empty; update timeslot (may queue skbs in q->internal) */
 	fp_update_timeslot(sch, now);
@@ -822,13 +806,21 @@ static struct sk_buff *fastpass_dequeue(struct Qdisc *sch)
 	/* if packets were queued for this timeslot, send them. */
 	skb = flow_dequeue_skb(sch, &q->internal);
 	if (skb)
-		goto out;
+		goto out_got_skb;
 
 	/* no packets in queue, go to sleep */
-	set_watchdog(q);
+	next_slot = horizon_next_nonempty(&q->horizon);
+	BUG_ON(next_slot == 0);
+
+	if (unlikely(next_slot < 0))
+		qdisc_unthrottled(sch);
+	else
+		qdisc_watchdog_schedule_ns(&q->watchdog,
+				q->tslot_start_time + next_slot * q->tslot_len);
+
 	return NULL;
 
-out:
+out_got_skb:
 	qdisc_bstats_update(sch, skb);
 	qdisc_unthrottled(sch);
 	return skb;

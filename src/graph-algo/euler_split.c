@@ -25,10 +25,14 @@ void split(struct graph_structure *structure, struct graph_edges *edges_in,
         while (has_neighbor(edges_in, node)) {
             // Peel off two edges and add them to g1 and g2
             new_node = split_edge(structure, edges_in, edges_1, cur_node);
-            cur_node = new_node;
+            cur_node = new_node;       
+            assert(is_consistent(structure, edges_in));
+            assert(is_consistent(structure, edges_1));
  
             new_node = split_edge(structure, edges_in, edges_2, cur_node);
-            cur_node = new_node;
+            cur_node = new_node;       
+            assert(is_consistent(structure, edges_in));
+            assert(is_consistent(structure, edges_2));
         }
     }
 }

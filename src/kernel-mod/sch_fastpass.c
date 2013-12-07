@@ -1063,8 +1063,12 @@ static int fastpass_change(struct Qdisc *sch, struct nlattr *opt)
 		else
 			psched_ratecfg_precompute(&q->data_rate, &data_rate_spec);
 	}
-	if (tb[TCA_FASTPASS_TIMESLOT_NSEC])
+	if (tb[TCA_FASTPASS_TIMESLOT_NSEC]) {
+		u64 now = fp_get_time_ns();
 		q->tslot_len = nla_get_u32(tb[TCA_FASTPASS_TIMESLOT_NSEC]);
+		q->horizon.timeslot = now;
+		q->tslot_start_time = now - do_div(q->horizon.timeslot, q->tslot_len);
+	}
 
 	if (tb[TCA_FASTPASS_REQUEST_COST])
 		q->req_cost = nla_get_u32(tb[TCA_FASTPASS_REQUEST_COST]);
@@ -1144,6 +1148,7 @@ static int fastpass_init(struct Qdisc *sch, struct nlattr *opt)
 			.rate = 1e9/8,
 			.overhead = 24};
 	int err;
+	struct qdisc_watchdog tmp_watchdog;
 
 	sch->limit			= 10000;
 	q->flow_plimit		= 100;
@@ -1159,17 +1164,23 @@ static int fastpass_init(struct Qdisc *sch, struct nlattr *opt)
 	q->unreq_flows.first= NULL;
 	q->internal.next = &do_not_schedule;
 	q->time_next_req = ~0ULL;
-	q->tslot_start_time = now;			/* timeslot 0 starts now */
+
+	/* calculate timeslot from beginning of Epoch */
+	q->horizon.timeslot = now;
+	q->tslot_start_time = now - do_div(q->horizon.timeslot, q->tslot_len);
+
 	q->req_t = now - q->req_bucketlen;	/* start with full bucket */
 	q->ctrl_sock		= NULL;
 
 	/* initialize watchdog */
+	qdisc_watchdog_init(&tmp_watchdog, sch);
 	qdisc_watchdog_init(&q->watchdog, sch);
 	/* hack to get watchdog on realtime clock */
-	//hrtimer_init(&q->watchdog->timer, CLOCK_REALTIME, HRTIMER_MODE_ABS);
+	hrtimer_init(&q->watchdog.timer, CLOCK_REALTIME, HRTIMER_MODE_ABS);
+	q->watchdog.timer.function = tmp_watchdog.timer.function;
 
 	/* initialize request timer */
-	hrtimer_init(&q->request_timer, CLOCK_MONOTONIC, HRTIMER_MODE_ABS);
+	hrtimer_init(&q->request_timer, CLOCK_REALTIME, HRTIMER_MODE_ABS);
 	q->request_timer.function = fp_do_request_timer_func;
 
 	/* initialize tasklet */

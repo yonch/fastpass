@@ -96,7 +96,7 @@ int fpproto_rcv(struct sk_buff *skb)
 	unsigned char *data_end;
 	int alloc_n_dst, alloc_n_tslots;
 	u16 alloc_dst[16];
-	u16 alloc_base_tslot;
+	u32 alloc_base_tslot;
 
 	pr_err("%s: visited\n", __func__);
 

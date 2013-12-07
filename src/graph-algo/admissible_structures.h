@@ -129,6 +129,21 @@ struct backlog_edge *peek_head_backlog(struct backlog_queue *queue) {
     return &queue->edges[queue->head];
 }
 
+// Returns the number of queued requests in this backlog
+static inline
+uint32_t backlog_size(struct backlog_queue *queue) {
+    assert(queue != NULL);
+
+    struct backlog_edge *current = &queue->edges[queue->head];
+    uint32_t backlog_size = 0;
+    while (current < &queue->edges[queue->tail]) {
+        backlog_size += current->backlog;
+        current++;
+    }
+
+    return backlog_size;
+}
+
 // Compare two backlog edges
 // Returns a positive value if edge1 > edge2, 0 if they're equal, and a
 // negative value if edge1 < edge2
@@ -190,7 +205,7 @@ void swap_backlog_edges(struct backlog_edge *edge_0, struct backlog_edge *edge_1
 
 // Recursive quicksort on a backlog_queue, using the compare function above
 static inline
-void quicksort_backlog(struct backlog_edge *edges, uint16_t size, uint16_t min_time) {
+void quicksort_backlog(struct backlog_edge *edges, uint32_t size, uint16_t min_time) {
     assert(edges != NULL);
 
     // Store partition element
@@ -216,7 +231,7 @@ void quicksort_backlog(struct backlog_edge *edges, uint16_t size, uint16_t min_t
     swap_backlog_edges(partition_location, partition);
 
     // Recursively sort portions
-    uint16_t size_0 = partition_location - partition;
+    uint32_t size_0 = partition_location - partition;
     if (size_0 >= 2)
         quicksort_backlog(edges, size_0, min_time);
     if (size - size_0 - 1 >= 2)

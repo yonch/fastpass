@@ -24,7 +24,6 @@ void request_timeslots(struct backlog_queue *new_requests, struct flow_status *s
     if (last_send_time < status->oldest_timeslot)
         last_send_time_abbrv = (uint16_t) status->oldest_timeslot - 1;
     enqueue_backlog(new_requests, src, dst, num_slots, last_send_time_abbrv);
-    //   printf("new request:\t%d\t%d\t%d\n", src, dst, last_send_time_abbrv);
 
     // Note: this does not preserve fair ordering between flows that arrive in the
     // same timeslot and are older than all currently backlogged flows

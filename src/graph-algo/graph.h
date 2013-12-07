@@ -310,4 +310,32 @@ void print_graph(struct graph_structure *structure, struct graph_edges *edges) {
     }
 }
 
+// Checks to make sure that the graph structure is consistent
+static inline
+bool is_consistent(struct graph_structure *structure, struct graph_edges *edges) {
+    assert(structure != NULL);
+    assert(edges != NULL);
+
+    int i, j;
+    for (i = 0; i < 2 * structure->n; i++) {
+        struct vertex_info *v_info = &structure->vertices[i];
+        for (j = 0; j < MAX_DEGREE; j++) {
+            if ((edges->neighbor_bitmaps[i] >> j) & 0x1ULL) {
+                // There is an edge here!
+                uint8_t other = v_info->neighbors[j].id;
+                uint8_t v_index_for_other = v_info->neighbors[j].index;
+                struct vertex_info *other_info = &structure->vertices[other];
+                
+                // Check that other id is consistent
+                if (other_info->neighbors[v_index_for_other].id != i)
+                    return false;
+                // Check that other index is consistent
+                if (other_info->neighbors[v_index_for_other].index != j)
+                    return false;
+            }
+        }
+    }
+    return true;
+}
+
 #endif /* GRAPH_H_ */

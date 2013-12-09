@@ -18,15 +18,38 @@ void request_timeslots(struct backlog_queue *new_requests, struct flow_status *s
     assert(new_requests != NULL);
     assert(status != NULL);
 
-    // Just add this request at the end of the backlog queue - sort later
-    uint64_t last_send_time = get_last_timeslot(status, src, dst);
-    uint16_t last_send_time_abbrv = (uint16_t) last_send_time;
-    if (last_send_time < status->oldest_timeslot)
-        last_send_time_abbrv = (uint16_t) status->oldest_timeslot - 1;
-    enqueue_backlog(new_requests, src, dst, num_slots, last_send_time_abbrv);
+    // Just add this request at the end of the backlog queue with an invalid time
+    // Obtain the last_sent_timeslot and sort later
+    enqueue_backlog(new_requests, src, dst, num_slots, 0);
+}
 
-    // Note: this does not preserve fair ordering between flows that arrive in the
-    // same timeslot and are older than all currently backlogged flows
+// Sets the last send time for new requests based on the contents of status
+// and sorts them
+void prepare_new_requests(struct backlog_queue *new_requests,
+                          struct flow_status *status) {
+    assert(new_requests != NULL);
+    assert(status != NULL);
+
+    uint16_t min_time = (uint16_t) status->oldest_timeslot - 1;
+
+    // Obtain the correct last_send_time for all requests
+    struct backlog_edge *current = &new_requests->edges[new_requests->head];
+    struct backlog_edge *last = &new_requests->edges[new_requests->tail];
+    while (current < last) {
+        uint64_t last_send_time = get_last_timeslot(status, current->src,
+                                                    current->dst);
+        uint16_t last_send_time_abbrv = (uint16_t) last_send_time;
+        if (last_send_time < status->oldest_timeslot)
+            last_send_time_abbrv = (uint16_t) status->oldest_timeslot - 1;
+        current->timeslot = last_send_time_abbrv;
+        current++;
+
+        // Note: this does not preserve fair ordering between flows that arrive in
+        // the same timeslot and are older than all currently backlogged flows
+    }
+
+    // Sort new requests
+    sort_backlog(new_requests, min_time);
 }
 
 // Populate traffic_out with the admissible traffic for one timeslot from queue_in
@@ -43,13 +66,10 @@ void get_admissible_traffic(struct backlog_queue *queue_in,
     assert(traffic_out != NULL);
     assert(status != NULL);
 
-    uint16_t min_time = (uint16_t) status->oldest_timeslot - 1;
+    // Fetch last_send_time, sort, etc.
+    prepare_new_requests(new_requests, status);
 
-    // Sort new requests
-    // TODO: consider what happens if request_timeslots is called while
-    // get_admissible_traffic is running. How do you update the last_send_time
-    // correctly?
-    sort_backlog(new_requests, min_time);
+    uint16_t min_time = (uint16_t) status->oldest_timeslot - 1;
 
     struct admitted_bitmap admitted;
     init_admitted_bitmap(&admitted);
@@ -127,10 +147,12 @@ void get_admissible_traffic(struct backlog_queue *queue_in,
         uint16_t oldest_queued_time = peek_head_backlog(queue_out)->timeslot;
         uint64_t mask = ~(0xffffULL);
         if (oldest_queued_time <= (uint16_t) status->current_timeslot)
-            status->oldest_timeslot = status->current_timeslot & mask + oldest_queued_time;
+            status->oldest_timeslot = status->current_timeslot & mask
+                + oldest_queued_time;
         else {
             // current timeslot has wrapped around relative to the oldest queued time
-            status->oldest_timeslot = ((status->current_timeslot - 0x10000ULL) & mask) + oldest_queued_time;
+            status->oldest_timeslot = ((status->current_timeslot - 0x10000ULL) & mask)
+                + oldest_queued_time;
         }
     }
 }

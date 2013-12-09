@@ -62,7 +62,7 @@ extern bool fastpass_debug;
 struct fpproto_ops {
 	void 	(*handle_reset)(struct Qdisc *q, u64 tstamp);
 
-	void	(*handle_alloc)(struct Qdisc *q, u16 base_tslot,
+	void	(*handle_alloc)(struct Qdisc *q, u32 base_tslot,
 			u16 *dst, int n_dst, u8 *tslots, int n_tslots);
 };
 

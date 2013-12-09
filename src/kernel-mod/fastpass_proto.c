@@ -98,7 +98,7 @@ int fpproto_rcv(struct sk_buff *skb)
 	u16 alloc_dst[16];
 	u32 alloc_base_tslot;
 
-	pr_err("%s: visited\n", __func__);
+	fastpass_pr_debug("visited\n");
 
 	sk = __inet_lookup_skb(&fastpass_hashinfo, skb,
 			FASTPASS_DEFAULT_PORT_NETORDER /*sport*/,
@@ -277,7 +277,7 @@ out:
 /* close the socket */
 static void fpproto_close(struct sock *sk, long timeout)
 {
-	pr_err("%s: visited\n", __func__);
+	fastpass_pr_debug("visited\n");
 
 	sk_common_release(sk);
 }
@@ -287,7 +287,7 @@ static int fpproto_disconnect(struct sock *sk, int flags)
 {
 	struct inet_sock *inet = inet_sk(sk);
 
-	pr_err("%s: visited\n", __func__);
+	fastpass_pr_debug("visited\n");
 
 	sk->sk_state = TCP_CLOSE;
 	inet->inet_daddr = 0;
@@ -308,7 +308,7 @@ static int fpproto_disconnect(struct sock *sk, int flags)
 
 static void fpproto_destroy_sock(struct sock *sk)
 {
-	pr_err("%s: visited\n", __func__);
+	fastpass_pr_debug("visited\n");
 
 	/* might not be necessary, doing for safety */
 	fpproto_set_qdisc(sk, NULL);
@@ -380,7 +380,7 @@ void fpproto_send_skb(struct sock *sk, struct sk_buff *skb)
 	struct inet_sock *inet = inet_sk(sk);
 	int rc;
 
-	pr_err("%s: visited\n", __func__);
+	fastpass_pr_debug("visited\n");
 
 	bh_lock_sock(sk);
 
@@ -399,8 +399,7 @@ void fpproto_send_skb(struct sock *sk, struct sk_buff *skb)
 	rc = net_xmit_eval(rc);
 	if (unlikely(rc != 0)) {
 		fp->stat_xmit_errors++;
-		fastpass_pr_debug("%s: got error %d from ip_queue_xmit\n",
-				__func__, rc);
+		fastpass_pr_debug("got error %d from ip_queue_xmit\n", rc);
 	}
 
 out_unlock:
@@ -410,8 +409,7 @@ out_unlock:
 build_header_error:
 	kfree_skb(skb);
 	fp->stat_build_header_errors++;
-	fastpass_pr_debug("%s: got error %d while building header\n",
-			__func__, rc);
+	fastpass_pr_debug("got error %d while building header\n", rc);
 	goto out_unlock;
 }
 
@@ -427,7 +425,7 @@ static int fpproto_sk_init(struct sock *sk)
 {
 	struct fastpass_sock *fp = fastpass_sk(sk);
 
-	pr_err("%s: visited\n", __func__);
+	fastpass_pr_debug("visited\n");
 
 	/* bind all sockets to port 1, to avoid inet_autobind */
 	inet_sk(sk)->inet_num = ntohs(FASTPASS_DEFAULT_PORT_NETORDER);
@@ -453,7 +451,7 @@ static int fpproto_userspace_sendmsg(struct kiocb *iocb, struct sock *sk,
 	struct sk_buff *skb;
 	int rc, size;
 
-	pr_err("%s: visited\n", __func__);
+	fastpass_pr_debug("visited\n");
 
 	if (len > fp->mss_cache)
 		return -EMSGSIZE;
@@ -516,17 +514,17 @@ static int fpproto_backlog_rcv(struct sock *sk, struct sk_buff *skb)
 
 static inline void fpproto_hash(struct sock *sk)
 {
-	pr_err("%s: visited\n", __func__);
+	fastpass_pr_debug("visited\n");
 	inet_hash(sk);
 }
 static void fpproto_unhash(struct sock *sk)
 {
-	pr_err("%s: visited\n", __func__);
+	fastpass_pr_debug("visited\n");
 	inet_unhash(sk);
 }
 static void fpproto_rehash(struct sock *sk)
 {
-	pr_err("%s: before %X\n", __func__, sk->sk_hash);
+	fastpass_pr_debug("before %X\n", sk->sk_hash);
 	sk->sk_prot->unhash(sk);
 
 	sk->sk_state = TCP_ESTABLISHED;
@@ -534,7 +532,7 @@ static void fpproto_rehash(struct sock *sk)
 	inet_sk(sk)->inet_daddr = inet_sk(sk)->cork.fl.u.ip4.daddr;
 	sk->sk_prot->hash(sk);
 
-	pr_err("%s: after %X\n", __func__, sk->sk_hash);
+	fastpass_pr_debug("after %X\n", sk->sk_hash);
 }
 static int fpproto_bind(struct sock *sk, struct sockaddr *uaddr,
 		int addr_len)

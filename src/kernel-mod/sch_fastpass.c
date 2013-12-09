@@ -573,7 +573,7 @@ begin:
 		/* move to the new slot */
 		q->tslot_start_time += tslot_advance * q->tslot_len;
 		horizon_advance(&q->horizon, tslot_advance);
-		fastpass_pr_debug("moved by %u timeslots to empty timeslot %llu\n",
+		fastpass_pr_debug("moved by %llu timeslots to empty timeslot %llu\n",
 				tslot_advance, q->horizon.timeslot);
 
 		return;

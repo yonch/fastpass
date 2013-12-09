@@ -142,9 +142,9 @@ struct fp_sched_data {
 	u64		stat_req_alloc_errors;
 	u64		stat_non_ctrl_highprio_pkts;
 	u64		stat_redundant_allocations;   /* TODO: report to tc */
-	u64 stat_ntp_packets; /* TODO: report to tc */
-	u64 stat_late_allocation_tslots; /* TODO: report to tc */
-	u64 stat_too_futuristic_alloc_tslots; /* TODO: report to tc */
+	u64 	stat_ntp_packets; /* TODO: report to tc */
+	u64		stat_late_allocation_tslots; /* TODO: report to tc */
+	u64		stat_too_futuristic_alloc_tslots; /* TODO: report to tc */
 };
 
 /* special value to mark a flow should not be scheduled */
@@ -374,8 +374,14 @@ static struct fp_flow *fp_classify(struct sk_buff *skb, struct fp_sched_data *q)
 
 cannot_classify:
 	// ARP packets should not count as classify errors
-	if (unlikely(skb->protocol != ETH_P_ARP))
+	if (unlikely(skb->protocol != htons(ETH_P_ARP))) {
 		q->stat_classify_errors++;
+		if (fastpass_debug) {
+			fastpass_pr_debug("cannot classify packet with protocol %u:\n", skb->protocol);
+			print_hex_dump(KERN_DEBUG, "cannot classify: ", DUMP_PREFIX_OFFSET,
+					16, 1, skb->data, min_t(size_t, skb->len, 64), false);
+		}
+	}
 	return &q->internal;
 }
 
@@ -479,6 +485,8 @@ static int fastpass_enqueue(struct sk_buff *skb, struct Qdisc *sch)
 
 	/* queue skb to flow, update statistics */
 	flow_enqueue_skb(sch, f, skb);
+	fastpass_pr_debug("enqueued packet of len %d to flow 0x%llX, qlen=%d\n",
+			qdisc_pkt_len(skb), f->src_dst_key, f->qlen);
 
 	/* internal queue flows without scheduling */
 	if (unlikely(f == &q->internal)) {
@@ -1245,6 +1253,7 @@ static int fastpass_init(struct Qdisc *sch, struct nlattr *opt)
 	q->flow_hash_tbl	= NULL;
 	q->unreq_flows.first= NULL;
 	q->internal.next = &do_not_schedule;
+	q->internal.src_dst_key = 0xD066F00DDEADBEEF;
 	q->time_next_req = ~0ULL;
 
 	/* calculate timeslot from beginning of Epoch */

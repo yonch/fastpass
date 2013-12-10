@@ -93,13 +93,124 @@ void fpproto_pktdesc_free(struct fpproto_pktdesc *pd)
 	kmem_cache_free(fpproto_pktdesc_cachep, pd);
 }
 
+static inline u32 outwnd_pos(u64 tslot)
+{
+	return -tslot & (FASTPASS_OUTWND_LEN-1);
+}
+
+/**
+ * Assumes tslot is in the correct range, returns whether the bin is unacked.
+ */
+static bool outwnd_is_unacked(struct fastpass_sock *fp, u64 tslot)
+{
+	return !!test_bit(outwnd_pos(tslot), fp->bin_mask);
+}
+
+/**
+ * Adds the packet descriptor as the next_seq
+ */
+void outwnd_add(struct fastpass_sock *fp, struct fpproto_pktdesc *pd)
+{
+	u32 circular_index = outwnd_pos(fp->next_seqno);
+
+	BUG_ON(outwnd_is_unacked(fp, fp->next_seqno - FASTPASS_OUTWND_LEN));
+	BUG_ON(!pd);
+
+	__set_bit(circular_index, fp->bin_mask);
+	__set_bit(circular_index + FASTPASS_OUTWND_LEN, fp->bin_mask);
+	fp->bins[circular_index] = pd;
+}
+
+/**
+ * Removes the packet description at the given timeslot, marking it as acked.
+ *    Returns the removed timeslot.
+ *
+ * Assumes the timeslot is in the correct range.
+ */
+struct fpproto_pktdesc * outwnd_pop(struct fastpass_sock *fp, u64 tslot)
+{
+	u32 circular_index = outwnd_pos(tslot);
+	struct fpproto_pktdesc *res = fp->bins[circular_index];
+
+	BUG_ON(!outwnd_is_unacked(fp, tslot));
+
+	__clear_bit(circular_index, fp->bin_mask);
+	__clear_bit(circular_index + FASTPASS_OUTWND_LEN, fp->bin_mask);
+	fp->bins[circular_index] = NULL;
+	return res;
+}
+
+/**
+ * Returns the "tslot - first_tslot", where first_tslot is the timeslot of the
+ *    first unacked packet *at* or *before* tslot if such exists within the
+ *    window, or -1 if it doesn't.
+ */
+s32	outwnd_at_or_before(struct fastpass_sock *fp, u64 tslot)
+{
+	u32 head_index = outwnd_pos(fp->next_seqno - 1);
+
+	/*
+	 * there are two indices that could correspond to tslot, get the first
+	 *   one not smaller than head_index.
+	 */
+	u32 tslot_index = head_index + outwnd_pos(tslot - head_index);
+
+	u32 found_offset;
+
+	BUG_ON(tslot >= fp->next_seqno);
+
+	found_offset = find_next_bit(fp->bin_mask,
+			head_index + FASTPASS_OUTWND_LEN,
+			tslot_index);
+
+	return (found_offset == head_index + FASTPASS_OUTWND_LEN) ?
+			-1 : (found_offset - tslot_index);
+}
+
+/**
+ * Returns the timeslot of the earliest unacked timeslot.
+ * Assumes such a timeslot exists!
+ */
+u64 outwnd_earliest_unacked(struct fastpass_sock *fp)
+{
+	u32 head_index = outwnd_pos(fp->next_seqno - 1);
+	u32 found_offset;
+	u64 earliest;
+
+	found_offset = find_last_bit(fp->bin_mask, head_index + FASTPASS_OUTWND_LEN);
+
+	/**
+	 * found_offset runs between head_index to head_index+FASTPASS_OUTWND_LEN-1
+	 * (found_offset-head_index) is #timeslots before next_seqno-1 of sought pkt
+	 */
+	earliest = fp->next_seqno - 1 - (found_offset - head_index);
+
+	/* TODO: remove the check when debugged, for performance */
+	BUG_ON((earliest != fp->next_seqno - FASTPASS_OUTWND_LEN)
+			&& (outwnd_at_or_before(fp, earliest - 1) != -1));
+
+	return earliest;
+}
+
 static void do_proto_reset(struct fastpass_sock *fp, u64 reset_time)
 {
+	u64 tslot;
+	s32 gap;
+
+	/* clear unacked packets */
+	tslot = fp->next_seqno - 1; /* start at the last transmitted message */
+clear_next_unacked:
+	gap = outwnd_at_or_before(fp, tslot);
+	if (gap >= 0) {
+		tslot += gap;
+		fpproto_pktdesc_free(outwnd_pop(fp, tslot));
+		goto clear_next_unacked;
+	}
+
+	/* set new sequence numbers */
 	fp->last_reset_time = reset_time;
 	fp->next_seqno = reset_time +
 			((u64)jhash_1word((u32)reset_time, reset_time >> 32) << 32);
-
-	memset(&fp->bin_mask[0], 0, sizeof(fp->bin_mask));
 }
 
 static bool tstamp_in_window(u64 tstamp, u64 win_middle, u64 win_size) {

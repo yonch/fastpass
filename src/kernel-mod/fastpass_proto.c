@@ -78,7 +78,64 @@ void fpproto_set_qdisc(struct sock *sk, struct Qdisc *new_qdisc)
 	rcu_assign_pointer(fp->qdisc, new_qdisc);
 }
 
+static void do_proto_reset(struct fastpass_sock *fp, u64 reset_time)
+{
+	fp->last_reset_time = reset_time;
+	fp->next_seqno = reset_time +
+			((u64)jhash_1word((u32)reset_time, reset_time >> 32) << 32);
+}
 
+static bool tstamp_in_window(u64 tstamp, u64 win_middle, u64 win_size) {
+	return (tstamp >= win_middle - (win_size / 2))
+			&& (tstamp < win_middle + ((win_size + 1) / 2));
+}
+
+static void fpproto_handle_reset(struct fastpass_sock *fp,
+		struct Qdisc *sch, u64 partial_tstamp)
+{
+
+	u64 now = fp_get_time_ns();
+
+	u64 full_tstamp = now - (1ULL << 55);
+	full_tstamp += (partial_tstamp - full_tstamp) & ((1ULL << 56) - 1);
+
+	fastpass_pr_debug("got RESET 0x%llX, last is 0x%llX, full %llu, now %llu\n",
+			partial_tstamp, fp->last_reset_time, full_tstamp, now);
+
+	if (full_tstamp == fp->last_reset_time) {
+		if (!fp->in_sync) {
+			fp->in_sync = 1;
+			fastpass_pr_debug("Now in sync\n");
+		} else {
+			fp->stat_redundant_reset++;
+			fastpass_pr_debug("received redundant reset\n");
+		}
+		return;
+	}
+
+	/* reject resets outside the time window */
+	if (unlikely(!tstamp_in_window(full_tstamp, now, fp->rst_win_ns))) {
+		fastpass_pr_debug("Reset was out of reset window (diff=%lld)\n",
+				(s64)full_tstamp - (s64)now);
+		fp->stat_reset_out_of_window++;
+		return;
+	}
+
+	/* if we already processed a newer reset within the window */
+	if (unlikely(tstamp_in_window(fp->last_reset_time, now, fp->rst_win_ns)
+			&& (full_tstamp < fp->last_reset_time))) {
+		fastpass_pr_debug("Already processed reset within window which is %lluns more recent\n",
+						fp->last_reset_time - full_tstamp);
+		fp->stat_outdated_reset++;
+		return;
+	}
+
+	/* okay, accept the reset */
+	do_proto_reset(fp, full_tstamp);
+	fp->in_sync = 1;
+	if (fp->ops->handle_reset)
+		fp->ops->handle_reset(sch);
+}
 
 /**
  * Receives a packet destined for the protocol. (part of inet socket API)
@@ -131,8 +188,7 @@ handle_payload:
 		rst_tstamp = ((u64)(ntohl(*(u32 *)data) & ((1 << 24) - 1)) << 32) |
 				ntohl(*(u32 *)(data + 4));
 
-		if (fp->ops->handle_reset)
-			fp->ops->handle_reset(sch, rst_tstamp);
+		fpproto_handle_reset(fp, sch, rst_tstamp);
 
 		data += 8;
 		break;
@@ -413,14 +469,6 @@ build_header_error:
 	goto out_unlock;
 }
 
-static void do_proto_reset(struct fastpass_sock *fp, u64 reset_time)
-{
-	fp->last_reset_time = reset_time & ((1ULL << 56) - 1);
-	fp->next_seqno = reset_time +
-			((u64)jhash_1word((u32)reset_time, reset_time >> 32) << 32);
-	fp->in_sync = 0;
-}
-
 static int fpproto_sk_init(struct sock *sk)
 {
 	struct fastpass_sock *fp = fastpass_sk(sk);
@@ -437,6 +485,7 @@ static int fpproto_sk_init(struct sock *sk)
 
 	/* choose reset time */
 	do_proto_reset(fp, fp_get_time_ns());
+	fp->in_sync = 0;
 
 	return 0;
 }

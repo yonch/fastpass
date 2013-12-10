@@ -112,6 +112,7 @@ struct fp_sched_data {
 	u32		req_min_gap;				/* min delay between requests (ns) */
 	u32		gc_age;						/* number of tslots to keep empty flows */
 	__be32	ctrl_addr_netorder;			/* IP of the controller, network byte order */
+	u32		reset_window_us;			/* time window of acceptable resets */
 
 	/* state */
 	struct rb_root	*flow_hash_tbl;		/* table of rb-trees of flows */
@@ -708,31 +709,13 @@ void set_watchdog(struct Qdisc* sch) {
 }
 
 /**
- * Handles a RESET payload with given timestamp
+ * Performs a reset and garbage collection of flows
  */
-static void handle_reset(struct Qdisc *sch, u64 tstamp)
+static void handle_reset(struct Qdisc *sch)
 {
 	struct fp_sched_data *q = qdisc_priv(sch);
-	struct fastpass_sock *fp = fastpass_sk(q->ctrl_sock->sk);
 
-	fastpass_pr_debug("got RESET 0x%llX, last is 0x%llX\n", tstamp,
-			fp->last_reset_time);
-
-	if (tstamp == fp->last_reset_time) {
-		if (!fp->in_sync) {
-			fp->in_sync = 1;
-		} else {
-			fastpass_pr_debug("rx redundant reset\n");
-			fp->stat_redundant_reset++;
-		}
-		return;
-	}
-
-	/* reject resets outside the time window */
-	/* TODO */
-
-	/* need to process reset */
-	//if (rst_tstamp > fp->last_reset_time)
+	(void)q;/* TODO */
 }
 
 /**
@@ -997,6 +980,11 @@ static int reconnect_ctrl_socket(struct Qdisc *sch)
 	/* set protocol ops */
 	fastpass_sk(q->ctrl_sock->sk)->ops = &fastpass_sch_proto_ops;
 
+	/* set reset window */
+	fastpass_sk(q->ctrl_sock->sk)->rst_win_ns =
+				(u64)q->reset_window_us * NSEC_PER_USEC;
+
+
 	/* connect */
 	sock_addr.sin_addr.s_addr = q->ctrl_addr_netorder;
 	rc = kernel_connect(q->ctrl_sock, (struct sockaddr *)&sock_addr,
@@ -1140,6 +1128,7 @@ static const struct nla_policy fp_policy[TCA_FASTPASS_MAX + 1] = {
 	[TCA_FASTPASS_REQUEST_BUCKET]	= { .type = NLA_U32 },
 	[TCA_FASTPASS_REQUEST_GAP]		= { .type = NLA_U32 },
 	[TCA_FASTPASS_CONTROLLER_IP]	= { .type = NLA_U32 },
+	[TCA_FASTPASS_RST_WIN_USEC]		= { .type = NLA_U32 },
 };
 
 /* change configuration (part of qdisc API) */
@@ -1218,6 +1207,13 @@ static int fp_tc_change(struct Qdisc *sch, struct nlattr *opt) {
 		should_reconnect = true;
 	}
 
+	if (tb[TCA_FASTPASS_RST_WIN_USEC]) {
+		q->reset_window_us = nla_get_u32(tb[TCA_FASTPASS_RST_WIN_USEC]);
+		if (q->ctrl_sock)
+			fastpass_sk(q->ctrl_sock->sk)->rst_win_ns =
+					(u64)q->reset_window_us * NSEC_PER_USEC;
+	}
+
 	if (!err && (should_reconnect || !q->ctrl_sock))
 		err = reconnect_ctrl_socket(sch);
 
@@ -1292,6 +1288,7 @@ static int fp_tc_init(struct Qdisc *sch, struct nlattr *opt)
 	q->req_min_gap		= 1000;
 	q->gc_age = DIV_ROUND_UP(FP_GC_NUM_SECS * NSEC_PER_SEC, q->tslot_len);
 	q->ctrl_addr_netorder = htonl(0x7F000001); /* need sensible default? */
+	q->reset_window_us	= 2e6; /* 2 seconds */
 	q->flow_hash_tbl	= NULL;
 	q->unreq_flows.first= NULL;
 	q->internal.src_dst_key = 0xD066F00DDEADBEEF;
@@ -1348,7 +1345,8 @@ static int fp_tc_dump(struct Qdisc *sch, struct sk_buff *skb)
 	    nla_put_u32(skb, TCA_FASTPASS_REQUEST_COST, q->req_cost) ||
 	    nla_put_u32(skb, TCA_FASTPASS_REQUEST_BUCKET, q->req_bucketlen) ||
 	    nla_put_u32(skb, TCA_FASTPASS_REQUEST_GAP, q->req_min_gap) ||
-	    nla_put_u32(skb, TCA_FASTPASS_CONTROLLER_IP, q->ctrl_addr_netorder))
+	    nla_put_u32(skb, TCA_FASTPASS_CONTROLLER_IP, q->ctrl_addr_netorder) ||
+	    nla_put_u32(skb, TCA_FASTPASS_RST_WIN_USEC, q->reset_window_us))
 		goto nla_put_failure;
 
 	nla_nest_end(skb, opts);

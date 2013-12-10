@@ -60,7 +60,7 @@ extern bool fastpass_debug;
  * Operations executed by the protocol
  */
 struct fpproto_ops {
-	void 	(*handle_reset)(struct Qdisc *q, u64 tstamp);
+	void 	(*handle_reset)(struct Qdisc *q);
 
 	void	(*handle_alloc)(struct Qdisc *q, u32 base_tslot,
 			u16 *dst, int n_dst, u8 *tslots, int n_tslots);
@@ -71,6 +71,7 @@ struct fpproto_ops {
  * @mss_cache: maximum segment size cache
  * @qdisc: the qdisc that owns the socket
  * @last_reset_time: the time used in the last sent reset
+ * @rst_win_ns: time window within which resets are accepted, in nanoseconds
  *
  * Statistics:
  * @stat_tasklet_runs: the number of times the tasklet ran
@@ -78,6 +79,9 @@ struct fpproto_ops {
  * @stat_xmit_errors: #egress failures due to IP stack
  * @stat_invalid_rx_pkts: #invalid rx packets
  * @stat_redundant_reset: #times got reset for last_reset_time
+ * @stat_reset_out_of_window: the reset was outside rst_wnd_ns
+ * @stat_outdated_reset: the socket already processed a more recent reset within
+ *   the window
  */
 struct fastpass_sock {
 	/* inet_sock has to be the first member */
@@ -88,6 +92,7 @@ struct fastpass_sock {
 	u64						next_seqno;
 	u32						in_sync:1;
 	struct fpproto_ops		*ops;
+	u64 					rst_win_ns;
 
 	/* statistics */
 	u64 stat_tasklet_runs;
@@ -95,6 +100,9 @@ struct fastpass_sock {
 	u64 stat_xmit_errors;
 	u64 stat_invalid_rx_pkts;
 	u64 stat_redundant_reset;
+	u64 stat_reset_out_of_window; /* TODO: report */
+	u64 stat_outdated_reset; /* TODO: report */
+
 };
 
 extern void __init fpproto_register(void);

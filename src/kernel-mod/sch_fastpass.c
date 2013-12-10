@@ -1417,25 +1417,35 @@ static struct Qdisc_ops fastpass_qdisc_ops __read_mostly = {
 
 static int __init fastpass_module_init(void)
 {
-	int ret;
+	int ret = -ENOMEM;
 
 	fp_flow_cachep = kmem_cache_create("fp_flow_cache",
 					   sizeof(struct fp_flow),
 					   0, 0, NULL);
 	if (!fp_flow_cachep)
-		return -ENOMEM;
+		goto out;
 
 	ret = register_qdisc(&fastpass_qdisc_ops);
 	if (ret)
-		kmem_cache_destroy(fp_flow_cachep);
+		goto out_destroy_cache;
 
-	fpproto_register();
+	ret = fpproto_register();
+	if (ret)
+		goto out_unregister_qdisc;
 
+	return 0;
+
+out_unregister_qdisc:
+	unregister_qdisc(&fastpass_qdisc_ops);
+out_destroy_cache:
+	kmem_cache_destroy(fp_flow_cachep);
+out:
 	return ret;
 }
 
 static void __exit fastpass_module_exit(void)
 {
+	fpproto_unregister(); /* TODO: verify this is safe */
 	unregister_qdisc(&fastpass_qdisc_ops);
 	kmem_cache_destroy(fp_flow_cachep);
 }

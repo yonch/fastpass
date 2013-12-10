@@ -21,6 +21,16 @@
 #define MAX_FASTPASS_ONLY_HEADER 12
 #define MAX_TOTAL_FASTPASS_HEADERS (MAX_FASTPASS_ONLY_HEADER + MAX_HEADER)
 
+/**
+ * The log of the size of outgoing packet window waiting for ACKs or timeout
+ *    expiry. Setting this at < 6 is a bit wasteful since a full word has 64
+ *    bits, and the algorithm works with word granularity
+ */
+#define FASTPASS_OUTWND_LOG			8
+#define FASTPASS_OUTWND_LEN			(1 << FASTPASS_OUTWND_LOG)
+
+#define FASTPASS_PKT_MAX_AREQ		10
+
 #define FASTPASS_PTYPE_RSTREQ		0x0
 #define FASTPASS_PTYPE_RESET 		0x1
 #define FASTPASS_PTYPE_AREQ			0x2
@@ -57,6 +67,26 @@ extern bool fastpass_debug;
 #endif
 
 /**
+ * An A-REQ for a single destination
+ * @src_dst_key: the key for the flow
+ * @tslots: the total number of tslots requested
+ */
+struct fpproto_areq_desc {
+	u64		src_dst_key;
+	u64		tslots;
+};
+
+/**
+ * A full packet sent to the controller
+ * @n_areq: number of filled in destinations for A-REQ
+ */
+struct fpproto_pktdesc {
+	u16							n_areq;
+	struct fpproto_areq_desc	areq[FASTPASS_PKT_MAX_AREQ];
+
+};
+
+/**
  * Operations executed by the protocol
  */
 struct fpproto_ops {
@@ -72,6 +102,8 @@ struct fpproto_ops {
  * @qdisc: the qdisc that owns the socket
  * @last_reset_time: the time used in the last sent reset
  * @rst_win_ns: time window within which resets are accepted, in nanoseconds
+ * @bin_mask: a mask for each bin, 1 if it has not been acked yet.
+ * @bins: pointers to the packet descriptors of each bin
  *
  * Statistics:
  * @stat_tasklet_runs: the number of times the tasklet ran
@@ -94,6 +126,10 @@ struct fastpass_sock {
 	struct fpproto_ops		*ops;
 	u64 					rst_win_ns;
 
+	/* outwnd */
+	unsigned long			bin_mask[BITS_TO_LONGS(2 * FASTPASS_OUTWND_LEN)];
+	struct fpproto_pktdesc		*bins[FASTPASS_OUTWND_LEN];
+
 	/* statistics */
 	u64 stat_tasklet_runs;
 	u64 stat_build_header_errors;
@@ -105,7 +141,9 @@ struct fastpass_sock {
 
 };
 
-extern void __init fpproto_register(void);
+extern int __init fpproto_register(void);
+void __exit fpproto_unregister(void);
+
 
 void fpproto_set_qdisc(struct sock *sk, struct Qdisc *new_qdisc);
 

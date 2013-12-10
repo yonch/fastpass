@@ -31,6 +31,9 @@ MODULE_PARM_DESC(fastpass_debug, "Enable debug messages");
 EXPORT_SYMBOL_GPL(fastpass_debug);
 #endif
 
+static struct kmem_cache *fpproto_pktdesc_cachep __read_mostly;
+
+
 /* locks the qdisc associated with the fastpass socket */
 static struct Qdisc *fpproto_lock_qdisc(struct sock *sk)
 {
@@ -78,11 +81,25 @@ void fpproto_set_qdisc(struct sock *sk, struct Qdisc *new_qdisc)
 	rcu_assign_pointer(fp->qdisc, new_qdisc);
 }
 
+struct fpproto_pktdesc *fpproto_pktdesc_alloc(void)
+{
+	struct fpproto_pktdesc *pd;
+	pd = kmem_cache_zalloc(fpproto_pktdesc_cachep, GFP_ATOMIC | __GFP_NOWARN);
+	return pd;
+}
+
+void fpproto_pktdesc_free(struct fpproto_pktdesc *pd)
+{
+	kmem_cache_free(fpproto_pktdesc_cachep, pd);
+}
+
 static void do_proto_reset(struct fastpass_sock *fp, u64 reset_time)
 {
 	fp->last_reset_time = reset_time;
 	fp->next_seqno = reset_time +
 			((u64)jhash_1word((u32)reset_time, reset_time >> 32) << 32);
+
+	memset(&fp->bin_mask[0], 0, sizeof(fp->bin_mask));
 }
 
 static bool tstamp_in_window(u64 tstamp, u64 win_middle, u64 win_size) {
@@ -652,7 +669,7 @@ static int init_hashinfo(void)
 
 	if (!fastpass_hashinfo.ehash) {
 		FASTPASS_CRIT("Failed to allocate ehash buckets");
-		return ENOMEM;
+		return -ENOMEM;
 	}
 
 	fastpass_hashinfo.ehash_locks = kmalloc(sizeof(spinlock_t), GFP_KERNEL);
@@ -660,7 +677,7 @@ static int init_hashinfo(void)
 	if (!fastpass_hashinfo.ehash_locks) {
 		FASTPASS_CRIT("Failed to allocate ehash locks");
 		kfree(fastpass_hashinfo.ehash);
-		return ENOMEM;
+		return -ENOMEM;
 	}
 	spin_lock_init(&fastpass_hashinfo.ehash_locks[0]);
 
@@ -671,29 +688,59 @@ static int init_hashinfo(void)
 	return 0;
 }
 
-
-void __init fpproto_register(void)
+static void destroy_hashinfo(void)
 {
-	if (init_hashinfo())
-		goto out_mem_err;
+	kfree(fastpass_hashinfo.ehash);
+	kfree(fastpass_hashinfo.ehash_locks);
+}
 
-	if (proto_register(&fastpass_prot, 1))
-		goto out_register_err;
+int __init fpproto_register(void)
+{
+	int err;
 
-	if (inet_add_protocol(&fastpass_protocol, IPPROTO_FASTPASS) < 0)
+	err = -ENOMEM;
+	fpproto_pktdesc_cachep = kmem_cache_create("fpproto_pktdesc_cache",
+					   sizeof(struct fpproto_pktdesc),
+					   0, 0, NULL);
+	if (!fpproto_pktdesc_cachep) {
+		FASTPASS_CRIT("Cannot create kmem cache for fpproto_pktdesc\n");
+		goto out;
+	}
+
+	err = init_hashinfo();
+	if (err) {
+		FASTPASS_CRIT("Cannot allocate hashinfo tables\n");
+		goto out_destroy_cache;
+	}
+
+	err = proto_register(&fastpass_prot, 1);
+	if (err) {
+		FASTPASS_CRIT("Cannot add FastPass/IP protocol\n");
+		goto out_destroy_hashinfo;
+	}
+
+	err = inet_add_protocol(&fastpass_protocol, IPPROTO_FASTPASS);
+	if (err < 0)
 		goto out_unregister_proto;
 
 	inet_register_protosw(&fastpass4_protosw);
 
-	return;
+	return 0;
 
 out_unregister_proto:
 	proto_unregister(&fastpass_prot);
-out_register_err:
-	pr_crit("%s: Cannot add FastPass/IP protocol\n", __func__);
-	return;
-out_mem_err:
-	pr_crit("%s: Cannot allocate hashinfo tables\n", __func__);
-	return;
+out_destroy_hashinfo:
+	destroy_hashinfo();
+out_destroy_cache:
+	kmem_cache_destroy(fpproto_pktdesc_cachep);
+out:
+	return err;
 }
 
+void __exit fpproto_unregister(void)
+{
+	inet_unregister_protosw(&fastpass4_protosw);
+	proto_unregister(&fastpass_prot);
+	destroy_hashinfo();
+	kmem_cache_destroy(fpproto_pktdesc_cachep);
+}

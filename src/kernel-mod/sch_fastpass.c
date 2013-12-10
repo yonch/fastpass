@@ -48,11 +48,11 @@
 #define FASTPASS_REQUEST_WINDOW_SIZE (1 << 13)
 
 /**
- * Don't send a fresh request when the request window is nearly full until
- *   at least FASTPASS_SILLY_REQUEST_SIZE time slots are pending. This is done
- *   to prevent SWS-like (Silly Window Syndrom) behaviour.
+ * Don't bother sending a fresh request when there are already many timeslots
+ *   requested. Rather, wait until the number of allocated timeslots gets close
+ *   to the number of request packets.
  */
-#define FASTPASS_SILLY_REQUEST_SIZE (1 << 10)
+#define FASTPASS_REQUEST_LOW_WATERMARK (1 << 9)
 
 /* limit number of collected flows per round */
 #define FP_GC_MAX 8
@@ -214,17 +214,6 @@ static void horizon_set(struct fp_sched_data* q, u64 timeslot, u64 src_dst_key)
 	q->schedule[timeslot % FASTPASS_HORIZON] = src_dst_key;
 }
 
-/* adds flow to a list of flows, at tail */
-static void flowlist_add_tail(struct fp_flow_head *head, struct fp_flow *flow)
-{
-	if (head->first)
-		head->last->next = flow;
-	else
-		head->first = flow;
-	head->last = flow;
-	flow->next = NULL;
-}
-
 /* computes the time when next request should go out */
 void set_request_timer(struct fp_sched_data* q, u64 now)
 {
@@ -234,6 +223,30 @@ void set_request_timer(struct fp_sched_data* q, u64 now)
 	hrtimer_start(&q->request_timer,
 			      ns_to_ktime(q->time_next_req),
 			      HRTIMER_MODE_ABS);
+}
+
+/* adds flow to a list of flows, at tail */
+static void flowqueue_enqueue(struct fp_sched_data *q, struct fp_flow *f)
+{
+	struct fp_flow_head *head = &q->unreq_flows;
+
+	BUG_ON(f->next != NULL);
+
+	/* enqueue */
+	if (head->first)
+		head->last->next = f;
+	else
+		head->first = f;
+	head->last = f;
+	f->next = NULL;
+
+	q->n_unreq_flows++;
+
+	/* if enqueued first flow in q->unreq_flows, set request timer */
+	if (q->n_unreq_flows == 1) {
+		set_request_timer(q, fp_get_time_ns());
+		fastpass_pr_debug("set request timer to %llu\n", q->time_next_req);
+	}
 }
 
 /* should the flow be garbage-collected? */
@@ -416,26 +429,37 @@ static struct sk_buff *flow_dequeue_skb(struct Qdisc *sch, struct fp_flow *flow)
 	return skb;
 }
 
+static bool flow_is_below_watermark(struct fp_flow* f)
+{
+	u64 watermark = f->alloc_tslots + FASTPASS_REQUEST_LOW_WATERMARK;
+	return time_before_eq64(f->requested_tslots, watermark);
+}
+
+void flow_inc_alloc(struct fp_sched_data* q, struct fp_flow* f)
+{
+	f->alloc_tslots++;
+	q->alloc_tslots++;
+
+	if (unlikely((f->next != NULL)
+			&& (f->requested_tslots != f->demand_tslots)
+			&& flow_is_below_watermark(f)))
+		flowqueue_enqueue(q, f);
+}
+
 /**
  * Increase the number of unrequested packets for the flow.
  *   Maintains the necessary invariants, e.g. adds the flow to the unreq_flows
  *   list if necessary
  */
-static void flow_inc_demand(struct fp_sched_data *q,
-		struct fp_flow *flow)
+static void flow_inc_demand(struct fp_sched_data *q, struct fp_flow *f)
 {
-	if (flow->demand_tslots == flow->requested_tslots) {
+	if ((f->demand_tslots == f->requested_tslots)
+			&& flow_is_below_watermark(f)) {
+
 		/* flow not on scheduling queue yet, enqueue */
-		BUG_ON(flow->next != NULL);
-		flowlist_add_tail(&q->unreq_flows, flow);
-		q->n_unreq_flows++;
-		/* if enqueued only flow in q->unreq_flows, compute next request time */
-		if (q->n_unreq_flows == 1) {
-			set_request_timer(q, fp_get_time_ns());
-			fastpass_pr_debug("set request timer to %llu\n", q->time_next_req);
-		}
+		flowqueue_enqueue(q, f);
 	}
-	flow->demand_tslots++;
+	f->demand_tslots++;
 	q->demand_tslots++;
 }
 
@@ -538,12 +562,6 @@ static void move_timeslot_from_flow(struct Qdisc *sch, struct psched_ratecfg *ra
 	fastpass_pr_debug("@%llu moved %u out of %u packets from %llu (0x%04llx)\n",
 			q->horizon.timeslot, count, src->qlen + count, src->src_dst_key,
 			src->src_dst_key);
-}
-
-void flow_inc_alloc(struct fp_sched_data* q, struct fp_flow* f)
-{
-	f->alloc_tslots++;
-	q->alloc_tslots++;
 }
 
 /**
@@ -819,9 +837,9 @@ static void send_request(struct Qdisc *sch, u64 now)
 	BUG_ON(!q->unreq_flows.first);
 
 	fastpass_pr_debug(
-			"%s start: unreq_flows=%u, unreq_tslots=%u, now=%llu, scheduled=%llu, diff=%lld\n",
-			__func__, q->n_unreq_flows, q->demand_tslots - q->requested_tslots,
-			now, q->time_next_req, (s64 )now - (s64 )q->time_next_req);
+			"start: unreq_flows=%u, unreq_tslots=%llu, now=%llu, scheduled=%llu, diff=%lld\n",
+			q->n_unreq_flows, q->demand_tslots - q->requested_tslots, now,
+			q->time_next_req, (s64 )now - (s64 )q->time_next_req);
 
 	BUG_ON(!q->ctrl_sock);
 
@@ -846,7 +864,7 @@ static void send_request(struct Qdisc *sch, u64 now)
 		areq->count = htons((u16)new_requested);
 		payload_len += 4;
 
-		q->requested_tslots += (new_requested - f->requested_tslots)
+		q->requested_tslots += (new_requested - f->requested_tslots);
 		f->requested_tslots = new_requested;
 
 		/* remove flow from the q->unreq_flows queue */
@@ -865,7 +883,7 @@ static void send_request(struct Qdisc *sch, u64 now)
 	if (false)
 		dummy_allocate_locked(q);
 
-	fastpass_pr_debug("fp_do_request end unreq_flows=%u, unreq_tslots=%u\n",
+	fastpass_pr_debug("end: unreq_flows=%u, unreq_tslots=%llu\n",
 			q->n_unreq_flows, q->demand_tslots - q->requested_tslots);
 
 	q->stat_requests++;

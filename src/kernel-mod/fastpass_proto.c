@@ -119,6 +119,8 @@ void outwnd_add(struct fastpass_sock *fp, struct fpproto_pktdesc *pd)
 	__set_bit(circular_index, fp->bin_mask);
 	__set_bit(circular_index + FASTPASS_OUTWND_LEN, fp->bin_mask);
 	fp->bins[circular_index] = pd;
+
+	fp->next_seqno++;
 }
 
 /**
@@ -153,7 +155,7 @@ s32	outwnd_at_or_before(struct fastpass_sock *fp, u64 tslot)
 	 * there are two indices that could correspond to tslot, get the first
 	 *   one not smaller than head_index.
 	 */
-	u32 tslot_index = head_index + outwnd_pos(tslot - head_index);
+	u32 tslot_index = head_index + outwnd_pos(tslot - (fp->next_seqno - 1));
 
 	u32 found_offset;
 
@@ -192,6 +194,68 @@ u64 outwnd_earliest_unacked(struct fastpass_sock *fp)
 	return earliest;
 }
 
+void outwnd_test(struct fastpass_sock *fp) {
+	u64 tslot;
+	s32 gap;
+	int i;
+	const int BASE = 10007;
+
+	fastpass_pr_debug("testing outwnd\n");
+	fp->next_seqno = BASE;
+	for(tslot = BASE - FASTPASS_OUTWND_LEN; tslot < BASE; tslot++) {
+		BUG_ON(outwnd_at_or_before(fp, tslot) != -1);
+		BUG_ON(outwnd_is_unacked(fp, tslot));
+	}
+
+	for(i = 0; i < FASTPASS_OUTWND_LEN; i++)
+		outwnd_add(fp, (struct fpproto_pktdesc *)(0xFF00L + i));
+
+	for(tslot = BASE; tslot < BASE + FASTPASS_OUTWND_LEN; tslot++) {
+		BUG_ON(!outwnd_is_unacked(fp, tslot));
+		BUG_ON(outwnd_at_or_before(fp, tslot) != 0);
+	}
+
+	BUG_ON(outwnd_earliest_unacked(fp) != BASE);
+	BUG_ON(outwnd_pop(fp, BASE) != (void *)0xFF00L);
+	BUG_ON(outwnd_earliest_unacked(fp) != BASE+1);
+	BUG_ON(outwnd_at_or_before(fp, BASE) != -1);
+	BUG_ON(outwnd_at_or_before(fp, BASE+1) != 0);
+	BUG_ON(outwnd_pop(fp, BASE+2) != (void *)0xFF02L);
+	BUG_ON(outwnd_earliest_unacked(fp) != BASE+1);
+	BUG_ON(outwnd_at_or_before(fp, BASE+2) != 1);
+
+	for(tslot = BASE+3; tslot < BASE + 152; tslot++) {
+		BUG_ON(outwnd_pop(fp, tslot) != (void *)0xFF00L + tslot - BASE);
+		BUG_ON(outwnd_is_unacked(fp, tslot));
+		BUG_ON(outwnd_at_or_before(fp, tslot) != tslot - BASE - 1);
+		BUG_ON(outwnd_at_or_before(fp, tslot+1) != 0);
+		BUG_ON(outwnd_earliest_unacked(fp) != BASE+1);
+	}
+	for(tslot = BASE+152; tslot < BASE + FASTPASS_OUTWND_LEN; tslot++) {
+		BUG_ON(!outwnd_is_unacked(fp, tslot));
+		BUG_ON(outwnd_at_or_before(fp, tslot) != 0);
+	}
+
+	BUG_ON(outwnd_pop(fp, BASE+1) != (void *)0xFF01L);
+	BUG_ON(outwnd_earliest_unacked(fp) != BASE+152);
+
+	fastpass_pr_debug("done testing outwnd, cleaning up\n");
+
+	/* clean up */
+	tslot = fp->next_seqno - 1;
+clear_next_unacked:
+	gap = outwnd_at_or_before(fp, tslot);
+	if (gap >= 0) {
+		tslot -= gap;
+		BUG_ON(outwnd_pop(fp, tslot) != (void *)0xFF00L + tslot - BASE);
+		goto clear_next_unacked;
+	}
+
+	/* make sure pointer array is clean */
+	for (i = 0; i < FASTPASS_OUTWND_LEN; i++)
+		BUG_ON(fp->bins[i] != NULL);
+}
+
 static void do_proto_reset(struct fastpass_sock *fp, u64 reset_time)
 {
 	u64 tslot;
@@ -202,7 +266,7 @@ static void do_proto_reset(struct fastpass_sock *fp, u64 reset_time)
 clear_next_unacked:
 	gap = outwnd_at_or_before(fp, tslot);
 	if (gap >= 0) {
-		tslot += gap;
+		tslot -= gap;
 		fpproto_pktdesc_free(outwnd_pop(fp, tslot));
 		goto clear_next_unacked;
 	}
@@ -610,6 +674,10 @@ static int fpproto_sk_init(struct sock *sk)
 	fp->mss_cache = 536;
 
 	fpproto_set_qdisc(sk, NULL);
+
+	/* initialize outwnd */
+	memset(fp->bin_mask, 0, sizeof(fp->bin_mask));
+	outwnd_test(fp);
 
 	/* choose reset time */
 	do_proto_reset(fp, fp_get_time_ns());

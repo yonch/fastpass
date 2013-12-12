@@ -94,11 +94,13 @@ class admissible_timing_util(object):
         packets_requested = int(mean * fraction)
         for src in range(n):
             t = self.gen_exponential_variate(mean)
+            cumulative_demand = 0
             while (t < self.duration):
+                cumulative_demand += packets_requested
                 dst = random.randint(0, n-2)
                 if (dst >= src):
                     dst += 1  # don't send to self
-                self.requests[int(t)].append((src, dst, packets_requested))
+                self.requests[int(t)].append((src, dst, cumulative_demand))
                 t = t + self.gen_exponential_variate(mean)
 
         # initialize structures

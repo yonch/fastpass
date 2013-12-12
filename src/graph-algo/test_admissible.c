@@ -37,6 +37,7 @@ uint32_t generate_requests_poisson(struct backlog_edge *edges, uint32_t size,
     uint16_t src;
     uint32_t num_generated = 0;
     for (src = 0; src < num_nodes; src++) {
+        uint16_t *cumulative_demands = calloc(num_nodes, sizeof(uint16_t));
         double current_time = generate_exponential_variate(mean);
         while (current_time < duration) {
             uint32_t dst = rand() / ((double) RAND_MAX) * (num_nodes - 1);
@@ -44,12 +45,14 @@ uint32_t generate_requests_poisson(struct backlog_edge *edges, uint32_t size,
                 dst++;  // Don't send to self
             current_edge->src = src;
             current_edge->dst = dst;
-            current_edge->backlog = (uint16_t) (mean * fraction);
+            cumulative_demands[dst] += (uint16_t) mean * fraction;
+            current_edge->backlog = cumulative_demands[dst];
             current_edge->timeslot = (uint16_t) current_time;
             num_generated++;
             current_edge++;
             current_time += generate_exponential_variate(mean);
         }
+        free(cumulative_demands);
     }
 
     assert(num_generated <= size);
@@ -63,6 +66,7 @@ uint32_t generate_requests_poisson(struct backlog_edge *edges, uint32_t size,
 
 // Generate a uniformly random sequence of requests, puts them in edges
 // Returns the number of requests generated
+// TODO: update this to use new API for admissible_traffic (cumulative demands)
 uint32_t generate_requests_uniformly(struct backlog_edge *edges, uint32_t size,
                                      uint32_t num_nodes, uint32_t duration,
                                      double fraction)
@@ -132,7 +136,6 @@ int main(void) {
 
         uint32_t t;
         uint32_t num_admitted = 0;
-        uint32_t num_requested = 0;
         struct backlog_edge *current_request = requests;
         for (t = 0; t < duration; t++) {
             // Issue new requests
@@ -141,7 +144,6 @@ int main(void) {
                    current_request < requests + num_requests) {
                 request_timeslots(&new_requests, &status, current_request->src,
                                   current_request->dst, current_request->backlog);
-                num_requested += current_request->backlog;
                 current_request++;
             }
  
@@ -159,19 +161,14 @@ int main(void) {
             num_admitted += admitted.size;
             
             assert(!out_of_order(queue_out, false));
-            assert(num_admitted <= num_requested);
         }
         
         uint64_t end_time = current_time();
         double time_per_experiment = (end_time - start_time) / (2.8 * 1000 * duration);
 
-        uint16_t request_size = fraction * mean;
-        assert(num_requests * request_size == num_requested);
-
         // Print stats - percent of requested traffic admitted, percent of network
         // capacity utilized, computation time per admitted timeslot (in microseconds)
-        printf("percent of requested traffic, capacity: %f, %f, ",
-               ((double) num_admitted) / (num_requested),
+        printf("percent of network capacity utilized: %f, ",
                ((double) num_admitted) / (duration * num_nodes));
         printf("avg time (microseconds): %f\n", time_per_experiment);
     }

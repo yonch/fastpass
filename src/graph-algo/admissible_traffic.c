@@ -14,13 +14,22 @@
 
 // Request num_slots additional timeslots from src to dst
 void request_timeslots(struct backlog_queue *new_requests, struct flow_status *status,
-                       uint16_t src, uint16_t dst, uint16_t num_slots) {
+                       uint16_t src, uint16_t dst, uint16_t demand_tslots) {
     assert(new_requests != NULL);
     assert(status != NULL);
 
-    // Just add this request at the end of the backlog queue with an invalid time
-    // Obtain the last_sent_timeslot and sort later
-    enqueue_backlog(new_requests, src, dst, num_slots, 0);
+    // Get full quantity from 16-bit LSB
+    uint16_t prev = get_last_demand(status, src, dst);
+    int16_t prev_wnd = prev - (1 << 15);
+    int64_t new_demand = prev_wnd + ((demand_tslots - prev_wnd) & 0xFFFF);
+
+    if (new_demand > prev) {
+        set_last_demand(status, src, dst, (uint16_t) new_demand);
+
+        // Just add this request at the end of the backlog queue with an invalid time
+        // Obtain the last_sent_timeslot and sort later
+        enqueue_backlog(new_requests, src, dst, new_demand - prev, 0);
+    }
 }
 
 // Sets the last send time for new requests based on the contents of status

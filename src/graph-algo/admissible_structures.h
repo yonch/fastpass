@@ -51,12 +51,13 @@ struct admitted_bitmap {
     uint64_t dsts [MAX_NODES >> 6];
 };
 
-// For all src/dst pairs, gives the timeslot we last sent in
+// For all src/dst pairs, stores the timeslot we last sent in and last recorded demand
 // Also stores the current timeslot and oldest timeslot with outstanding requests
 struct flow_status {
     uint64_t current_timeslot;
     uint64_t oldest_timeslot;
     uint64_t timeslots[MAX_NODES * MAX_NODES];
+    uint16_t demands[MAX_NODES * MAX_NODES];
 };
 
 
@@ -86,6 +87,16 @@ void insert_admitted_edge(struct admitted_traffic *admitted, uint16_t src,
     edge->src = src;
     edge->dst = dst;
     admitted->size++;
+}
+
+// Get a pointer to an edge of admitted traffic
+static inline
+struct admitted_edge *get_admitted_edge(struct admitted_traffic *admitted,
+                                        uint16_t index) {
+    assert(admitted != NULL);
+    assert(index <= admitted->size);
+
+    return &admitted->edges[index];
 }
 
 // Initialize a backlog queue
@@ -354,7 +365,7 @@ void set_dst_admitted(struct admitted_bitmap *admitted, uint16_t dst) {
     admitted->dsts[dst >> 6] = admitted->dsts[dst >> 6] | (0x1ULL << bit_index);
 }
 
-// Initialize all timeslots to zero
+// Initialize all timeslots and demands to zero
 static inline
 void init_flow_status(struct flow_status *status) {
     assert(status != NULL);
@@ -365,6 +376,8 @@ void init_flow_status(struct flow_status *status) {
     uint32_t i;
     for (i = 0; i < MAX_NODES * MAX_NODES; i++)
         status->timeslots[i] = 0;
+    for (i = 0; i < MAX_NODES * MAX_NODES; i++)
+        status->demands[i] = 0;
 }
 
 // Returns the last timeslot we transmitted in for this src/dst pair
@@ -384,6 +397,23 @@ void set_last_timeslot(struct flow_status *status, uint16_t src, uint16_t dst,
     status->timeslots[src * MAX_NODES + dst] = timeslot;
 }
 
+// Returns the last demand recorded for this src/dst pair
+static inline
+uint16_t get_last_demand(struct flow_status *status, uint16_t src, uint16_t dst) {
+    assert(status != NULL);
+
+    return status->demands[src * MAX_NODES + dst];
+}
+
+// Sets the last demand for this src/dst pair
+static inline
+void set_last_demand(struct flow_status *status, uint16_t src, uint16_t dst,
+                     uint16_t demand) {
+    assert(status != NULL);
+    
+    status->demands[src * MAX_NODES + dst] = demand;
+}
+
 // Helper methods for testing in python
 static inline
 struct admitted_traffic *create_admitted_traffic() {
@@ -398,15 +428,6 @@ void destroy_admitted_traffic(struct admitted_traffic *admitted) {
     assert(admitted != NULL);
 
     free(admitted);
-}
-
-static inline
-struct admitted_edge *get_admitted_edge(struct admitted_traffic *admitted,
-                                        uint16_t index) {
-    assert(admitted != NULL);
-    assert(index <= admitted->size);
-
-    return &admitted->edges[index];
 }
 
 static inline

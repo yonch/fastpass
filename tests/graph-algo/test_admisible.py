@@ -143,8 +143,8 @@ class Test(unittest.TestCase):
 
         # Make two competing requests out of their timeslot order
         structures.init_backlog_queue(new_requests)
-        admissible.request_timeslots(new_requests, status, 4, 5, 1)
-        admissible.request_timeslots(new_requests, status, 3, 5, 1)
+        admissible.request_timeslots(new_requests, status, 4, 5, 2)
+        admissible.request_timeslots(new_requests, status, 3, 5, 2)
 
         # Get admissible traffic (timeslot 3)
         # Check that one packet was admitted from src 3
@@ -194,7 +194,7 @@ class Test(unittest.TestCase):
 
     def test_many_requests(self):
         """Tests the admissible algorithm over a long time."""
-        
+  
         n_nodes = 32
         max_r_per_t = 10  # max requests per timeslot
         duration = 100000
@@ -202,6 +202,8 @@ class Test(unittest.TestCase):
 
         # Track pending requests - mapping from src/dst to num requested
         pending_requests = {}
+        # Track total demands
+        cumulative_demands = {}
 
         # initialize structures
         queue_0 = structures.create_backlog_queue()
@@ -222,12 +224,15 @@ class Test(unittest.TestCase):
                 if (dst >= src):
                     dst += 1 # don't send to self
                 size = random.randint(1, max_size)
+                demand = cumulative_demands.get((src, dst), 0)
+                demand += size
+                cumulative_demands[(src, dst)] = demand
                 if (src, dst) in pending_requests.keys():
                     pending_requests[(src, dst)] = pending_requests[(src, dst)] + size
                 else:
                     pending_requests[(src, dst)] = size
                 admissible.request_timeslots(new_requests, status,
-                                             src, dst, size)
+                                             src, dst, demand)
                 num_requested += size
             
             # Get admissible traffic for this timeslot
@@ -262,6 +267,8 @@ class Test(unittest.TestCase):
         structures.destroy_backlog_queue(new_requests)
         structures.destroy_admitted_traffic(admitted)
         structures.destroy_flow_status(status)
+
+        pass
 
 
     def test_backlog_sorting_1_item(self):

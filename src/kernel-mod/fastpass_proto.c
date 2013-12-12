@@ -260,20 +260,24 @@ clear_next_unacked:
 }
 #endif
 
-static void do_proto_reset(struct fastpass_sock *fp, u64 reset_time)
+void outwnd_reset(struct fastpass_sock* fp)
 {
 	u64 tslot;
 	s32 gap;
 
-	/* clear unacked packets */
 	tslot = fp->next_seqno - 1; /* start at the last transmitted message */
-clear_next_unacked:
-	gap = outwnd_at_or_before(fp, tslot);
+	clear_next_unacked: gap = outwnd_at_or_before(fp, tslot);
 	if (gap >= 0) {
 		tslot -= gap;
 		fpproto_pktdesc_free(outwnd_pop(fp, tslot));
 		goto clear_next_unacked;
 	}
+}
+
+static void do_proto_reset(struct fastpass_sock *fp, u64 reset_time)
+{
+	/* clear unacked packets */
+	outwnd_reset(fp);
 
 	/* set new sequence numbers */
 	fp->last_reset_time = reset_time;
@@ -564,6 +568,9 @@ static void fpproto_destroy_sock(struct sock *sk)
 
 	/* might not be necessary, doing for safety */
 	fpproto_set_qdisc(sk, NULL);
+
+	/* clear unacked packets */
+	outwnd_reset(fastpass_sk(sk));
 }
 
 static int fpproto_build_header(struct sock *sk, struct sk_buff *skb)

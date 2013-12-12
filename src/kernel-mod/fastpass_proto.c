@@ -19,6 +19,8 @@
 
 #include "fastpass_proto.h"
 
+#undef FASTPASS_PERFORM_RUNTIME_TESTS
+
 struct inet_hashinfo fastpass_hashinfo;
 EXPORT_SYMBOL_GPL(fastpass_hashinfo);
 #define FASTPASS_EHASH_NBUCKETS 16
@@ -194,6 +196,7 @@ u64 outwnd_earliest_unacked(struct fastpass_sock *fp)
 	return earliest;
 }
 
+#ifdef FASTPASS_PERFORM_RUNTIME_TESTS
 void outwnd_test(struct fastpass_sock *fp) {
 	u64 tslot;
 	s32 gap;
@@ -255,6 +258,7 @@ clear_next_unacked:
 	for (i = 0; i < FASTPASS_OUTWND_LEN; i++)
 		BUG_ON(fp->bins[i] != NULL);
 }
+#endif
 
 static void do_proto_reset(struct fastpass_sock *fp, u64 reset_time)
 {
@@ -677,7 +681,9 @@ static int fpproto_sk_init(struct sock *sk)
 
 	/* initialize outwnd */
 	memset(fp->bin_mask, 0, sizeof(fp->bin_mask));
+#ifdef FASTPASS_PERFORM_RUNTIME_TESTS
 	outwnd_test(fp);
+#endif
 
 	/* choose reset time */
 	do_proto_reset(fp, fp_get_time_ns());

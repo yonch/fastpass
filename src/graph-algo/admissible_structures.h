@@ -268,7 +268,7 @@ static inline
 void print_backlog(struct backlog_queue *queue) {
     assert(queue != NULL);
 
-    printf("printing backlog queue %x\n", (int) queue);
+    printf("printing backlog queue:\n");
     struct backlog_edge *edge;
     for (edge = &queue->edges[queue->head]; edge < &queue->edges[queue->tail]; edge++)
         printf("\t%d\t%d\t%d\t%d\n", edge->src, edge->dst, edge->backlog, edge->timeslot);

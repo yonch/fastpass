@@ -108,7 +108,7 @@ class admissible_timing_util(object):
         self.queue_1 = structures.create_backlog_queue()
         self.new_requests = structures.create_backlog_queue()
         self.admitted = structures.create_admitted_traffic()
-        self.status = structures.create_flow_status()
+        self.status = structures.create_admissible_status(False, 0)
 
     def gen_exponential_variate(self, mean):
         '''

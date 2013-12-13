@@ -16,6 +16,7 @@
 
 #define MAX_NODES 256  // should be a multiple of 64, due to bitmaps
 #define NODES_SHIFT 8  // 2^NODES_SHIFT = MAX_NODES
+#define MAX_RACKS 16
 #define MAX_TIME 66535
 
 struct admitted_edge {
@@ -51,11 +52,18 @@ struct admitted_bitmap {
     uint64_t dsts [MAX_NODES >> 6];
 };
 
-// For all src/dst pairs, stores the timeslot we last sent in and last recorded demand
-// Also stores the current timeslot and oldest timeslot with outstanding requests
-struct flow_status {
+// Tracks how many flows have been admitted per rack
+struct rack_admits {
+    uint8_t srcs [MAX_RACKS];
+    uint8_t dsts [MAX_RACKS];
+};
+
+// Tracks status for admissible traffic (last send time and demand for all flows, etc.)
+struct admissible_status {
     uint64_t current_timeslot;
     uint64_t oldest_timeslot;
+    bool oversubscribed;
+    uint16_t inter_rack_capacity;  // Only valid if oversubscribed is true
     uint64_t timeslots[MAX_NODES * MAX_NODES];
     uint16_t demands[MAX_NODES * MAX_NODES];
 };
@@ -365,13 +373,28 @@ void set_dst_admitted(struct admitted_bitmap *admitted, uint16_t dst) {
     admitted->dsts[dst >> 6] = admitted->dsts[dst >> 6] | (0x1ULL << bit_index);
 }
 
+// Initialize an admitted bitmap;
+static inline
+void init_rack_admits(struct rack_admits *admitted) {
+    assert(admitted != NULL);
+
+    int i;
+    for (i = 0; i < MAX_RACKS; i++) {
+        admitted->srcs[i] = 0;
+        admitted->dsts[i] = 0;
+    }
+}
+
 // Initialize all timeslots and demands to zero
 static inline
-void init_flow_status(struct flow_status *status) {
+void init_admissible_status(struct admissible_status *status, bool oversubscribed,
+                            uint16_t inter_rack_capacity) {
     assert(status != NULL);
 
     status->current_timeslot = 1;
     status->oldest_timeslot = 1;
+    status->oversubscribed = oversubscribed;
+    status->inter_rack_capacity = inter_rack_capacity;
 
     uint32_t i;
     for (i = 0; i < MAX_NODES * MAX_NODES; i++)
@@ -382,7 +405,7 @@ void init_flow_status(struct flow_status *status) {
 
 // Returns the last timeslot we transmitted in for this src/dst pair
 static inline
-uint64_t get_last_timeslot(struct flow_status *status, uint16_t src, uint16_t dst) {
+uint64_t get_last_timeslot(struct admissible_status *status, uint16_t src, uint16_t dst) {
     assert(status != NULL);
 
     return status->timeslots[src * MAX_NODES + dst];
@@ -390,7 +413,7 @@ uint64_t get_last_timeslot(struct flow_status *status, uint16_t src, uint16_t ds
 
 // Sets the last timeslot we transmitted in for this src/dst pair
 static inline
-void set_last_timeslot(struct flow_status *status, uint16_t src, uint16_t dst,
+void set_last_timeslot(struct admissible_status *status, uint16_t src, uint16_t dst,
                        uint64_t timeslot) {
     assert(status != NULL);
 
@@ -399,7 +422,7 @@ void set_last_timeslot(struct flow_status *status, uint16_t src, uint16_t dst,
 
 // Returns the last demand recorded for this src/dst pair
 static inline
-uint16_t get_last_demand(struct flow_status *status, uint16_t src, uint16_t dst) {
+uint16_t get_last_demand(struct admissible_status *status, uint16_t src, uint16_t dst) {
     assert(status != NULL);
 
     return status->demands[src * MAX_NODES + dst];
@@ -407,7 +430,7 @@ uint16_t get_last_demand(struct flow_status *status, uint16_t src, uint16_t dst)
 
 // Sets the last demand for this src/dst pair
 static inline
-void set_last_demand(struct flow_status *status, uint16_t src, uint16_t dst,
+void set_last_demand(struct admissible_status *status, uint16_t src, uint16_t dst,
                      uint16_t demand) {
     assert(status != NULL);
     
@@ -418,6 +441,8 @@ void set_last_demand(struct flow_status *status, uint16_t src, uint16_t dst,
 static inline
 struct admitted_traffic *create_admitted_traffic() {
     struct admitted_traffic *admitted = malloc(sizeof(struct admitted_traffic));
+    assert(admitted != NULL);
+
     init_admitted_traffic(admitted);
 
     return admitted;
@@ -433,6 +458,8 @@ void destroy_admitted_traffic(struct admitted_traffic *admitted) {
 static inline
 struct backlog_queue *create_backlog_queue() {
     struct backlog_queue *queue = malloc(sizeof(struct backlog_queue));
+    assert(queue != NULL);
+
     init_backlog_queue(queue);
 
     return queue;
@@ -446,15 +473,18 @@ void destroy_backlog_queue(struct backlog_queue *queue) {
 }
 
 static inline
-struct flow_status *create_flow_status() {
-    struct flow_status *status = malloc(sizeof(struct flow_status));
-    init_flow_status(status);
+struct admissible_status *create_admissible_status(bool oversubscribed,
+                                                   uint16_t inter_rack_capacity) {
+    struct admissible_status *status = malloc(sizeof(struct admissible_status));
+    assert(status != NULL);
+
+    init_admissible_status(status, oversubscribed, inter_rack_capacity);
 
     return status;
 }
 
 static inline
-void destroy_flow_status(struct flow_status *status) {
+void destroy_admissible_status(struct admissible_status *status) {
     assert(status != NULL);
 
     free(status);

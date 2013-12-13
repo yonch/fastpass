@@ -108,7 +108,7 @@ int main(void) {
 
     // Data structures
     struct backlog_queue new_requests;
-    struct flow_status status;
+    struct admissible_status status;
     struct backlog_queue queue_0;
     struct backlog_queue queue_1;
     struct admitted_traffic admitted;
@@ -118,7 +118,7 @@ int main(void) {
     uint16_t i;
     for (i = 0; i < experiments; i++) {
         // Initialize data structures
-        init_flow_status(&status);
+        init_admissible_status(&status, false, 0);
         init_backlog_queue(&queue_0);
         init_backlog_queue(&queue_1);
 

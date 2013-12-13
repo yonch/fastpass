@@ -25,4 +25,7 @@ void get_admissible_traffic(struct backlog_queue *queue_in,
                             struct admitted_traffic *traffic_out,
                             struct admissible_status *status);
 
+// Helper function to map ids to racks
+uint16_t get_rack_from_id(uint16_t id);
+
 #endif /* ADMISSIBLE_TRAFFIC_H_ */

@@ -24,7 +24,7 @@ class Test(unittest.TestCase):
         queue_1 = structures.create_backlog_queue()
         new_requests = structures.create_backlog_queue()
         admitted = structures.create_admitted_traffic()
-        status = structures.create_admissible_status()
+        status = structures.create_admissible_status(False, 0)
 
         # Make a request, check it was inserted correctly
         admissible.request_timeslots(new_requests, status, 0, 1, 5)
@@ -70,7 +70,7 @@ class Test(unittest.TestCase):
         admitted_1 = structures.create_admitted_traffic()
         admitted_2 = structures.create_admitted_traffic()
         admitted_3 = structures.create_admitted_traffic()
-        status = structures.create_admissible_status()
+        status = structures.create_admissible_status(False, 0)
         empty_queue = structures.create_backlog_queue()
 
         # Make a few competing requests
@@ -120,7 +120,7 @@ class Test(unittest.TestCase):
         admitted_1 = structures.create_admitted_traffic()
         admitted_2 = structures.create_admitted_traffic()
         admitted_3 = structures.create_admitted_traffic()
-        status = structures.create_admissible_status()
+        status = structures.create_admissible_status(False, 0)
         empty_queue = structures.create_backlog_queue()
 
         # Make two competing requests
@@ -193,12 +193,13 @@ class Test(unittest.TestCase):
             print "avg time per timeslot: \t\t(%f)" % avg
 
     def test_many_requests(self):
-        """Tests the admissible algorithm over a long time."""
+        """Tests the admissible algorithm over a long time, including oversubscription."""
   
-        n_nodes = 32
+        n_nodes = 64
         max_r_per_t = 10  # max requests per timeslot
         duration = 100000
         max_size = 10
+        rack_capacity = 24
 
         # Track pending requests - mapping from src/dst to num requested
         pending_requests = {}
@@ -210,7 +211,7 @@ class Test(unittest.TestCase):
         queue_1 = structures.create_backlog_queue()
         new_requests = structures.create_backlog_queue()
         admitted = structures.create_admitted_traffic()
-        status = structures.create_admissible_status()
+        status = structures.create_admissible_status(True, rack_capacity)
 
         num_admitted = 0
         num_requested = 0
@@ -251,6 +252,8 @@ class Test(unittest.TestCase):
 
             # Check all admitted edges - make sure they were requested and have not yet been fulfilled
             self.assertTrue(admitted.size <= n_nodes)
+            rack_outputs = [0, 0]
+            rack_inputs = [0, 0]
             for e in range(admitted.size):
                 edge = structures.get_admitted_edge(admitted, e)
                 pending_count = pending_requests[(edge.src, edge.dst)]
@@ -259,6 +262,13 @@ class Test(unittest.TestCase):
                     pending_requests[(edge.src, edge.dst)] = pending_count - 1
                 else:
                     del pending_requests[(edge.src, edge.dst)]
+
+                rack_outputs[admissible.get_rack_from_id(edge.src)] += 1
+                rack_inputs[admissible.get_rack_from_id(edge.dst)] += 1
+            
+            for index in range(len(rack_outputs)):
+                self.assertTrue(rack_outputs[index] <= rack_capacity)
+                self.assertTrue(rack_inputs[index] <= rack_capacity)
                 
         print 'requested %d, admitted %d, capacity %d' % (num_requested, num_admitted, duration * n_nodes)
 
@@ -391,9 +401,49 @@ class Test(unittest.TestCase):
 
         pass
   
+    def test_oversubscribed(self):
+        """Tests networks which are oversubscribed on the uplinks from racks/downlinks to racks."""
 
-    # TODO: write more tests
-                        
+        queue_in = structures.create_backlog_queue()
+        queue_out = structures.create_backlog_queue()
+        new_requests = structures.create_backlog_queue()
+        admitted = structures.create_admitted_traffic()
+        status = structures.create_admissible_status(True, 2)
+        empty_queue = structures.create_backlog_queue()
+
+        # Make requests that could overfill the links above the ToRs
+        admissible.request_timeslots(new_requests, status, 0, 32, 1)
+        admissible.request_timeslots(new_requests, status, 1, 64, 1)
+        admissible.request_timeslots(new_requests, status, 2, 96, 1)
+        admissible.request_timeslots(new_requests, status, 33, 65, 1)
+        admissible.request_timeslots(new_requests, status, 97, 66, 1)
+    
+        # Get admissible traffic
+        admissible.get_admissible_traffic(queue_in, queue_out, new_requests,
+                                          admitted, status)
+   
+        # Check that we admitted at most 2 packets for each of the
+        # oversubscribed links
+        rack_0_out = 0
+        rack_2_in = 0
+        for e in range(admitted.size):
+            edge = structures.get_admitted_edge(admitted, e)
+            if admissible.get_rack_from_id(edge.src) == 0:
+                rack_0_out += 1
+            if admissible.get_rack_from_id(edge.dst) == 2:
+                rack_2_in += 1
+
+        self.assertEqual(rack_0_out, 2)
+        self.assertEqual(rack_2_in, 2)
+
+        structures.destroy_backlog_queue(queue_in)
+        structures.destroy_backlog_queue(queue_out)
+        structures.destroy_backlog_queue(new_requests)
+        structures.destroy_admitted_traffic(admitted)
+        structures.destroy_admissible_status(status)
+        structures.destroy_backlog_queue(empty_queue)
+
+        pass
 
 if __name__ == "__main__":
     unittest.main()

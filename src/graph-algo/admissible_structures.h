@@ -58,11 +58,12 @@ struct rack_admits {
     uint8_t dsts [MAX_RACKS];
 };
 
-// For all src/dst pairs, stores the timeslot we last sent in and last recorded demand
-// Also stores the current timeslot and oldest timeslot with outstanding requests
+// Tracks status for admissible traffic (last send time and demand for all flows, etc.)
 struct admissible_status {
     uint64_t current_timeslot;
     uint64_t oldest_timeslot;
+    bool oversubscribed;
+    uint16_t inter_rack_capacity;  // Only valid if oversubscribed is true
     uint64_t timeslots[MAX_NODES * MAX_NODES];
     uint16_t demands[MAX_NODES * MAX_NODES];
 };
@@ -386,11 +387,14 @@ void init_rack_admits(struct rack_admits *admitted) {
 
 // Initialize all timeslots and demands to zero
 static inline
-void init_admissible_status(struct admissible_status *status) {
+void init_admissible_status(struct admissible_status *status, bool oversubscribed,
+                            uint16_t inter_rack_capacity) {
     assert(status != NULL);
 
     status->current_timeslot = 1;
     status->oldest_timeslot = 1;
+    status->oversubscribed = oversubscribed;
+    status->inter_rack_capacity = inter_rack_capacity;
 
     uint32_t i;
     for (i = 0; i < MAX_NODES * MAX_NODES; i++)
@@ -469,11 +473,12 @@ void destroy_backlog_queue(struct backlog_queue *queue) {
 }
 
 static inline
-struct admissible_status *create_admissible_status() {
+struct admissible_status *create_admissible_status(bool oversubscribed,
+                                                   uint16_t inter_rack_capacity) {
     struct admissible_status *status = malloc(sizeof(struct admissible_status));
     assert(status != NULL);
 
-    init_admissible_status(status);
+    init_admissible_status(status, oversubscribed, inter_rack_capacity);
 
     return status;
 }

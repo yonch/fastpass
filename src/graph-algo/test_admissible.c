@@ -118,7 +118,7 @@ int main(void) {
     uint16_t i;
     for (i = 0; i < experiments; i++) {
         // Initialize data structures
-        init_admissible_status(&status);
+        init_admissible_status(&status, false, 0);
         init_backlog_queue(&queue_0);
         init_backlog_queue(&queue_1);
 

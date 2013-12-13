@@ -12,8 +12,11 @@
 #include <stdio.h>
 #include <stdlib.h>
 
+#define INTER_RACK_CAPACITY  // max packets in/out of a rack per timeslot
+#define TOR_SHIFT 5  // number of machines per rack is at most 2^TOR_SHIFT
+
 // Request num_slots additional timeslots from src to dst
-void request_timeslots(struct backlog_queue *new_requests, struct flow_status *status,
+void request_timeslots(struct backlog_queue *new_requests, struct admissible_status *status,
                        uint16_t src, uint16_t dst, uint16_t demand_tslots) {
     assert(new_requests != NULL);
     assert(status != NULL);
@@ -32,10 +35,15 @@ void request_timeslots(struct backlog_queue *new_requests, struct flow_status *s
     }
 }
 
+// Returns the ID of the top of rack switch corresponding to id
+uint16_t get_tor_from_id(uint16_t id) {
+    return id >> TOR_SHIFT;
+}
+
 // Sets the last send time for new requests based on the contents of status
 // and sorts them
 void prepare_new_requests(struct backlog_queue *new_requests,
-                          struct flow_status *status) {
+                          struct admissible_status *status) {
     assert(new_requests != NULL);
     assert(status != NULL);
 
@@ -68,7 +76,7 @@ void get_admissible_traffic(struct backlog_queue *queue_in,
                             struct backlog_queue *queue_out,
                             struct backlog_queue *new_requests,
                             struct admitted_traffic *traffic_out,
-                            struct flow_status *status) {
+                            struct admissible_status *status) {
     assert(queue_in != NULL);
     assert(queue_out != NULL);
     assert(new_requests != NULL);
@@ -80,8 +88,8 @@ void get_admissible_traffic(struct backlog_queue *queue_in,
 
     uint16_t min_time = (uint16_t) status->oldest_timeslot - 1;
 
-    struct admitted_bitmap admitted;
-    init_admitted_bitmap(&admitted);
+    struct admitted_bitmap admitted_endnodes;
+    init_admitted_bitmap(&admitted_endnodes);
 
     struct backlog_queue admitted_backlog;
     init_backlog_queue(&admitted_backlog);
@@ -118,8 +126,8 @@ void get_admissible_traffic(struct backlog_queue *queue_in,
             dequeue_backlog(new_requests);
         }
  
-        if (src_is_admitted(&admitted, chosen_edge->src) ||
-            dst_is_admitted(&admitted, chosen_edge->dst)) {
+        if (src_is_admitted(&admitted_endnodes, chosen_edge->src) ||
+            dst_is_admitted(&admitted_endnodes, chosen_edge->dst)) {
             // We cannot allocate this edge now - copy to queue_out
             enqueue_backlog(queue_out, chosen_edge->src, chosen_edge->dst,
                             chosen_edge->backlog, chosen_edge->timeslot);
@@ -132,8 +140,8 @@ void get_admissible_traffic(struct backlog_queue *queue_in,
                                 chosen_edge->backlog - 1, (uint16_t) status->current_timeslot);
             set_last_timeslot(status, chosen_edge->src, chosen_edge->dst,
                               status->current_timeslot);
-            set_src_admitted(&admitted, chosen_edge->src);
-            set_dst_admitted(&admitted, chosen_edge->dst);
+            set_src_admitted(&admitted_endnodes, chosen_edge->src);
+            set_dst_admitted(&admitted_endnodes, chosen_edge->dst);
         }
     }
 

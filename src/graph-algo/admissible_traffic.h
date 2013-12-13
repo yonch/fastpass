@@ -13,14 +13,16 @@
 #include <inttypes.h>
 
 // Updates the total requested timeslots from src to dst to demand_tslots
-void request_timeslots(struct backlog_queue *new_requests, struct flow_status *status,
-                       uint16_t src, uint16_t dst, uint16_t demand_tslots);
+void request_timeslots(struct backlog_queue *new_requests,
+                       struct admissible_status *status,
+                       uint16_t src, uint16_t dst,
+                       uint16_t demand_tslots);
 
 // Populate traffic_out with the admissible traffic for one timeslot from queue_in
 void get_admissible_traffic(struct backlog_queue *queue_in,
                             struct backlog_queue *queue_out,
                             struct backlog_queue *new_requests,
                             struct admitted_traffic *traffic_out,
-                            struct flow_status *status);
+                            struct admissible_status *status);
 
 #endif /* ADMISSIBLE_TRAFFIC_H_ */

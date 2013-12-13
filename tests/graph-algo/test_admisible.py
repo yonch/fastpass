@@ -24,7 +24,7 @@ class Test(unittest.TestCase):
         queue_1 = structures.create_backlog_queue()
         new_requests = structures.create_backlog_queue()
         admitted = structures.create_admitted_traffic()
-        status = structures.create_flow_status()
+        status = structures.create_admissible_status()
 
         # Make a request, check it was inserted correctly
         admissible.request_timeslots(new_requests, status, 0, 1, 5)
@@ -56,7 +56,7 @@ class Test(unittest.TestCase):
         structures.destroy_backlog_queue(queue_1)
         structures.destroy_backlog_queue(new_requests)
         structures.destroy_admitted_traffic(admitted)
-        structures.destroy_flow_status(status)
+        structures.destroy_admissible_status(status)
 
         pass
 
@@ -70,7 +70,7 @@ class Test(unittest.TestCase):
         admitted_1 = structures.create_admitted_traffic()
         admitted_2 = structures.create_admitted_traffic()
         admitted_3 = structures.create_admitted_traffic()
-        status = structures.create_flow_status()
+        status = structures.create_admissible_status()
         empty_queue = structures.create_backlog_queue()
 
         # Make a few competing requests
@@ -104,7 +104,7 @@ class Test(unittest.TestCase):
         structures.destroy_admitted_traffic(admitted_1)
         structures.destroy_admitted_traffic(admitted_2)
         structures.destroy_admitted_traffic(admitted_3)
-        structures.destroy_flow_status(status)
+        structures.destroy_admissible_status(status)
         structures.destroy_backlog_queue(empty_queue)
 
         pass
@@ -120,7 +120,7 @@ class Test(unittest.TestCase):
         admitted_1 = structures.create_admitted_traffic()
         admitted_2 = structures.create_admitted_traffic()
         admitted_3 = structures.create_admitted_traffic()
-        status = structures.create_flow_status()
+        status = structures.create_admissible_status()
         empty_queue = structures.create_backlog_queue()
 
         # Make two competing requests
@@ -167,7 +167,7 @@ class Test(unittest.TestCase):
         structures.destroy_admitted_traffic(admitted_1)
         structures.destroy_admitted_traffic(admitted_2)
         structures.destroy_admitted_traffic(admitted_3)
-        structures.destroy_flow_status(status)
+        structures.destroy_admissible_status(status)
         structures.destroy_backlog_queue(empty_queue)
 
         pass
@@ -210,7 +210,7 @@ class Test(unittest.TestCase):
         queue_1 = structures.create_backlog_queue()
         new_requests = structures.create_backlog_queue()
         admitted = structures.create_admitted_traffic()
-        status = structures.create_flow_status()
+        status = structures.create_admissible_status()
 
         num_admitted = 0
         num_requested = 0
@@ -266,7 +266,7 @@ class Test(unittest.TestCase):
         structures.destroy_backlog_queue(queue_1)
         structures.destroy_backlog_queue(new_requests)
         structures.destroy_admitted_traffic(admitted)
-        structures.destroy_flow_status(status)
+        structures.destroy_admissible_status(status)
 
         pass
 

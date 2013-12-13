@@ -12,8 +12,6 @@
 #include <stdio.h>
 #include <stdlib.h>
 
-#define TOR_SHIFT 5  // number of machines per rack is at most 2^TOR_SHIFT
-
 // Request num_slots additional timeslots from src to dst
 void request_timeslots(struct backlog_queue *new_requests, struct admissible_status *status,
                        uint16_t src, uint16_t dst, uint16_t demand_tslots) {
@@ -82,11 +80,8 @@ void get_admissible_traffic(struct backlog_queue *queue_in,
 
     uint16_t min_time = (uint16_t) status->oldest_timeslot - 1;
 
-    struct admitted_bitmap admitted_endnodes;
-    init_admitted_bitmap(&admitted_endnodes);
-
-    struct rack_admits admitted_racks;
-    init_rack_admits(&admitted_racks);
+    struct batch_state batch_state;
+    init_batch_state(&batch_state);
 
     struct backlog_queue admitted_backlog;
     init_backlog_queue(&admitted_backlog);
@@ -116,37 +111,35 @@ void get_admissible_traffic(struct backlog_queue *queue_in,
             dequeue_backlog(queue_in);
         }
 
-        uint16_t src = chosen_edge->src;
-        uint16_t dst = chosen_edge->dst;
-
         // Combine any other new requests for the same src/dst pair
         while (!is_empty_backlog(new_requests) &&
                compare_backlog_edges(chosen_edge, peek_head_backlog(new_requests), min_time) == 0) {
             chosen_edge->backlog += peek_head_backlog(new_requests)->backlog;
             dequeue_backlog(new_requests);
         }
- 
-        if (src_is_admitted(&admitted_endnodes, src) ||
-            dst_is_admitted(&admitted_endnodes, dst) ||
-            (status->oversubscribed &&
-             (admitted_racks.srcs[get_rack_from_id(src)] == status->inter_rack_capacity ||
-              admitted_racks.dsts[get_rack_from_id(dst)] == status->inter_rack_capacity))) {
+
+        uint16_t src = chosen_edge->src;
+        uint16_t dst = chosen_edge->dst;
+
+        uint8_t batch_timeslot = get_first_timeslot(&batch_state, src, dst,
+                                                    status->oversubscribed,
+                                                    status->inter_rack_capacity);
+
+        if (batch_timeslot == NONE_AVAILABLE) {
             // We cannot allocate this edge now - copy to queue_out
             enqueue_backlog(queue_out, src, dst, chosen_edge->backlog, chosen_edge->timeslot);
         }
         else {
             // We can allocate this edge now
+            assert(batch_timeslot == 0);
             insert_admitted_edge(traffic_out, src, dst);
             if (chosen_edge->backlog > 1)
                 enqueue_backlog(&admitted_backlog, src, dst, chosen_edge->backlog - 1,
                                 (uint16_t) status->current_timeslot);
             set_last_timeslot(status, src, dst, status->current_timeslot);
-            set_src_admitted(&admitted_endnodes, src);
-            set_dst_admitted(&admitted_endnodes, dst);
-            if (status->oversubscribed) {
-                admitted_racks.srcs[get_rack_from_id(src)] += 1;
-                admitted_racks.dsts[get_rack_from_id(dst)] += 1;
-            }
+
+            set_timeslot_occupied(&batch_state, src, dst, status->oversubscribed,
+                                  batch_timeslot);
         }
     }
 
@@ -177,9 +170,4 @@ void get_admissible_traffic(struct backlog_queue *queue_in,
                 + oldest_queued_time;
         }
     }
-}
-
-// Returns the ID of the rack corresponding to id
-uint16_t get_rack_from_id(uint16_t id) {
-    return id >> TOR_SHIFT;
 }

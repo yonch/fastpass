@@ -17,6 +17,9 @@
 #define MAX_NODES 256  // should be a multiple of 64, due to bitmaps
 #define NODES_SHIFT 8  // 2^NODES_SHIFT = MAX_NODES
 #define MAX_RACKS 16
+#define TOR_SHIFT 5  // number of machines per rack is at most 2^TOR_SHIFT
+#define BATCH_SIZE 16  // must be consistent with bitmaps in batch_state
+#define NONE_AVAILABLE 251
 #define MAX_TIME 66535
 
 struct admitted_edge {
@@ -45,20 +48,16 @@ struct backlog_queue {
     struct backlog_edge edges[MAX_NODES * MAX_NODES];
 };
 
-// Admitted bitmap - one bit per src, one bit per dst
-// Tracks which srcs/dsts already have already been filled for this timeslot
-struct admitted_bitmap {
-    uint64_t srcs [MAX_NODES >> 6];
-    uint64_t dsts [MAX_NODES >> 6];
-};
-
-// Tracks how many flows have been admitted per rack
-struct rack_admits {
-    uint8_t srcs [MAX_RACKS];
-    uint8_t dsts [MAX_RACKS];
+// Tracks which srcs/dsts and src/dst racks are available for this batch
+struct batch_state {
+    uint16_t src_endnodes [MAX_NODES];
+    uint16_t dst_endnodes [MAX_NODES];
+    uint8_t src_racks [MAX_RACKS];
+    uint8_t dst_racks [MAX_RACKS];
 };
 
 // Tracks status for admissible traffic (last send time and demand for all flows, etc.)
+// over the lifetime of a controller
 struct admissible_status {
     uint64_t current_timeslot;
     uint64_t oldest_timeslot;
@@ -325,63 +324,63 @@ bool out_of_order(struct backlog_queue *queue, bool duplicates_allowed) {
     return false;
 }
 
-// Initialize an admitted bitmap;
+// Returns the ID of the rack corresponding to id
 static inline
-void init_admitted_bitmap(struct admitted_bitmap *admitted) {
-    assert(admitted != NULL);
+uint16_t get_rack_from_id(uint16_t id) {
+    return id >> TOR_SHIFT;
+}
+
+// Initialize an admitted bitmap
+static inline
+void init_batch_state(struct batch_state *state) {
+    assert(state != NULL);
 
     int i;
-    for (i = 0; i < MAX_NODES >> 6; i++) {
-        admitted->srcs[i] = 0x0ULL;
-        admitted->dsts[i] = 0x0ULL;
+    for (i = 0; i < MAX_NODES; i++) {
+        state->src_endnodes[i] = 0xFFFF;
+        state->dst_endnodes[i] = 0xFFFF;
+    }
+
+   for (i = 0; i < MAX_RACKS; i++) {
+        state->src_racks[i] = 0;
+        state->dst_racks[i] = 0;
     }
 }
 
-// Returns true if src has been admitted already, false otherwise
+// Returns the first available timeslot for src and dst, or NON_AVAILABLE
 static inline
-bool src_is_admitted(struct admitted_bitmap *admitted, uint16_t src) {
-    assert(admitted != NULL);
+uint8_t get_first_timeslot(struct batch_state *state, uint16_t src,
+                        uint16_t dst, bool oversubscribed,
+                        uint16_t inter_rack_capacity) {
+    assert(state != NULL);
 
-    uint16_t bit_index =  src % 64;
-    return (admitted->srcs[src >> 6] & (0x1ULL << bit_index));
+    uint16_t bitmap = state->src_endnodes[src] & state->dst_endnodes[dst] & 0x1; // TEMP
+    bool racks_available = !oversubscribed ||
+        (state->src_racks[get_rack_from_id(src)] < inter_rack_capacity &&
+         state->dst_racks[get_rack_from_id(dst)] < inter_rack_capacity);
+ 
+    if (bitmap == 0 || !racks_available)
+        return NONE_AVAILABLE;
+
+    uint16_t timeslot;
+    asm("bsfw %1,%0" : "=r"(timeslot) : "r"(bitmap));
+
+    return (uint8_t) timeslot;
 }
 
-// Sets src to admitted
+// Sets a timeslot as occupied for src and dst
 static inline
-void set_src_admitted(struct admitted_bitmap *admitted, uint16_t src) {
-    assert(admitted != NULL);
+void set_timeslot_occupied(struct batch_state *state, uint16_t src,
+                           uint16_t dst, bool oversubscribed, uint8_t timeslot) {
+    assert(state != NULL);
+    assert(timeslot <= 0xF);
 
-    uint16_t bit_index = src % 64;
-    admitted->srcs[src >> 6] = admitted->srcs[src >> 6] | (0x1ULL << bit_index);
-}
+    state->src_endnodes[src] = state->src_endnodes[src] & ~(0x1 << timeslot);
+    state->dst_endnodes[dst] = state->dst_endnodes[dst] & ~(0x1 << timeslot);
 
-// Returns true if dst has been admitted already, false otherwise
-static inline
-bool dst_is_admitted(struct admitted_bitmap *admitted, uint16_t dst) {
-    assert(admitted != NULL);
-
-    uint16_t bit_index =  dst % 64;
-    return (admitted->dsts[dst >> 6] & (0x1ULL << bit_index));
-}
-
-// Sets dst to admitted
-static inline
-void set_dst_admitted(struct admitted_bitmap *admitted, uint16_t dst) {
-    assert(admitted != NULL);
-
-    uint16_t bit_index = dst % 64;
-    admitted->dsts[dst >> 6] = admitted->dsts[dst >> 6] | (0x1ULL << bit_index);
-}
-
-// Initialize an admitted bitmap;
-static inline
-void init_rack_admits(struct rack_admits *admitted) {
-    assert(admitted != NULL);
-
-    int i;
-    for (i = 0; i < MAX_RACKS; i++) {
-        admitted->srcs[i] = 0;
-        admitted->dsts[i] = 0;
+    if (oversubscribed) {
+        state->src_racks[get_rack_from_id(src)] += 1;
+        state->dst_racks[get_rack_from_id(dst)] += 1;
     }
 }
 

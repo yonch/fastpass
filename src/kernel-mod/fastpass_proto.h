@@ -128,7 +128,9 @@ struct fastpass_sock {
 
 	/* outwnd */
 	unsigned long			bin_mask[BITS_TO_LONGS(2 * FASTPASS_OUTWND_LEN)];
-	struct fpproto_pktdesc		*bins[FASTPASS_OUTWND_LEN];
+	struct fpproto_pktdesc	*bins[FASTPASS_OUTWND_LEN];
+	u32						tx_num_unacked;
+
 
 	/* statistics */
 	u64 stat_tasklet_runs;  /* TODO: deprecate */
@@ -144,6 +146,7 @@ struct fastpass_sock {
 	u64 stat_rx_incomplete_alloc; /* TODO: report */
 	u64 stat_rx_too_short; /* TODO: report */
 	u64 stat_rx_pkts; /* TODO: report */
+	u64 stat_fall_off_outwnd; /*TODO:report*/
 };
 
 extern int __init fpproto_register(void);

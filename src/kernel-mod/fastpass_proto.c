@@ -121,6 +121,7 @@ void outwnd_add(struct fastpass_sock *fp, struct fpproto_pktdesc *pd)
 	__set_bit(circular_index, fp->bin_mask);
 	__set_bit(circular_index + FASTPASS_OUTWND_LEN, fp->bin_mask);
 	fp->bins[circular_index] = pd;
+	fp->tx_num_unacked++;
 
 	fp->next_seqno++;
 }
@@ -141,6 +142,7 @@ struct fpproto_pktdesc * outwnd_pop(struct fastpass_sock *fp, u64 tslot)
 	__clear_bit(circular_index, fp->bin_mask);
 	__clear_bit(circular_index + FASTPASS_OUTWND_LEN, fp->bin_mask);
 	fp->bins[circular_index] = NULL;
+	fp->tx_num_unacked--;
 	return res;
 }
 
@@ -598,7 +600,7 @@ static int fpproto_build_header(struct sock *sk, struct sk_buff *skb)
 		fh->rstreq.lo = htonl((u32)fp->last_reset_time);
 	}
 
-	fh->seq = htons((u16)(fp->next_seqno++));
+	fh->seq = htons((u16)(fp->next_seqno));
 
 	/* These could be useful for updating state */
 //	dccp_update_gss(sk, dcb->dccpd_seq);
@@ -672,7 +674,19 @@ build_header_error:
 	goto out_unlock;
 }
 
-void fpproto_send_packet(struct sock *sk, struct fpproto_pktdesc *pkt)
+/**
+ * Handles a case of a packet that seems to have not been delivered to
+ *    controller successfully, either because of falling off the outwnd end,
+ *    or a timeout.
+ */
+void fpproto_handle_unacked_tx_packet(struct fastpass_sock *fp, u64 seq)
+{
+	struct fpproto_pktdesc *pd = outwnd_pop(fp, seq);
+	fastpass_pr_debug("Unacked tx seq %llu\n", seq);
+	fpproto_pktdesc_free(pd);
+}
+
+void fpproto_send_packet(struct sock *sk, struct fpproto_pktdesc *pd)
 {
 	struct fastpass_sock *fp = fastpass_sk(sk);
 	int max_header;
@@ -682,10 +696,11 @@ void fpproto_send_packet(struct sock *sk, struct fpproto_pktdesc *pkt)
 	int i;
 	u8 *data;
 	struct fastpass_areq *areq;
+	u64 window_edge;
 
 
 	/* calculate byte size in packet*/
-	payload_len = 2 + 4 * pkt->n_areq;
+	payload_len = 2 + 4 * pd->n_areq;
 	max_header = sk->sk_prot->max_header;
 
 	/* allocate request skb */
@@ -705,17 +720,25 @@ void fpproto_send_packet(struct sock *sk, struct fpproto_pktdesc *pkt)
 	data += 2;
 
 	/* A-REQ requests */
-	for (i = 0; i < pkt->n_areq; i++) {
+	for (i = 0; i < pd->n_areq; i++) {
 		areq = (struct fastpass_areq *)data;
-		areq->dst = htons((__be16)pkt->areq[i].src_dst_key);
-		areq->count = htons((u16)pkt->areq[i].tslots);
+		areq->dst = htons((__be16)pd->areq[i].src_dst_key);
+		areq->count = htons((u16)pd->areq[i].tslots);
 		data += 4;
 
 	}
 
 	fpproto_send_skb(sk, skb);
 
-	fpproto_pktdesc_free(pkt);
+	/* treat packet going out of outwnd as if it was dropped */
+	window_edge = fp->next_seqno - FASTPASS_OUTWND_LEN;
+	if (fp->tx_num_unacked > 0 && outwnd_is_unacked(fp, window_edge)) {
+		fp->stat_fall_off_outwnd++;
+		fpproto_handle_unacked_tx_packet(fp, window_edge);
+	}
+
+	/* add packet to outwnd */
+	outwnd_add(fp, pd);
 	return;
 
 alloc_err:

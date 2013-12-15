@@ -161,7 +161,7 @@ s32	outwnd_at_or_before(struct fastpass_sock *fp, u64 tslot)
 
 	u32 found_offset;
 
-	BUG_ON(tslot >= fp->next_seqno);
+	BUG_ON(time_after_eq64(tslot, fp->next_seqno));
 
 	found_offset = find_next_bit(fp->bin_mask,
 			head_index + FASTPASS_OUTWND_LEN,

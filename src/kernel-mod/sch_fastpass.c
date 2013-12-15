@@ -805,12 +805,7 @@ static void send_request(struct Qdisc *sch, u64 now)
 	spinlock_t *root_lock = qdisc_lock(qdisc_root(sch));
 
 	struct fp_flow *f;
-	struct sk_buff *skb = NULL;
-	const int max_payload_len = 40;
-	struct fastpass_areq *areq;
-	int max_header;
-	int payload_len = 0;
-	int err;
+	struct fpproto_pktdesc *pkt;
 	u64 new_requested;
 
 	spin_lock_bh(root_lock);
@@ -830,36 +825,28 @@ static void send_request(struct Qdisc *sch, u64 now)
 	BUG_ON(flowqueue_is_empty(q));
 	BUG_ON(!q->ctrl_sock);
 
-	/* allocate request skb */
-	max_header = q->ctrl_sock->sk->sk_prot->max_header;
-	skb = sock_alloc_send_skb(q->ctrl_sock->sk, max_payload_len + max_header, 1,
-			&err);
-	if (!skb)
-		goto alloc_err;
-	skb_reserve(skb, max_header);
-	skb_reserve(skb, 2);
+	/* allocate packet descriptor */
 
-	while ((payload_len + 4 < max_payload_len) && !flowqueue_is_empty(q)) {
+	pkt = fpproto_pktdesc_alloc();
+	if (!pkt)
+		goto alloc_err;
+
+	pkt->n_areq = 0;
+	while ((pkt->n_areq < FASTPASS_PKT_MAX_AREQ) && !flowqueue_is_empty(q)) {
 		f = flowqueue_dequeue(q);
 
 		new_requested = min_t(u64, f->demand_tslots,
 				f->alloc_tslots + FASTPASS_REQUEST_WINDOW_SIZE - 1);
 		BUG_ON(new_requested <= f->requested_tslots);
 
-		skb_put(skb, 4);
-		areq = (struct fastpass_areq *)&skb->data[payload_len];
-		areq->dst = htons((__be16)f->src_dst_key);
-		areq->count = htons((u16)new_requested);
-		payload_len += 4;
+		pkt->areq[pkt->n_areq].src_dst_key = f->src_dst_key;
+		pkt->areq[pkt->n_areq].tslots = new_requested;
 
 		q->requested_tslots += (new_requested - f->requested_tslots);
 		f->requested_tslots = new_requested;
 
-		/* TODO: add to retransmission queue */
+		pkt->n_areq++;
 	}
-	skb_push(skb, 2);
-	*(__be16 *)&skb->data[0] = htons((FASTPASS_PTYPE_AREQ << 12) |
-			((payload_len >> 2) & 0x3F));
 
 	fastpass_pr_debug("end: unreq_flows=%u, unreq_tslots=%llu\n",
 			q->n_unreq_flows, q->demand_tslots - q->requested_tslots);
@@ -877,14 +864,14 @@ update_credits:
 
 	spin_unlock_bh(root_lock);
 
-	if (likely(skb != NULL))
-		fpproto_send_skb(q->ctrl_sock->sk, skb);
+	if (likely(pkt != NULL))
+		fpproto_send_packet(q->ctrl_sock->sk, pkt);
 
 	return;
 
 alloc_err:
 	q->stat_req_alloc_errors++;
-	fastpass_pr_debug("request allocation failed, err %d\n", err);
+	fastpass_pr_debug("request allocation failed\n");
 	goto update_credits;
 }
 

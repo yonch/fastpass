@@ -131,14 +131,19 @@ struct fastpass_sock {
 	struct fpproto_pktdesc		*bins[FASTPASS_OUTWND_LEN];
 
 	/* statistics */
-	u64 stat_tasklet_runs;
+	u64 stat_tasklet_runs;  /* TODO: deprecate */
 	u64 stat_build_header_errors;
 	u64 stat_xmit_errors;
 	u64 stat_invalid_rx_pkts;
 	u64 stat_redundant_reset;
 	u64 stat_reset_out_of_window; /* TODO: report */
 	u64 stat_outdated_reset; /* TODO: report */
-
+	u64 stat_skb_alloc_error; /* TODO: report */
+	u64 stat_rx_unknown_payload; /* TODO: report */
+	u64 stat_rx_incomplete_reset; /* TODO: report */
+	u64 stat_rx_incomplete_alloc; /* TODO: report */
+	u64 stat_rx_too_short; /* TODO: report */
+	u64 stat_rx_pkts; /* TODO: report */
 };
 
 extern int __init fpproto_register(void);
@@ -147,7 +152,10 @@ void __exit fpproto_unregister(void);
 
 void fpproto_set_qdisc(struct sock *sk, struct Qdisc *new_qdisc);
 
-void fpproto_send_skb(struct sock *sk, struct sk_buff *skb);
+struct fpproto_pktdesc *fpproto_pktdesc_alloc(void);
+void fpproto_pktdesc_free(struct fpproto_pktdesc *pd);
+
+void fpproto_send_packet(struct sock *sk, struct fpproto_pktdesc *pkt);
 
 static inline struct fastpass_sock *fastpass_sk(const struct sock *sk)
 {

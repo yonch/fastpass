@@ -370,6 +370,8 @@ int fpproto_rcv(struct sk_buff *skb)
 
 	sch = fpproto_lock_qdisc(sk);
 
+	fp->stat_rx_pkts++;
+
 	if (skb->len < 6)
 		goto packet_too_short;
 
@@ -435,25 +437,25 @@ cleanup:
 	return NET_RX_SUCCESS;
 
 unknown_payload_type:
+	fp->stat_rx_unknown_payload++;
 	fastpass_pr_debug("got unknown payload type %d\n", payload_type);
-	goto invalid_pkt;
+	goto cleanup;
 
 incomplete_reset_payload:
+	fp->stat_rx_incomplete_reset++;
 	fastpass_pr_debug("RESET payload incomplete, expected 8 bytes, got %d\n",
 			(int)(data_end - data));
-	goto invalid_pkt;
+	goto cleanup;
 
 incomplete_alloc_payload:
+	fp->stat_rx_incomplete_alloc++;
 	fastpass_pr_debug("ALLOC payload incomplete: expected %d bytes, got %d\n",
 			2 + 2 * alloc_n_dst + alloc_n_tslots, (int)(data_end - data));
-	goto invalid_pkt;
+	goto cleanup;
 
 packet_too_short:
+	fp->stat_rx_too_short++;
 	fastpass_pr_debug("packet less than minimal size (len=%d)\n", skb->len);
-	goto invalid_pkt;
-
-invalid_pkt:
-	fp->stat_invalid_rx_pkts++;
 	goto cleanup;
 }
 
@@ -633,7 +635,7 @@ void fpproto_egress_checksum(struct sock *sk, struct sk_buff *skb)
 			skb->len, IPPROTO_DCCP, skb->csum);
 }
 
-void fpproto_send_skb(struct sock *sk, struct sk_buff *skb)
+static void fpproto_send_skb(struct sock *sk, struct sk_buff *skb)
 {
 	struct fastpass_sock *fp = fastpass_sk(sk);
 	struct inet_sock *inet = inet_sk(sk);
@@ -642,8 +644,6 @@ void fpproto_send_skb(struct sock *sk, struct sk_buff *skb)
 	fastpass_pr_debug("visited\n");
 
 	bh_lock_sock(sk);
-
-	fp->stat_tasklet_runs++;
 
 	/* write the fastpass header */
 	rc = fpproto_build_header(sk, skb);
@@ -670,6 +670,58 @@ build_header_error:
 	fp->stat_build_header_errors++;
 	fastpass_pr_debug("got error %d while building header\n", rc);
 	goto out_unlock;
+}
+
+void fpproto_send_packet(struct sock *sk, struct fpproto_pktdesc *pkt)
+{
+	struct fastpass_sock *fp = fastpass_sk(sk);
+	int max_header;
+	int payload_len;
+	struct sk_buff *skb = NULL;
+	int err;
+	int i;
+	u8 *data;
+	struct fastpass_areq *areq;
+
+
+	/* calculate byte size in packet*/
+	payload_len = 2 + 4 * pkt->n_areq;
+	max_header = sk->sk_prot->max_header;
+
+	/* allocate request skb */
+	skb = sock_alloc_send_skb(sk, payload_len + max_header, 1, &err);
+	if (!skb)
+		goto alloc_err;
+
+	/* reserve space for headers */
+	skb_reserve(skb, max_header);
+
+	data = &skb->data[0];
+
+	/* A-REQ type short */
+	skb_put(skb, payload_len);
+	*(__be16 *)data = htons((FASTPASS_PTYPE_AREQ << 12) |
+					  ((payload_len >> 2) & 0x3F));
+	data += 2;
+
+	/* A-REQ requests */
+	for (i = 0; i < pkt->n_areq; i++) {
+		areq = (struct fastpass_areq *)data;
+		areq->dst = htons((__be16)pkt->areq[i].src_dst_key);
+		areq->count = htons((u16)pkt->areq[i].tslots);
+		data += 4;
+
+	}
+
+	fpproto_send_skb(sk, skb);
+
+	fpproto_pktdesc_free(pkt);
+	return;
+
+alloc_err:
+	fp->stat_skb_alloc_error++;
+	fastpass_pr_debug("could not alloc skb of size %d\n",
+			payload_len + max_header);
 }
 
 static int fpproto_sk_init(struct sock *sk)

@@ -167,7 +167,7 @@ static struct kmem_cache *fp_flow_cachep __read_mostly;
 
 /* translates IP address to short FastPass ID */
 u16 ip_to_id(__be32 ipaddr) {
-	return (u16)ntohl(ipaddr);
+	return (u16)(ntohl(ipaddr) & ((1 << 8) - 1));
 }
 
 /* hashes a flow key into a u32, for lookup in the hash tables */

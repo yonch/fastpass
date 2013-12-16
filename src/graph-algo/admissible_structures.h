@@ -17,6 +17,10 @@
 #define MAX_NODES 256  // should be a multiple of 64, due to bitmaps
 #define NODES_SHIFT 8  // 2^NODES_SHIFT = MAX_NODES
 #define MAX_RACKS 16
+#define TOR_SHIFT 5  // number of machines per rack is at most 2^TOR_SHIFT
+#define BATCH_SIZE 16  // must be consistent with bitmaps in batch_state
+#define BATCH_SHIFT 4  // 2^BATCH_SHIFT = BATCH_SIZE
+#define NONE_AVAILABLE 251
 #define MAX_TIME 66535
 
 struct admitted_edge {
@@ -42,23 +46,23 @@ struct backlog_edge {
 struct backlog_queue {
     uint16_t head;
     uint16_t tail;
-    struct backlog_edge edges[MAX_NODES * MAX_NODES];
+    struct backlog_edge edges[MAX_NODES];
 };
 
-// Admitted bitmap - one bit per src, one bit per dst
-// Tracks which srcs/dsts already have already been filled for this timeslot
-struct admitted_bitmap {
-    uint64_t srcs [MAX_NODES >> 6];
-    uint64_t dsts [MAX_NODES >> 6];
-};
-
-// Tracks how many flows have been admitted per rack
-struct rack_admits {
-    uint8_t srcs [MAX_RACKS];
-    uint8_t dsts [MAX_RACKS];
+// Tracks which srcs/dsts and src/dst racks are available for this batch
+struct batch_state {
+    bool oversubscribed;
+    uint16_t inter_rack_capacity;  // Only valid if oversubscribed is true
+    uint16_t src_endnodes [MAX_NODES];
+    uint16_t dst_endnodes [MAX_NODES];
+    uint16_t src_rack_bitmaps [MAX_NODES];
+    uint16_t dst_rack_bitmaps [MAX_NODES];
+    uint16_t src_rack_counts [MAX_RACKS * BATCH_SIZE];  // rows are racks
+    uint16_t dst_rack_counts [MAX_RACKS * BATCH_SIZE];
 };
 
 // Tracks status for admissible traffic (last send time and demand for all flows, etc.)
+// over the lifetime of a controller
 struct admissible_status {
     uint64_t current_timeslot;
     uint64_t oldest_timeslot;
@@ -66,6 +70,7 @@ struct admissible_status {
     uint16_t inter_rack_capacity;  // Only valid if oversubscribed is true
     uint64_t timeslots[MAX_NODES * MAX_NODES];
     uint16_t demands[MAX_NODES * MAX_NODES];
+    struct backlog_queue *admitted_queues;  // pool of backlog queues
 };
 
 
@@ -223,9 +228,11 @@ void swap_backlog_edges(struct backlog_edge *edge_0, struct backlog_edge *edge_1
 }
 
 // Recursive quicksort on a backlog_queue, using the compare function above
+// Assume size is at least 2
 static inline
 void quicksort_backlog(struct backlog_edge *edges, uint32_t size, uint16_t min_time) {
     assert(edges != NULL);
+    assert(size >= 2);
 
     // Store partition element
     struct backlog_edge *partition = &edges[0];
@@ -325,64 +332,84 @@ bool out_of_order(struct backlog_queue *queue, bool duplicates_allowed) {
     return false;
 }
 
-// Initialize an admitted bitmap;
+// Returns the ID of the rack corresponding to id
 static inline
-void init_admitted_bitmap(struct admitted_bitmap *admitted) {
-    assert(admitted != NULL);
+uint16_t get_rack_from_id(uint16_t id) {
+    return id >> TOR_SHIFT;
+}
+
+// Initialize an admitted bitmap
+static inline
+void init_batch_state(struct batch_state *state, bool oversubscribed,
+                      uint16_t inter_rack_capacity) {
+    assert(state != NULL);
+
+    state->oversubscribed = oversubscribed;
+    state->inter_rack_capacity = inter_rack_capacity;
 
     int i;
-    for (i = 0; i < MAX_NODES >> 6; i++) {
-        admitted->srcs[i] = 0x0ULL;
-        admitted->dsts[i] = 0x0ULL;
+    for (i = 0; i < MAX_NODES; i++) {
+        state->src_endnodes[i] = 0xFFFF;
+        state->dst_endnodes[i] = 0xFFFF;
+        state->src_rack_bitmaps[i] = 0xFFFF;
+        state->dst_rack_bitmaps[i] = 0xFFFF;
+    }
+
+   for (i = 0; i < MAX_RACKS * BATCH_SIZE; i++) {
+        state->src_rack_counts[i] = 0;
+        state->dst_rack_counts[i] = 0;
     }
 }
 
-// Returns true if src has been admitted already, false otherwise
+// Returns the first available timeslot for src and dst, or NON_AVAILABLE
 static inline
-bool src_is_admitted(struct admitted_bitmap *admitted, uint16_t src) {
-    assert(admitted != NULL);
+uint8_t get_first_timeslot(struct batch_state *state, uint16_t src, uint16_t dst) {
+    assert(state != NULL);
+    assert(src < MAX_NODES);
+    assert(dst < MAX_NODES);
 
-    uint16_t bit_index =  src % 64;
-    return (admitted->srcs[src >> 6] & (0x1ULL << bit_index));
+    uint16_t endnode_bitmap = state->src_endnodes[src] & state->dst_endnodes[dst];
+    uint16_t rack_bitmap = state->src_rack_bitmaps[get_rack_from_id(src)] &
+        state->dst_rack_bitmaps[get_rack_from_id(dst)];
+    
+    uint16_t bitmap = endnode_bitmap;
+    if (state->oversubscribed)
+        bitmap = endnode_bitmap & rack_bitmap;
+ 
+    if (bitmap == 0)
+        return NONE_AVAILABLE;
+
+    uint16_t timeslot;
+    asm("bsfw %1,%0" : "=r"(timeslot) : "r"(bitmap));
+
+    return (uint8_t) timeslot;
 }
 
-// Sets src to admitted
+// Sets a timeslot as occupied for src and dst
 static inline
-void set_src_admitted(struct admitted_bitmap *admitted, uint16_t src) {
-    assert(admitted != NULL);
+void set_timeslot_occupied(struct batch_state *state, uint16_t src,
+                           uint16_t dst, uint8_t timeslot) {
+    assert(state != NULL);
+    assert(src < MAX_NODES);
+    assert(dst < MAX_NODES);
+    assert(timeslot <= 0xF);
 
-    uint16_t bit_index = src % 64;
-    admitted->srcs[src >> 6] = admitted->srcs[src >> 6] | (0x1ULL << bit_index);
-}
+    state->src_endnodes[src] = state->src_endnodes[src] & ~(0x1 << timeslot);
+    state->dst_endnodes[dst] = state->dst_endnodes[dst] & ~(0x1 << timeslot);
+  
+    if (state->oversubscribed) {
+        uint16_t src_rack = get_rack_from_id(src);
+        uint16_t dst_rack = get_rack_from_id(dst);
 
-// Returns true if dst has been admitted already, false otherwise
-static inline
-bool dst_is_admitted(struct admitted_bitmap *admitted, uint16_t dst) {
-    assert(admitted != NULL);
-
-    uint16_t bit_index =  dst % 64;
-    return (admitted->dsts[dst >> 6] & (0x1ULL << bit_index));
-}
-
-// Sets dst to admitted
-static inline
-void set_dst_admitted(struct admitted_bitmap *admitted, uint16_t dst) {
-    assert(admitted != NULL);
-
-    uint16_t bit_index = dst % 64;
-    admitted->dsts[dst >> 6] = admitted->dsts[dst >> 6] | (0x1ULL << bit_index);
-}
-
-// Initialize an admitted bitmap;
-static inline
-void init_rack_admits(struct rack_admits *admitted) {
-    assert(admitted != NULL);
-
-    int i;
-    for (i = 0; i < MAX_RACKS; i++) {
-        admitted->srcs[i] = 0;
-        admitted->dsts[i] = 0;
+        state->src_rack_counts[BATCH_SIZE * src_rack + timeslot] += 1;
+        state->dst_rack_counts[BATCH_SIZE * dst_rack + timeslot] += 1;
+        if (state->src_rack_counts[BATCH_SIZE * src_rack + timeslot] == state->inter_rack_capacity)
+            state->src_rack_bitmaps[src_rack] = state->src_rack_bitmaps[src_rack] & ~(0x1 << timeslot);
+        
+        if (state->dst_rack_counts[BATCH_SIZE * dst_rack + timeslot] == state->inter_rack_capacity)
+            state->dst_rack_bitmaps[dst_rack] = state->dst_rack_bitmaps[dst_rack] & ~(0x1 << timeslot);
     }
+
 }
 
 // Initialize all timeslots and demands to zero
@@ -440,10 +467,13 @@ void set_last_demand(struct admissible_status *status, uint16_t src, uint16_t ds
 // Helper methods for testing in python
 static inline
 struct admitted_traffic *create_admitted_traffic() {
-    struct admitted_traffic *admitted = malloc(sizeof(struct admitted_traffic));
+    struct admitted_traffic *admitted = malloc(sizeof(struct admitted_traffic) *
+                                               BATCH_SIZE);
     assert(admitted != NULL);
 
-    init_admitted_traffic(admitted);
+    uint8_t i;
+    for (i = 0; i < BATCH_SIZE; i++)
+        init_admitted_traffic(&admitted[i]);
 
     return admitted;
 }
@@ -456,8 +486,18 @@ void destroy_admitted_traffic(struct admitted_traffic *admitted) {
 }
 
 static inline
+struct admitted_traffic *get_admitted_struct(struct admitted_traffic *admitted,
+                                             uint8_t index) {
+    assert(admitted != NULL);
+
+    return &admitted[index];
+}
+
+static inline
 struct backlog_queue *create_backlog_queue() {
-    struct backlog_queue *queue = malloc(sizeof(struct backlog_queue));
+    size_t size = sizeof(struct backlog_queue) +
+        (MAX_NODES * MAX_NODES - MAX_NODES) * sizeof(struct backlog_edge);
+    struct backlog_queue *queue = malloc(size);
     assert(queue != NULL);
 
     init_backlog_queue(queue);
@@ -479,6 +519,8 @@ struct admissible_status *create_admissible_status(bool oversubscribed,
     assert(status != NULL);
 
     init_admissible_status(status, oversubscribed, inter_rack_capacity);
+    status->admitted_queues = malloc(sizeof(struct backlog_queue) * BATCH_SIZE);
+    assert(status->admitted_queues != NULL);
 
     return status;
 }
@@ -487,6 +529,7 @@ static inline
 void destroy_admissible_status(struct admissible_status *status) {
     assert(status != NULL);
 
+    free(status->admitted_queues);
     free(status);
 }
 

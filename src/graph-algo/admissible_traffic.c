@@ -12,8 +12,6 @@
 #include <stdio.h>
 #include <stdlib.h>
 
-#define TOR_SHIFT 5  // number of machines per rack is at most 2^TOR_SHIFT
-
 // Request num_slots additional timeslots from src to dst
 void request_timeslots(struct backlog_queue *new_requests, struct admissible_status *status,
                        uint16_t src, uint16_t dst, uint16_t demand_tslots) {
@@ -65,7 +63,8 @@ void prepare_new_requests(struct backlog_queue *new_requests,
 
 // Populate traffic_out with the admissible traffic for one timeslot from queue_in
 // Puts unallocated traffic in queue_out
-// For now, allocates one timeslot at a time, doesn't parallelize
+// Allocate BATCH_SIZE timeslots at once
+// traffic_out must be an array of BATCH_SIZE struct admitted_traffics
 void get_admissible_traffic(struct backlog_queue *queue_in,
                             struct backlog_queue *queue_out,
                             struct backlog_queue *new_requests,
@@ -82,14 +81,14 @@ void get_admissible_traffic(struct backlog_queue *queue_in,
 
     uint16_t min_time = (uint16_t) status->oldest_timeslot - 1;
 
-    struct admitted_bitmap admitted_endnodes;
-    init_admitted_bitmap(&admitted_endnodes);
+    struct batch_state batch_state;
+    init_batch_state(&batch_state, status->oversubscribed,
+                     status->inter_rack_capacity);
 
-    struct rack_admits admitted_racks;
-    init_rack_admits(&admitted_racks);
-
-    struct backlog_queue admitted_backlog;
-    init_backlog_queue(&admitted_backlog);
+    struct backlog_queue *admitted_backlog = status->admitted_queues;
+    uint8_t i;
+    for (i = 0; i < BATCH_SIZE; i++)
+        init_backlog_queue(&admitted_backlog[i]);
 
     while (!is_empty_backlog(queue_in) || !is_empty_backlog(new_requests)) {
         struct backlog_edge *edge = peek_head_backlog(queue_in);
@@ -116,45 +115,81 @@ void get_admissible_traffic(struct backlog_queue *queue_in,
             dequeue_backlog(queue_in);
         }
 
-        uint16_t src = chosen_edge->src;
-        uint16_t dst = chosen_edge->dst;
-
         // Combine any other new requests for the same src/dst pair
         while (!is_empty_backlog(new_requests) &&
                compare_backlog_edges(chosen_edge, peek_head_backlog(new_requests), min_time) == 0) {
             chosen_edge->backlog += peek_head_backlog(new_requests)->backlog;
             dequeue_backlog(new_requests);
         }
- 
-        if (src_is_admitted(&admitted_endnodes, src) ||
-            dst_is_admitted(&admitted_endnodes, dst) ||
-            (status->oversubscribed &&
-             (admitted_racks.srcs[get_rack_from_id(src)] == status->inter_rack_capacity ||
-              admitted_racks.dsts[get_rack_from_id(dst)] == status->inter_rack_capacity))) {
+
+        uint16_t src = chosen_edge->src;
+        uint16_t dst = chosen_edge->dst;
+
+        uint8_t batch_timeslot = get_first_timeslot(&batch_state, src, dst);
+
+        if (batch_timeslot == NONE_AVAILABLE) {
             // We cannot allocate this edge now - copy to queue_out
             enqueue_backlog(queue_out, src, dst, chosen_edge->backlog, chosen_edge->timeslot);
         }
         else {
             // We can allocate this edge now
-            insert_admitted_edge(traffic_out, src, dst);
+            set_timeslot_occupied(&batch_state, src, dst, batch_timeslot);
+       
+            insert_admitted_edge(&traffic_out[batch_timeslot], src, dst);
             if (chosen_edge->backlog > 1)
-                enqueue_backlog(&admitted_backlog, src, dst, chosen_edge->backlog - 1,
-                                (uint16_t) status->current_timeslot);
-            set_last_timeslot(status, src, dst, status->current_timeslot);
-            set_src_admitted(&admitted_endnodes, src);
-            set_dst_admitted(&admitted_endnodes, dst);
-            if (status->oversubscribed) {
-                admitted_racks.srcs[get_rack_from_id(src)] += 1;
-                admitted_racks.dsts[get_rack_from_id(dst)] += 1;
-            }
+                enqueue_backlog(&admitted_backlog[batch_timeslot], src, dst,
+                                chosen_edge->backlog - 1,
+                                (uint16_t) status->current_timeslot + batch_timeslot);
+            set_last_timeslot(status, src, dst, status->current_timeslot + batch_timeslot);
         }
+    }
+
+    // Process the rest of this batch
+    uint8_t batch;
+    for (batch = 1; batch < BATCH_SIZE; batch++) {
+        struct backlog_queue *current_queue_in = &admitted_backlog[batch - 1];
+        uint32_t start_index = queue_out->tail;
+        struct backlog_edge *queue_out_start = &queue_out->edges[start_index];
+
+        while (!is_empty_backlog(current_queue_in)) {
+            struct backlog_edge *edge = peek_head_backlog(current_queue_in);
+
+            uint16_t src = edge->src;
+            uint16_t dst = edge->dst;
+
+            uint8_t batch_timeslot = get_first_timeslot(&batch_state, src, dst);
+
+            if (batch_timeslot == NONE_AVAILABLE) {
+                // We cannot allocate this edge now - copy to queue_out
+                enqueue_backlog(queue_out, src, dst, edge->backlog, edge->timeslot);
+            }
+            else {
+                // We can allocate this edge now
+                assert(batch_timeslot >= batch);
+                set_timeslot_occupied(&batch_state, src, dst, batch_timeslot);
+       
+                insert_admitted_edge(&traffic_out[batch_timeslot], src, dst);
+                if (edge->backlog > 1)
+                    enqueue_backlog(&admitted_backlog[batch_timeslot], src, dst,
+                                    edge->backlog - 1,
+                                    (uint16_t) status->current_timeslot + batch_timeslot);
+                set_last_timeslot(status, src, dst, status->current_timeslot + batch_timeslot);
+            }
+            dequeue_backlog(current_queue_in);
+        }
+
+        // Sort the edges newly added to queue_out
+        uint32_t size = queue_out->tail - start_index;
+        if (size >= 2)
+            quicksort_backlog(queue_out_start, size, 0);
     }
 
     // Add backlogs for admitted traffic to end of queue
     // Sort first to preserve ordering of queue
-    sort_backlog(&admitted_backlog, (uint16_t) status->current_timeslot);
-    struct backlog_edge *edge = &admitted_backlog.edges[admitted_backlog.head];
-    struct backlog_edge *end = &admitted_backlog.edges[admitted_backlog.tail];
+    struct backlog_queue *last_admitted = &admitted_backlog[BATCH_SIZE - 1];
+    sort_backlog(last_admitted, 0);
+    struct backlog_edge *edge = &last_admitted->edges[last_admitted->head];
+    struct backlog_edge *end = &last_admitted->edges[last_admitted->tail];
     while (edge < end) {
         enqueue_backlog(queue_out, edge->src, edge->dst,
                         edge->backlog, edge->timeslot);
@@ -162,24 +197,16 @@ void get_admissible_traffic(struct backlog_queue *queue_in,
     }
     
     // Update current timeslot and oldest timeslot
-    status->current_timeslot++;
+    status->current_timeslot += BATCH_SIZE;
     if (is_empty_backlog(queue_out))
         status->oldest_timeslot = status->current_timeslot;
     else {
         uint16_t oldest_queued_time = peek_head_backlog(queue_out)->timeslot;
-        uint64_t mask = ~(0xffffULL);
-        if (oldest_queued_time <= (uint16_t) status->current_timeslot)
-            status->oldest_timeslot = status->current_timeslot & mask
-                + oldest_queued_time;
-        else {
-            // current timeslot has wrapped around relative to the oldest queued time
-            status->oldest_timeslot = ((status->current_timeslot - 0x10000ULL) & mask)
-                + oldest_queued_time;
-        }
-    }
-}
 
-// Returns the ID of the rack corresponding to id
-uint16_t get_rack_from_id(uint16_t id) {
-    return id >> TOR_SHIFT;
+        status->oldest_timeslot = oldest_queued_time + (status->current_timeslot & ~(0xFFFFULL));
+        if (status->oldest_timeslot > status->current_timeslot)
+            status->oldest_timeslot -= 0x10000ULL;
+    }
+
+    assert(!out_of_order(queue_out, false));
 }

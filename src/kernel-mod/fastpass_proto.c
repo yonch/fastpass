@@ -634,7 +634,7 @@ void fpproto_egress_checksum(struct sock *sk, struct sk_buff *skb)
 
 	skb->csum = skb_checksum(skb, 0, skb->len, 0);
 	fh->checksum = csum_tcpudp_magic(inet->inet_saddr, inet->inet_daddr,
-			skb->len, IPPROTO_DCCP, skb->csum);
+			skb->len, IPPROTO_FASTPASS, skb->csum);
 }
 
 static void fpproto_send_skb(struct sock *sk, struct sk_buff *skb)

@@ -72,7 +72,8 @@ class python_timing_util(object):
 
 class admissible_timing_util(object):
     '''
-    Functions for timing admissible traffic code
+    Functions for timing admissible traffic code.
+    Not currently used, because it assumes non-batching.
     '''
 
     def __init__(self, n, duration):

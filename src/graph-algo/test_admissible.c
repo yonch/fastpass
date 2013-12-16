@@ -107,20 +107,20 @@ int main(void) {
     uint32_t mean = 10;
 
     // Data structures
-    struct backlog_queue new_requests;
-    struct admissible_status status;
-    struct backlog_queue queue_0;
-    struct backlog_queue queue_1;
-    struct admitted_traffic admitted;
+    struct backlog_queue *new_requests = create_backlog_queue();
+    struct admissible_status *status = create_admissible_status(false, 0);
+    struct backlog_queue *queue_0 = create_backlog_queue();
+    struct backlog_queue *queue_1 = create_backlog_queue();
+    struct admitted_traffic *admitted = create_admitted_traffic();
 
     printf("running with %d nodes, requesting %f percent of capacity\n", num_nodes, fraction);
 
     uint16_t i;
     for (i = 0; i < experiments; i++) {
         // Initialize data structures
-        init_admissible_status(&status, false, 0);
-        init_backlog_queue(&queue_0);
-        init_backlog_queue(&queue_1);
+        init_admissible_status(status, false, 0);
+        init_backlog_queue(queue_0);
+        init_backlog_queue(queue_1);
 
         // Allocate enough space for new requests
         // (this is sufficient for <= 1 request per node per timeslot)
@@ -134,31 +134,34 @@ int main(void) {
         // Start timining
         uint64_t start_time = current_time();
 
-        uint32_t t;
+        uint32_t b;
         uint32_t num_admitted = 0;
         struct backlog_edge *current_request = requests;
-        for (t = 0; t < duration; t++) {
-            // Issue new requests
-            init_backlog_queue(&new_requests);
-            while (current_request->timeslot == (t % 65536) &&
+        for (b = 0; b < (duration / BATCH_SIZE); b++) {
+            // Issue all new requests for this batch
+            init_backlog_queue(new_requests);
+            while ((current_request->timeslot / BATCH_SIZE) == (b % (65536 / BATCH_SIZE)) &&
                    current_request < requests + num_requests) {
-                request_timeslots(&new_requests, &status, current_request->src,
+                request_timeslots(new_requests, status, current_request->src,
                                   current_request->dst, current_request->backlog);
                 current_request++;
             }
  
             // Get admissible traffic
-            struct backlog_queue *queue_in = &queue_0;
-            struct backlog_queue *queue_out = &queue_1;
-            if (t % 2 == 1) {
-                queue_in = &queue_1;
-                queue_out = &queue_0;
+            struct backlog_queue *queue_in = queue_0;
+            struct backlog_queue *queue_out = queue_1;
+            if (b % 2 == 1) {
+                queue_in = queue_1;
+                queue_out = queue_0;
             }
-            init_admitted_traffic(&admitted);
+            uint8_t i;
+            for (i = 0; i < BATCH_SIZE; i++)
+                init_admitted_traffic(&admitted[i]);
             init_backlog_queue(queue_out);
-            get_admissible_traffic(queue_in, queue_out, &new_requests,
-                                   &admitted, &status);
-            num_admitted += admitted.size;
+            get_admissible_traffic(queue_in, queue_out, new_requests,
+                                   admitted, status);
+            for (i = 0; i < BATCH_SIZE; i++)
+                num_admitted += admitted[i].size;
             
             assert(!out_of_order(queue_out, false));
         }
@@ -172,4 +175,11 @@ int main(void) {
                ((double) num_admitted) / (duration * num_nodes));
         printf("avg time (microseconds): %f\n", time_per_experiment);
     }
+
+    free(queue_0);
+    free(queue_1);
+    free(new_requests);
+    free(status->admitted_queues);
+    free(status);
+    free(admitted);
 }

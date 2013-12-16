@@ -97,6 +97,47 @@ uint32_t generate_requests_uniformly(struct backlog_edge *edges, uint32_t size,
     return num_generated;
 }
 
+// Runs one experiment. Returns the number of packets admitted.
+uint32_t run_experiment(struct backlog_edge *requests, uint32_t duration, uint32_t num_requests,
+                        struct backlog_queue *new_requests, struct admissible_status *status,
+                        struct backlog_queue *queue_0, struct backlog_queue *queue_1,
+                        struct admitted_traffic *admitted) {
+    assert(requests != NULL);
+
+    uint32_t b;
+    uint32_t num_admitted = 0;
+    struct backlog_edge *current_request = requests;
+    for (b = 0; b < (duration >> BATCH_SHIFT); b++) {
+        // Issue all new requests for this batch
+        init_backlog_queue(new_requests);
+        while ((current_request->timeslot >> BATCH_SHIFT) == (b % (65536 >> BATCH_SHIFT)) &&
+               current_request < requests + num_requests) {
+            request_timeslots(new_requests, status, current_request->src,
+                              current_request->dst, current_request->backlog);
+            current_request++;
+        }
+ 
+        // Get admissible traffic
+        struct backlog_queue *queue_in = queue_0;
+        struct backlog_queue *queue_out = queue_1;
+        if (b % 2 == 1) {
+            queue_in = queue_1;
+            queue_out = queue_0;
+        }
+        uint8_t i;
+        for (i = 0; i < BATCH_SIZE; i++)
+            init_admitted_traffic(&admitted[i]);
+        init_backlog_queue(queue_out);
+        get_admissible_traffic(queue_in, queue_out, new_requests,
+                               admitted, status);
+        for (i = 0; i < BATCH_SIZE; i++)
+            num_admitted += admitted[i].size;
+            
+        assert(!out_of_order(queue_out, false));
+    }
+    return num_admitted;
+}
+
 // For now, a simple experiment in which we randomly issue 1 new request per timeslot
 int main(void) {
     uint16_t experiments = 10;
@@ -134,37 +175,9 @@ int main(void) {
         // Start timining
         uint64_t start_time = current_time();
 
-        uint32_t b;
-        uint32_t num_admitted = 0;
-        struct backlog_edge *current_request = requests;
-        for (b = 0; b < (duration / BATCH_SIZE); b++) {
-            // Issue all new requests for this batch
-            init_backlog_queue(new_requests);
-            while ((current_request->timeslot / BATCH_SIZE) == (b % (65536 / BATCH_SIZE)) &&
-                   current_request < requests + num_requests) {
-                request_timeslots(new_requests, status, current_request->src,
-                                  current_request->dst, current_request->backlog);
-                current_request++;
-            }
- 
-            // Get admissible traffic
-            struct backlog_queue *queue_in = queue_0;
-            struct backlog_queue *queue_out = queue_1;
-            if (b % 2 == 1) {
-                queue_in = queue_1;
-                queue_out = queue_0;
-            }
-            uint8_t i;
-            for (i = 0; i < BATCH_SIZE; i++)
-                init_admitted_traffic(&admitted[i]);
-            init_backlog_queue(queue_out);
-            get_admissible_traffic(queue_in, queue_out, new_requests,
-                                   admitted, status);
-            for (i = 0; i < BATCH_SIZE; i++)
-                num_admitted += admitted[i].size;
-            
-            assert(!out_of_order(queue_out, false));
-        }
+        // Run the experiment
+        uint32_t num_admitted = run_experiment(requests, duration, num_requests, new_requests,
+                                               status, queue_0, queue_1, admitted);
         
         uint64_t end_time = current_time();
         double time_per_experiment = (end_time - start_time) / (2.8 * 1000 * duration);

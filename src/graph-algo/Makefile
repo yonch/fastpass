@@ -3,8 +3,10 @@ CC = gcc
 #CC = /mnt/sdb1/bin/icc
 CCFLAGS = -g
 CCFLAGS += -DNDEBUG
-CCFLAGS += -O3
-LDFLAGS =
+CCFLAGS += -O3 
+#CCFLAGS += -debug inline-debug-info
+LDFLAGS = -lm
+#LDFLAGS = -debug inline-debug-info
 
 # Pattern rule
 %.o: %.c

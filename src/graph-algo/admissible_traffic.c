@@ -90,7 +90,7 @@ void get_admissible_traffic(struct backlog_queue *queue_in,
     for (i = 0; i < BATCH_SIZE; i++)
         init_backlog_queue(&admitted_backlog[i]);
 
-    while (!is_empty_backlog(queue_in) || !is_empty_backlog(new_requests)) {
+    while (likely(!is_empty_backlog(queue_in) || !is_empty_backlog(new_requests))) {
         struct backlog_edge *edge = peek_head_backlog(queue_in);
         struct backlog_edge *new_edge = peek_head_backlog(new_requests);
 
@@ -151,7 +151,7 @@ void get_admissible_traffic(struct backlog_queue *queue_in,
         uint32_t start_index = queue_out->tail;
         struct backlog_edge *queue_out_start = &queue_out->edges[start_index];
 
-        while (!is_empty_backlog(current_queue_in)) {
+        while (likely(!is_empty_backlog(current_queue_in))) {
             struct backlog_edge *edge = peek_head_backlog(current_queue_in);
 
             uint16_t src = edge->src;

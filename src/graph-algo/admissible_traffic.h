@@ -28,4 +28,13 @@ void get_admissible_traffic(struct backlog_queue *queue_in,
 // Helper function to map ids to racks
 uint16_t get_rack_from_id(uint16_t id);
 
+
+#ifndef likely
+#define likely(x)  __builtin_expect((x),1)
+#endif /* likely */
+
+#ifndef unlikely
+#define unlikely(x)  __builtin_expect((x),0)
+#endif /* unlikely */
+
 #endif /* ADMISSIBLE_TRAFFIC_H_ */

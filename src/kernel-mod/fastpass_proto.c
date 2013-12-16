@@ -278,13 +278,13 @@ void outwnd_reset(struct fastpass_sock* fp)
 
 static void do_proto_reset(struct fastpass_sock *fp, u64 reset_time)
 {
+	u32 time_hash = jhash_1word((u32)reset_time, reset_time >> 32);
 	/* clear unacked packets */
 	outwnd_reset(fp);
 
 	/* set new sequence numbers */
 	fp->last_reset_time = reset_time;
-	fp->next_seqno = reset_time +
-			((u64)jhash_1word((u32)reset_time, reset_time >> 32) << 32);
+	fp->next_seqno = reset_time + time_hash + ((u64)time_hash << 32);
 }
 
 static bool tstamp_in_window(u64 tstamp, u64 win_middle, u64 win_size) {

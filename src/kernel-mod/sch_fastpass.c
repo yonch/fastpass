@@ -73,7 +73,6 @@ struct fp_flow {
 	int		qlen;				/* number of packets in flow queue */
 
 	s64		credit;				/* time remaining in the last scheduled timeslot */
-	int		sch_tslots;			/* number of scheduled tslots that have not ended */
 };
 
 /* special pointer signifies flow is not in a queue */

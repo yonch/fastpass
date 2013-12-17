@@ -61,6 +61,40 @@ void prepare_new_requests(struct backlog_queue *new_requests,
     sort_backlog(new_requests, min_time);
 }
 
+// Try to allocate
+void try_allocation(struct backlog_edge *chosen_edge, struct batch_state *batch_state,
+                    struct backlog_queue *queue_out,
+                    struct admitted_traffic *traffic_out,
+                    struct backlog_queue *admitted_backlog,
+                    struct admissible_status *status) {
+    assert(chosen_edge != NULL);
+    assert(batch_state != NULL);
+    assert(queue_out != NULL);
+    assert(traffic_out != NULL);
+    assert(admitted_backlog != NULL);
+    
+    uint16_t src = chosen_edge->src;
+    uint16_t dst = chosen_edge->dst;
+
+    uint8_t batch_timeslot = get_first_timeslot(batch_state, src, dst);
+
+    if (batch_timeslot == NONE_AVAILABLE) {
+        // We cannot allocate this edge now - copy to queue_out
+        enqueue_backlog(queue_out, src, dst, chosen_edge->backlog, chosen_edge->timeslot);
+    }
+    else {
+        // We can allocate this edge now
+        set_timeslot_occupied(batch_state, src, dst, batch_timeslot);
+       
+        insert_admitted_edge(&traffic_out[batch_timeslot], src, dst);
+        if (chosen_edge->backlog > 1)
+            enqueue_backlog(&admitted_backlog[batch_timeslot], src, dst,
+                            chosen_edge->backlog - 1,
+                            (uint16_t) status->current_timeslot + batch_timeslot);
+        set_last_timeslot(status, src, dst, status->current_timeslot + batch_timeslot);
+    }
+}
+
 // Populate traffic_out with the admissible traffic for one timeslot from queue_in
 // Puts unallocated traffic in queue_out
 // Allocate BATCH_SIZE timeslots at once
@@ -122,26 +156,8 @@ void get_admissible_traffic(struct backlog_queue *queue_in,
             dequeue_backlog(new_requests);
         }
 
-        uint16_t src = chosen_edge->src;
-        uint16_t dst = chosen_edge->dst;
-
-        uint8_t batch_timeslot = get_first_timeslot(&batch_state, src, dst);
-
-        if (batch_timeslot == NONE_AVAILABLE) {
-            // We cannot allocate this edge now - copy to queue_out
-            enqueue_backlog(queue_out, src, dst, chosen_edge->backlog, chosen_edge->timeslot);
-        }
-        else {
-            // We can allocate this edge now
-            set_timeslot_occupied(&batch_state, src, dst, batch_timeslot);
-       
-            insert_admitted_edge(&traffic_out[batch_timeslot], src, dst);
-            if (chosen_edge->backlog > 1)
-                enqueue_backlog(&admitted_backlog[batch_timeslot], src, dst,
-                                chosen_edge->backlog - 1,
-                                (uint16_t) status->current_timeslot + batch_timeslot);
-            set_last_timeslot(status, src, dst, status->current_timeslot + batch_timeslot);
-        }
+        try_allocation(chosen_edge, &batch_state, queue_out, traffic_out,
+                       admitted_backlog, status);
     }
 
     // Process the rest of this batch
@@ -154,27 +170,9 @@ void get_admissible_traffic(struct backlog_queue *queue_in,
         while (likely(!is_empty_backlog(current_queue_in))) {
             struct backlog_edge *edge = peek_head_backlog(current_queue_in);
 
-            uint16_t src = edge->src;
-            uint16_t dst = edge->dst;
+            try_allocation(edge, &batch_state, queue_out, traffic_out,
+                           admitted_backlog, status);
 
-            uint8_t batch_timeslot = get_first_timeslot(&batch_state, src, dst);
-
-            if (batch_timeslot == NONE_AVAILABLE) {
-                // We cannot allocate this edge now - copy to queue_out
-                enqueue_backlog(queue_out, src, dst, edge->backlog, edge->timeslot);
-            }
-            else {
-                // We can allocate this edge now
-                assert(batch_timeslot >= batch);
-                set_timeslot_occupied(&batch_state, src, dst, batch_timeslot);
-       
-                insert_admitted_edge(&traffic_out[batch_timeslot], src, dst);
-                if (edge->backlog > 1)
-                    enqueue_backlog(&admitted_backlog[batch_timeslot], src, dst,
-                                    edge->backlog - 1,
-                                    (uint16_t) status->current_timeslot + batch_timeslot);
-                set_last_timeslot(status, src, dst, status->current_timeslot + batch_timeslot);
-            }
             dequeue_backlog(current_queue_in);
         }
 

@@ -65,7 +65,7 @@ struct fp_flow {
 	u64		src_dst_key;		/* flow identifier */
 
 	struct rb_node	fp_node; 	/* anchor in fp_root[] trees */
-	struct fp_flow	*next;		/* singly linked pointer into q->unreq_flows */
+	struct list_head	queue_entry; /* entry into one of the request queues */
 
 	/* queued buffers: */
 	struct sk_buff	*head;		/* list of skbs for this flow : first skb */
@@ -82,7 +82,7 @@ struct fp_flow {
 };
 
 /* special pointer signifies flow is not in a queue */
-struct fp_flow		not_in_queue;
+struct list_head		not_in_queue;
 
 struct fp_flow_head {
 	struct fp_flow *first;
@@ -120,7 +120,7 @@ struct fp_sched_data {
 
 	struct fp_flow	internal;		/* for non classified or high prio packets */
 
-	struct fp_flow_head unreq_flows; 	/* flows with unscheduled packets */
+	struct list_head unreq_flows; 		/* flows with unscheduled packets */
 
 	u64		tslot_start_time;			/* current time slot start time */
 	struct fp_timeslot_horizon	horizon;/* which slots have been allocated */
@@ -230,23 +230,16 @@ void set_request_timer(struct fp_sched_data* q, u64 now)
 
 static bool flow_in_flowqueue(struct fp_flow *f)
 {
-	return (f->next != &not_in_queue);
+	return (f->queue_entry.next != &not_in_queue);
 }
 
 /* adds flow to a list of flows, at tail */
 static void flowqueue_enqueue(struct fp_sched_data *q, struct fp_flow *f)
 {
-	struct fp_flow_head *head = &q->unreq_flows;
-
 	BUG_ON(flow_in_flowqueue(f));
 
 	/* enqueue */
-	if (head->first)
-		head->last->next = f;
-	else
-		head->first = f;
-	head->last = f;
-	f->next = NULL;
+	list_add_tail(&f->queue_entry, &q->unreq_flows);
 
 	q->n_unreq_flows++;
 
@@ -259,12 +252,18 @@ static void flowqueue_enqueue(struct fp_sched_data *q, struct fp_flow *f)
 
 static struct fp_flow *flowqueue_dequeue(struct fp_sched_data* q)
 {
-	struct fp_flow *f = q->unreq_flows.first;
+	struct fp_flow *f;
 
-	BUG_ON(f == NULL);
+	BUG_ON(list_empty(&q->unreq_flows));
 
-	q->unreq_flows.first = f->next;
-	f->next = &not_in_queue;
+	/* get entry */
+	f = list_first_entry(&q->unreq_flows, struct fp_flow, queue_entry);
+
+	/* remove it from queue */
+	list_del(&f->queue_entry);
+	f->queue_entry.next = &not_in_queue;
+
+	/* update counter */
 	q->n_unreq_flows--;
 
 	return f;
@@ -272,7 +271,7 @@ static struct fp_flow *flowqueue_dequeue(struct fp_sched_data* q)
 
 static bool flowqueue_is_empty(struct fp_sched_data* q)
 {
-	return (q->unreq_flows.first == NULL);
+	return list_empty(&q->unreq_flows);
 }
 
 /* should the flow be garbage-collected? */
@@ -380,7 +379,7 @@ static struct fp_flow *fpq_lookup(struct fp_sched_data *q, u64 src_dst_key,
 
 	rb_link_node(&f->fp_node, parent, p);
 	rb_insert_color(&f->fp_node, root);
-	f->next = &not_in_queue;
+	f->queue_entry.next = &not_in_queue;
 
 	q->flows++;
 	q->inactive_flows++;
@@ -1051,7 +1050,7 @@ static void fp_tc_reset(struct Qdisc *sch)
 			kmem_cache_free(fp_flow_cachep, f);
 		}
 	}
-	q->unreq_flows.first	= NULL;
+	INIT_LIST_HEAD(&q->unreq_flows);
 	q->horizon.mask = 0ULL;
 	q->flows		= 0;
 	q->inactive_flows	= 0;
@@ -1311,7 +1310,7 @@ static int fp_tc_init(struct Qdisc *sch, struct nlattr *opt)
 	q->ctrl_addr_netorder = htonl(0x7F000001); /* need sensible default? */
 	q->reset_window_us	= 2e6; /* 2 seconds */
 	q->flow_hash_tbl	= NULL;
-	q->unreq_flows.first= NULL;
+	INIT_LIST_HEAD(&q->unreq_flows);
 	q->internal.src_dst_key = 0xD066F00DDEADBEEF;
 	q->time_next_req = ~0ULL;
 

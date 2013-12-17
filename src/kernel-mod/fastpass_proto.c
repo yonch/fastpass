@@ -97,7 +97,7 @@ void fpproto_pktdesc_free(struct fpproto_pktdesc *pd)
 
 static inline u32 outwnd_pos(u64 tslot)
 {
-	return -tslot & (FASTPASS_OUTWND_LEN-1);
+	return ((u32)(-tslot)) & (FASTPASS_OUTWND_LEN-1);
 }
 
 /**
@@ -153,21 +153,30 @@ struct fpproto_pktdesc * outwnd_pop(struct fastpass_sock *fp, u64 tslot)
  */
 s32	outwnd_at_or_before(struct fastpass_sock *fp, u64 tslot)
 {
-	u32 head_index = outwnd_pos(fp->next_seqno - 1);
+	u32 head_index;
+	u32 tslot_index;
+	u32 found_offset;
+
+	BUG_ON(time_after_eq64(tslot, fp->next_seqno));
+
+	if (unlikely(time_before64(tslot, fp->next_seqno - FASTPASS_OUTWND_LEN)))
+		return -1;
+
+	head_index = outwnd_pos(fp->next_seqno - 1);
 
 	/*
 	 * there are two indices that could correspond to tslot, get the first
 	 *   one not smaller than head_index.
 	 */
-	u32 tslot_index = head_index + outwnd_pos(tslot - (fp->next_seqno - 1));
-
-	u32 found_offset;
-
-	BUG_ON(time_after_eq64(tslot, fp->next_seqno));
+	tslot_index = head_index + outwnd_pos(tslot - (fp->next_seqno - 1));
 
 	found_offset = find_next_bit(fp->bin_mask,
 			head_index + FASTPASS_OUTWND_LEN,
 			tslot_index);
+
+	/* TODO: remove later, for performance */
+	BUG_ON((found_offset != head_index + FASTPASS_OUTWND_LEN)
+			&& !outwnd_is_unacked(fp, tslot - (found_offset - tslot_index)));
 
 	return (found_offset == head_index + FASTPASS_OUTWND_LEN) ?
 			-1 : (found_offset - tslot_index);
@@ -340,6 +349,83 @@ static void fpproto_handle_reset(struct fastpass_sock *fp,
 }
 
 /**
+ * Acks a single timeslot.
+ * Assumes timeslot is within the window and has not been acked yet.
+ */
+void fpproto_ack_seqno(struct fastpass_sock *fp, u64 seqno)
+{
+	struct fpproto_pktdesc *pd;
+
+	BUG_ON(time_after_eq64(seqno, fp->next_seqno));
+	BUG_ON(time_before64(seqno, fp->next_seqno - FASTPASS_OUTWND_LEN));
+
+	fastpass_pr_debug("ACK seqno 0x%08llX\n", seqno);
+	if (!outwnd_is_unacked(fp, seqno))
+		fastpass_pr_debug("huh?\n");
+	pd = outwnd_pop(fp, seqno);
+
+	/* TODO: notify scheduler */
+
+	fpproto_pktdesc_free(pd);
+}
+
+void fpproto_handle_ack(struct fastpass_sock *fp,
+		struct Qdisc *sch, u16 ack_seq, u32 ack_runlen)
+{
+	u64 cur_seqno;
+	s32 next_unacked;
+	u64 end_seqno;
+
+	/* find full seqno, strictly before fp->next_seqno */
+	cur_seqno = fp->next_seqno - (1 << 16);
+	cur_seqno += (ack_seq - cur_seqno) & 0xFFFF;
+
+	/* is the seqno within the window? */
+	if (time_before64(cur_seqno, fp->next_seqno - FASTPASS_OUTWND_LEN))
+		goto ack_too_early;
+
+	/* if the ack_seq is unacknowledged, process the ack on it */
+	if (outwnd_is_unacked(fp, cur_seqno))
+		fpproto_ack_seqno(fp, cur_seqno);
+	end_seqno = cur_seqno - 1;
+
+	/* start with the positive nibble */
+	ack_runlen <<= 4;
+	goto handle_positive;
+
+handle_positive:
+	cur_seqno = end_seqno;
+	end_seqno -= (ack_runlen >> 28);
+	ack_runlen <<= 4;
+next_unacked:
+	/* find next unacked */
+	next_unacked = outwnd_at_or_before(fp, cur_seqno);
+	if (next_unacked == -1)
+		goto done;
+	cur_seqno -= next_unacked;
+
+	if (likely(time_after64(cur_seqno, end_seqno))) {
+		/* got ourselves an unacked seqno that should be acked */
+		fpproto_ack_seqno(fp, cur_seqno);
+		/* try to find another seqno that should be acked */
+		goto next_unacked;
+	}
+	/* finished handling this run. if more runs, handle them as well */
+	if (likely(ack_runlen != 0)) {
+		end_seqno -= (ack_runlen >> 28);
+		ack_runlen <<= 4;
+		goto handle_positive; /* continue handling */
+	}
+done:
+	return;
+
+ack_too_early:
+	fastpass_pr_debug("too_early_ack: earliest %llu, got %llu\n",
+			fp->next_seqno - FASTPASS_OUTWND_LEN, cur_seqno);
+	fp->stat_too_early_ack++;
+}
+
+/**
  * Receives a packet destined for the protocol. (part of inet socket API)
  */
 int fpproto_rcv(struct sk_buff *skb)
@@ -356,6 +442,8 @@ int fpproto_rcv(struct sk_buff *skb)
 	int alloc_n_dst, alloc_n_tslots;
 	u16 alloc_dst[16];
 	u32 alloc_base_tslot;
+	u16 ack_seq;
+	u32 ack_runlen;
 
 	fastpass_pr_debug("visited\n");
 
@@ -374,7 +462,7 @@ int fpproto_rcv(struct sk_buff *skb)
 
 	fp->stat_rx_pkts++;
 
-	if (skb->len < 6)
+	if (skb->len < 5)
 		goto packet_too_short;
 
 	hdr = (struct fastpass_hdr *)skb->data;
@@ -382,6 +470,7 @@ int fpproto_rcv(struct sk_buff *skb)
 	data_end = &skb->data[skb->len];
 
 handle_payload:
+	/* at this point we know there is at least one byte remaining */
 	payload_type = *data >> 4;
 
 	switch (payload_type) {
@@ -398,6 +487,9 @@ handle_payload:
 		break;
 
 	case FASTPASS_PTYPE_ALLOC:
+		if (data + 2 > data_end)
+			goto incomplete_alloc_payload_one_byte;
+
 		payload_type = ntohs(*(u16 *)data);
 		alloc_n_dst = (payload_type >> 8) & 0xF;
 		alloc_n_tslots = 2 * (payload_type & 0x3F);
@@ -421,6 +513,17 @@ handle_payload:
 				data, alloc_n_tslots);
 
 		data += alloc_n_tslots;
+		break;
+	case FASTPASS_PTYPE_ACK:
+		if (data + 6 > data_end)
+			goto incomplete_ack_payload;
+
+		ack_runlen = ntohl(*(u32 *)data);
+		ack_seq = ntohs(*(u16 *)(data + 4));
+
+		fpproto_handle_ack(fp, sch, ack_seq, ack_runlen);
+
+		data += 6;
 		break;
 	default:
 		goto unknown_payload_type;
@@ -449,10 +552,21 @@ incomplete_reset_payload:
 			(int)(data_end - data));
 	goto cleanup;
 
+incomplete_alloc_payload_one_byte:
+	fp->stat_rx_incomplete_alloc++;
+	fastpass_pr_debug("ALLOC payload incomplete, only got one byte\n");
+	goto cleanup;
+
 incomplete_alloc_payload:
 	fp->stat_rx_incomplete_alloc++;
 	fastpass_pr_debug("ALLOC payload incomplete: expected %d bytes, got %d\n",
 			2 + 2 * alloc_n_dst + alloc_n_tslots, (int)(data_end - data));
+	goto cleanup;
+
+incomplete_ack_payload:
+	fp->stat_rx_incomplete_ack++;
+	fastpass_pr_debug("ACK payload incomplete: expected 6 bytes, got %d\n",
+			(int)(data_end - data));
 	goto cleanup;
 
 packet_too_short:
@@ -685,7 +799,7 @@ build_header_error:
 void fpproto_handle_unacked_tx_packet(struct fastpass_sock *fp, u64 seq)
 {
 	struct fpproto_pktdesc *pd = outwnd_pop(fp, seq);
-	fastpass_pr_debug("Unacked tx seq %llu\n", seq);
+	fastpass_pr_debug("Unacked tx seq 0x%llX\n", seq);
 	fpproto_pktdesc_free(pd);
 }
 

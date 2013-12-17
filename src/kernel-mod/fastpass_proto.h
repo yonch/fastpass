@@ -148,6 +148,8 @@ struct fastpass_sock {
 	u64 stat_rx_too_short; /* TODO: report */
 	u64 stat_rx_pkts; /* TODO: report */
 	u64 stat_fall_off_outwnd; /*TODO:report*/
+	u64 stat_rx_incomplete_ack; /*TODO:report*/
+	u64 stat_too_early_ack; /*TODO:report*/
 };
 
 extern int __init fpproto_register(void);

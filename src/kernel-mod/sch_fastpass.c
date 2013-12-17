@@ -817,9 +817,10 @@ static void send_request(struct Qdisc *sch, u64 now)
 	}
 
 	fastpass_pr_debug(
-			"start: unreq_flows=%u, unreq_tslots=%llu, now=%llu, scheduled=%llu, diff=%lld\n",
+			"start: unreq_flows=%u, unreq_tslots=%llu, now=%llu, scheduled=%llu, diff=%lld, next_seq=%08llX\n",
 			q->n_unreq_flows, q->demand_tslots - q->requested_tslots, now,
-			q->time_next_req, (s64 )now - (s64 )q->time_next_req);
+			q->time_next_req, (s64 )now - (s64 )q->time_next_req,
+			fastpass_sk(q->ctrl_sock->sk)->next_seqno);
 
 	BUG_ON(q->req_t + q->req_cost > now);
 	BUG_ON(flowqueue_is_empty(q));

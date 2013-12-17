@@ -735,7 +735,7 @@ static void handle_alloc(struct Qdisc *sch, u32 base_tslot, u16 *dst,
 	full_tslot = q->horizon.timeslot - (1ULL << 18); /* 1/4 back, 3/4 front */
 	full_tslot += ((u32)base_tslot - (u32)full_tslot) & 0xFFFFF; /* 20 bits */
 
-	fastpass_pr_debug("got ALLOC for timeslot %d (full %llu, current %llu), %d destinations, %d timeslots, mask 0x%016llX",
+	fastpass_pr_debug("got ALLOC for timeslot %d (full %llu, current %llu), %d destinations, %d timeslots, mask 0x%016llX\n",
 			base_tslot, full_tslot, q->horizon.timeslot, n_dst, n_tslots, q->horizon.mask);
 
 	for (i = 0; i < n_tslots; i++) {
@@ -794,6 +794,18 @@ static void handle_alloc(struct Qdisc *sch, u32 base_tslot, u16 *dst,
 	} else {
 		set_watchdog(sch);
 	}
+}
+
+static void handle_ack(struct Qdisc *sch, struct fpproto_pktdesc *pd)
+{
+	fastpass_pr_debug("here");
+	fpproto_pktdesc_free(pd);
+}
+
+static void handle_neg_ack(struct Qdisc *sch, struct fpproto_pktdesc *pd)
+{
+	fastpass_pr_debug("here");
+	fpproto_pktdesc_free(pd);
 }
 
 /**
@@ -927,8 +939,10 @@ out_got_skb:
 }
 
 struct fpproto_ops fastpass_sch_proto_ops = {
-	.handle_reset = &handle_reset,
-	.handle_alloc = &handle_alloc,
+	.handle_reset	= &handle_reset,
+	.handle_alloc	= &handle_alloc,
+	.handle_ack		= &handle_ack,
+	.handle_neg_ack	= &handle_neg_ack,
 };
 
 /* reconnects the control socket to the controller */

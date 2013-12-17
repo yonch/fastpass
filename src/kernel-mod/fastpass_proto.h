@@ -95,6 +95,18 @@ struct fpproto_ops {
 
 	void	(*handle_alloc)(struct Qdisc *q, u32 base_tslot,
 			u16 *dst, int n_dst, u8 *tslots, int n_tslots);
+
+	/**
+	 * Called when an ack is received for a sent packet.
+	 * @note: this function becomes responsible for freeing the memory of @pd
+	 */
+	void	(*handle_ack)(struct Qdisc *q, struct fpproto_pktdesc *pd);
+
+	/**
+	 * Called when a sent packet is deemed as probably lost.
+	 * @note: this function becomes responsible for freeing the memory of @pd
+	 */
+	void	(*handle_neg_ack)(struct Qdisc *q, struct fpproto_pktdesc *pd);
 };
 
 /**

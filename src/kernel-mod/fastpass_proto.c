@@ -364,9 +364,10 @@ void fpproto_ack_seqno(struct fastpass_sock *fp, u64 seqno)
 		fastpass_pr_debug("huh?\n");
 	pd = outwnd_pop(fp, seqno);
 
-	/* TODO: notify scheduler */
-
-	fpproto_pktdesc_free(pd);
+	if (fp->ops->handle_ack)
+		fp->ops->handle_ack(fp->qdisc, pd);		/* will free pd */
+	else
+		fpproto_pktdesc_free(pd);
 }
 
 void fpproto_handle_ack(struct fastpass_sock *fp,
@@ -800,7 +801,10 @@ void fpproto_handle_unacked_tx_packet(struct fastpass_sock *fp, u64 seq)
 {
 	struct fpproto_pktdesc *pd = outwnd_pop(fp, seq);
 	fastpass_pr_debug("Unacked tx seq 0x%llX\n", seq);
-	fpproto_pktdesc_free(pd);
+	if (fp->ops->handle_neg_ack)
+		fp->ops->handle_neg_ack(fp->qdisc, pd);		/* will free pd */
+	else
+		fpproto_pktdesc_free(pd);
 }
 
 void fpproto_send_packet(struct sock *sk, struct fpproto_pktdesc *pd)

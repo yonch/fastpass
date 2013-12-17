@@ -35,6 +35,7 @@
 #define FASTPASS_PTYPE_RESET 		0x1
 #define FASTPASS_PTYPE_AREQ			0x2
 #define FASTPASS_PTYPE_ALLOC		0x3
+#define FASTPASS_PTYPE_ACK			0x4
 
 /*
  * 	Warning and debugging macros, (originally taken from DCCP)

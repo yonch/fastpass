@@ -627,12 +627,15 @@ static int fpproto_build_header(struct sock *sk, struct sk_buff *skb)
 	return 0;
 }
 
-void fpproto_egress_checksum(struct sock *sk, struct sk_buff *skb)
+void fpproto_egress_checksum(struct sock *sk, struct sk_buff *skb,
+		u64 seqno)
 {
 	const struct inet_sock *inet = inet_sk(sk);
 	struct fastpass_hdr *fh = fastpass_hdr(skb);
 
-	skb->csum = skb_checksum(skb, 0, skb->len, 0);
+	u32 seq_hash = jhash_1word((u32)seqno, seqno >> 32);
+
+	skb->csum = skb_checksum(skb, 0, skb->len, seq_hash);
 	fh->checksum = csum_tcpudp_magic(inet->inet_saddr, inet->inet_daddr,
 			skb->len, IPPROTO_FASTPASS, skb->csum);
 }
@@ -653,7 +656,7 @@ static void fpproto_send_skb(struct sock *sk, struct sk_buff *skb)
 		goto build_header_error;
 
 	/* checksum */
-	fpproto_egress_checksum(sk, skb);
+	fpproto_egress_checksum(sk, skb, fp->next_seqno);
 
 	/* send onwards */
 	rc = ip_queue_xmit(skb, &inet->cork.fl);
@@ -817,7 +820,7 @@ static int fpproto_userspace_sendmsg(struct kiocb *iocb, struct sock *sk,
 		goto out_discard;
 
 	/* checksum */
-	fpproto_egress_checksum(sk, skb);
+	fpproto_egress_checksum(sk, skb, fp->next_seqno);
 
 	/* send onwards */
 	rc = ip_queue_xmit(skb, &inet->cork.fl);

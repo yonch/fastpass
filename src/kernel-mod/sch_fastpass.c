@@ -54,6 +54,11 @@
  */
 #define FASTPASS_REQUEST_LOW_WATERMARK (1 << 9)
 
+enum {
+	FLOW_UNQUEUED,
+	FLOW_REQUEST_QUEUE,
+};
+
 /*
  * Per flow structure, dynamically allocated
  */
@@ -62,6 +67,7 @@ struct fp_flow {
 
 	struct rb_node	fp_node; 	/* anchor in fp_root[] trees */
 	struct list_head	queue_entry; /* entry into one of the request queues */
+	uint8_t state;
 
 	/* queued buffers: */
 	struct sk_buff	*head;		/* list of skbs for this flow : first skb */
@@ -74,9 +80,6 @@ struct fp_flow {
 
 	s64		credit;				/* time remaining in the last scheduled timeslot */
 };
-
-/* special pointer signifies flow is not in a queue */
-struct list_head		not_in_queue;
 
 struct fp_flow_head {
 	struct fp_flow *first;
@@ -105,7 +108,6 @@ struct fp_sched_data {
 	u32		req_cost;					/* cost, in tokens, of a request */
 	u32		req_bucketlen;				/* the max number of tokens to burst */
 	u32		req_min_gap;				/* min delay between requests (ns) */
-	u32		gc_age;						/* number of tslots to keep empty flows */
 	__be32	ctrl_addr_netorder;			/* IP of the controller, network byte order */
 	u32		reset_window_us;			/* time window of acceptable resets */
 
@@ -224,7 +226,7 @@ void set_request_timer(struct fp_sched_data* q, u64 now)
 
 static bool flow_in_flowqueue(struct fp_flow *f)
 {
-	return (f->queue_entry.next != &not_in_queue);
+	return (f->state != FLOW_UNQUEUED);
 }
 
 /* adds flow to a list of flows, at tail */
@@ -234,6 +236,7 @@ static void flowqueue_enqueue(struct fp_sched_data *q, struct fp_flow *f)
 
 	/* enqueue */
 	list_add_tail(&f->queue_entry, &q->unreq_flows);
+	f->state = FLOW_REQUEST_QUEUE;
 
 	q->n_unreq_flows++;
 
@@ -255,7 +258,7 @@ static struct fp_flow *flowqueue_dequeue(struct fp_sched_data* q)
 
 	/* remove it from queue */
 	list_del(&f->queue_entry);
-	f->queue_entry.next = &not_in_queue;
+	f->state = FLOW_UNQUEUED;
 
 	/* update counter */
 	q->n_unreq_flows--;
@@ -320,7 +323,7 @@ static struct fp_flow *fpq_lookup(struct fp_sched_data *q, u64 src_dst_key,
 
 	rb_link_node(&f->fp_node, parent, p);
 	rb_insert_color(&f->fp_node, root);
-	f->queue_entry.next = &not_in_queue;
+	f->state = FLOW_UNQUEUED;
 
 	q->flows++;
 	q->inactive_flows++;
@@ -1156,7 +1159,6 @@ static int fp_tc_change(struct Qdisc *sch, struct nlattr *opt) {
 
 	if (tb[TCA_FASTPASS_REQUEST_GAP]) {
 		q->req_min_gap = nla_get_u32(tb[TCA_FASTPASS_REQUEST_GAP]);
-		q->gc_age = DIV_ROUND_UP(FP_GC_NUM_SECS * NSEC_PER_SEC, q->tslot_len);
 	}
 
 	if (tb[TCA_FASTPASS_CONTROLLER_IP]) {
@@ -1243,7 +1245,6 @@ static int fp_tc_init(struct Qdisc *sch, struct nlattr *opt)
 	q->req_cost			= 2 * q->tslot_len;
 	q->req_bucketlen	= 4 * q->req_cost;
 	q->req_min_gap		= 1000;
-	q->gc_age = DIV_ROUND_UP(FP_GC_NUM_SECS * NSEC_PER_SEC, q->tslot_len);
 	q->ctrl_addr_netorder = htonl(0x7F000001); /* need sensible default? */
 	q->reset_window_us	= 2e6; /* 2 seconds */
 	q->flow_hash_tbl	= NULL;

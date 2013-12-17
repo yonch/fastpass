@@ -54,10 +54,6 @@
  */
 #define FASTPASS_REQUEST_LOW_WATERMARK (1 << 9)
 
-/* limit number of collected flows per round */
-#define FP_GC_MAX 8
-#define FP_GC_NUM_SECS 3
-
 /*
  * Per flow structure, dynamically allocated
  */
@@ -78,7 +74,6 @@ struct fp_flow {
 
 	s64		credit;				/* time remaining in the last scheduled timeslot */
 	int		sch_tslots;			/* number of scheduled tslots that have not ended */
-	u64		last_sch_tslot;		/* last slot that had been allocated to flow */
 };
 
 /* special pointer signifies flow is not in a queue */
@@ -274,55 +269,6 @@ static bool flowqueue_is_empty(struct fp_sched_data* q)
 	return list_empty(&q->unreq_flows);
 }
 
-/* should the flow be garbage-collected? */
-static bool fp_gc_candidate(const struct fp_sched_data *q,
-		const struct fp_flow *f)
-{
-	return f->qlen == 0 &&
-	       time_after64(q->horizon.timeslot, f->last_sch_tslot + q->gc_age);
-}
-
-/* garbage collect the given tree on the path from @root to @src_dst_key */
-static void fp_gc(struct fp_sched_data *q,
-		  struct rb_root *root,
-		  u64 src_dst_key)
-{
-	struct fp_flow *f, *tofree[FP_GC_MAX];
-	struct rb_node **p, *parent;
-	int fcnt = 0;
-
-	p = &root->rb_node;
-	parent = NULL;
-	while (*p) {
-		parent = *p;
-
-		f = container_of(parent, struct fp_flow, fp_node);
-		if (f->src_dst_key == src_dst_key)
-			break;
-
-		if (fp_gc_candidate(q, f)) {
-			tofree[fcnt++] = f;
-			if (fcnt == FP_GC_MAX)
-				break;
-		}
-
-		if (f->src_dst_key > src_dst_key)
-			p = &parent->rb_right;
-		else
-			p = &parent->rb_left;
-	}
-
-	q->flows -= fcnt;
-	q->inactive_flows -= fcnt;
-	q->stat_gc_flows += fcnt;
-	while (fcnt) {
-		struct fp_flow *f = tofree[--fcnt];
-
-		rb_erase(&f->fp_node, root);
-		kmem_cache_free(fp_flow_cachep, f);
-	}
-}
-
 static const u8 prio2band[TC_PRIO_MAX + 1] = {
 	1, 2, 2, 2, 1, 2, 0, 0 , 1, 1, 1, 1, 1, 1, 1, 1
 };
@@ -345,10 +291,6 @@ static struct fp_flow *fpq_lookup(struct fp_sched_data *q, u64 src_dst_key,
 	skb_hash = src_dst_key_hash(src_dst_key);
 
 	root = &q->flow_hash_tbl[skb_hash >> (32 - q->hash_tbl_log)];
-
-	if (q->flows >= (2U << q->hash_tbl_log) &&
-	    q->inactive_flows > q->flows/2)
-		fp_gc(q, root, src_dst_key);
 
 	p = &root->rb_node;
 	parent = NULL;
@@ -1071,23 +1013,22 @@ static void fp_tc_rehash(struct fp_sched_data *q,
 	struct rb_node *op, **np, *parent;
 	struct rb_root *oroot, *nroot;
 	struct fp_flow *of, *nf;
-	int fcnt = 0;
 	u32 idx;
 	u32 skb_hash;
 
+	/* for each cell in hash table: */
 	for (idx = 0; idx < (1U << old_log); idx++) {
 		oroot = &old_array[idx];
+		/* while rbtree not empty: */
 		while ((op = rb_first(oroot)) != NULL) {
+			/* erase from old tree */
 			rb_erase(op, oroot);
+			/* find new cell in hash table */
 			of = container_of(op, struct fp_flow, fp_node);
-			if (fp_gc_candidate(q, of)) {
-				fcnt++;
-				kmem_cache_free(fp_flow_cachep, of);
-				continue;
-			}
 			skb_hash = src_dst_key_hash(of->src_dst_key);
 			nroot = &new_array[skb_hash >> (32 - new_log)];
 
+			/* insert in tree */
 			np = &nroot->rb_node;
 			parent = NULL;
 			while (*np) {
@@ -1106,9 +1047,6 @@ static void fp_tc_rehash(struct fp_sched_data *q,
 			rb_insert_color(&of->fp_node, nroot);
 		}
 	}
-	q->flows -= fcnt;
-	q->inactive_flows -= fcnt;
-	q->stat_gc_flows += fcnt;
 }
 
 /* Resizes the hash table to a new size, rehashing if necessary */

@@ -72,6 +72,7 @@ struct fp_flow {
 	struct sk_buff *tail;		/* last skb in the list */
 	u64		demand_tslots;		/* total needed timeslots */
 	u64		requested_tslots;	/* highest requested timeslots */
+	u64		acked_tslots;		/* highest requested timeslots that was acked*/
 	u64		alloc_tslots;		/* total received allocations */
 	int		qlen;				/* number of packets in flow queue */
 
@@ -142,6 +143,7 @@ struct fp_sched_data {
 	u64		demand_tslots;		/* total needed timeslots */
 	u64		requested_tslots;	/* highest requested timeslots */
 	u64		alloc_tslots;		/* total received allocations */
+	u64		acked_tslots;		/* total acknowledged requests */
 
 	/* statistics */
 	u64		stat_gc_flows;
@@ -798,7 +800,24 @@ static void handle_alloc(struct Qdisc *sch, u32 base_tslot, u16 *dst,
 
 static void handle_ack(struct Qdisc *sch, struct fpproto_pktdesc *pd)
 {
-	fastpass_pr_debug("here");
+	struct fp_sched_data *q = qdisc_priv(sch);
+	int i;
+	struct fp_flow *f;
+	u64 new_acked;
+	u64 delta;
+
+	for (i = 0; i < pd->n_areq; i++) {
+		f = fpq_lookup(q, pd->areq[i].src_dst_key, false);
+		BUG_ON(f == NULL);
+		new_acked = pd->areq[i].tslots;
+		if (f->acked_tslots < new_acked) {
+			delta = new_acked - f->acked_tslots;
+			q->acked_tslots += delta;
+			f->acked_tslots = new_acked;
+			fastpass_pr_debug("acked request of %llu additional slots, flow 0x%04llX, total %llu slots\n",
+					delta, f->src_dst_key, new_acked);
+		}
+	}
 	fpproto_pktdesc_free(pd);
 }
 

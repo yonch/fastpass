@@ -22,18 +22,13 @@ class Test(unittest.TestCase):
 
         queue_0 = structures.create_backlog_queue()
         queue_1 = structures.create_backlog_queue()
-        new_requests = structures.create_backlog_queue()
+        new_requests = structures.create_bin()
         admitted = structures.create_admitted_traffic()
         status = structures.create_admissible_status(False, 0)
 
-        # Make a request, check it was inserted correctly
+        # Make a request
         admissible.request_timeslots(new_requests, status, 0, 1, 5)
-        self.assertEqual(new_requests.head, 0)
-        self.assertEqual(new_requests.tail, 1)
-        self.assertEqual(new_requests.edges.src, 0)
-        self.assertEqual(new_requests.edges.dst, 1)
-        self.assertEqual(new_requests.edges.backlog, 5)
-
+ 
         # Get admissible traffic (timeslot 1)
         admissible.get_admissible_traffic(queue_0, queue_1, new_requests,
                                           admitted, status)
@@ -48,15 +43,10 @@ class Test(unittest.TestCase):
         for i in range(5, structures.BATCH_SIZE):
             admitted_i = structures.get_admitted_struct(admitted, i)
             self.assertEqual(admitted_i.size, 0)
-
-        self.assertEqual(queue_0.head, 0)
-        self.assertEqual(queue_0.tail, 0)
-        self.assertEqual(queue_1.head, 0)
-        self.assertEqual(queue_1.tail, 0)
     
         structures.destroy_backlog_queue(queue_0)
         structures.destroy_backlog_queue(queue_1)
-        structures.destroy_backlog_queue(new_requests)
+        structures.destroy_bin(new_requests)
         structures.destroy_admitted_traffic(admitted)
         structures.destroy_admissible_status(status)
 
@@ -67,7 +57,7 @@ class Test(unittest.TestCase):
  
         queue_0 = structures.create_backlog_queue()
         queue_1 = structures.create_backlog_queue()
-        new_requests = structures.create_backlog_queue()
+        new_requests = structures.create_bin()
         admitted = structures.create_admitted_traffic()
         status = structures.create_admissible_status(False, 0)
         empty_queue = structures.create_backlog_queue()
@@ -86,13 +76,13 @@ class Test(unittest.TestCase):
             self.assertEqual(admitted_i.size, 1)
  
         # Check that no packets were admitted in remaining timeslots
-        for i in range(3, 16):
+        for i in range(3, structures.BATCH_SIZE):
             admitted_i = structures.get_admitted_struct(admitted, i)
             self.assertEqual(admitted_i.size, 0)
 
         structures.destroy_backlog_queue(queue_0)
         structures.destroy_backlog_queue(queue_1)
-        structures.destroy_backlog_queue(new_requests)
+        structures.destroy_bin(new_requests)
         structures.destroy_admitted_traffic(admitted)
         structures.destroy_admissible_status(status)
         structures.destroy_backlog_queue(empty_queue)
@@ -105,7 +95,7 @@ class Test(unittest.TestCase):
 
         queue_0 = structures.create_backlog_queue()
         queue_1 = structures.create_backlog_queue()
-        new_requests = structures.create_backlog_queue()
+        new_requests = structures.create_bin()
         admitted_batch_0 = structures.create_admitted_traffic()
         admitted_batch_1 = structures.create_admitted_traffic()
         status = structures.create_admissible_status(False, 0)
@@ -130,12 +120,12 @@ class Test(unittest.TestCase):
         self.assertEqual(admitted_1.edges.src, 4)
 
         # Check that no more packets were admitted in this batch
-        for i in range(2, 16):
+        for i in range(2, structures.BATCH_SIZE):
             admitted_i = structures.get_admitted_struct(admitted_batch_0, i)
             self.assertEqual(admitted_i.size, 0)
 
         # Make two competing requests out of their timeslot order
-        structures.init_backlog_queue(new_requests)
+        structures.init_bin(new_requests)
         admissible.request_timeslots(new_requests, status, 4, 5, 2)
         admissible.request_timeslots(new_requests, status, 3, 5, 2)
 
@@ -155,7 +145,7 @@ class Test(unittest.TestCase):
 
         structures.destroy_backlog_queue(queue_0)
         structures.destroy_backlog_queue(queue_1)
-        structures.destroy_backlog_queue(new_requests)
+        structures.destroy_bin(new_requests)
         structures.destroy_admitted_traffic(admitted_batch_0)
         structures.destroy_admitted_traffic(admitted_batch_1)
         structures.destroy_admissible_status(status)
@@ -180,14 +170,14 @@ class Test(unittest.TestCase):
         # initialize structures
         queue_0 = structures.create_backlog_queue()
         queue_1 = structures.create_backlog_queue()
-        new_requests = structures.create_backlog_queue()
+        new_requests = structures.create_bin()
         admitted = structures.create_admitted_traffic()
         status = structures.create_admissible_status(True, rack_capacity)
 
         num_admitted = 0
         num_requested = 0
         for b in range(duration / structures.BATCH_SIZE):
-            structures.init_backlog_queue(new_requests)
+            structures.init_bin(new_requests)
             # Make some new requests
             for t in range(structures.BATCH_SIZE):
                 requests_per_timeslot = random.randint(0, max_r_per_t)
@@ -252,139 +242,18 @@ class Test(unittest.TestCase):
 
         structures.destroy_backlog_queue(queue_0)
         structures.destroy_backlog_queue(queue_1)
-        structures.destroy_backlog_queue(new_requests)
+        structures.destroy_bin(new_requests)
         structures.destroy_admitted_traffic(admitted)
         structures.destroy_admissible_status(status)
 
         pass
 
-
-    def test_backlog_sorting_1_item(self):
-        """Tests sorting of backlogs with 1 item."""
-
-        queue = structures.create_backlog_queue()
-
-        # Enqueue item
-        structures.enqueue_backlog(queue, 0, 1, 2, 3)
-
-        # Sort
-        structures.sort_backlog(queue, 0)
-       
-        # Check order
-        edge = structures.peek_head_backlog(queue)
-        self.assertEqual(edge.src, 0)
-        self.assertEqual(edge.dst, 1)
-        self.assertEqual(edge.backlog, 2)
-        self.assertEqual(edge.timeslot, 3)
-        structures.dequeue_backlog(queue)
-        self.assertEqual(structures.is_empty_backlog(queue), True)
-
-        structures.destroy_backlog_queue(queue)
-
-        pass
-
-    def test_backlog_sorting_many_items(self):
-        """Tests sorting of backlogs with many items."""
-
-        for num_items in xrange(2, 50, 3):
-            queue = structures.create_backlog_queue()
-
-            # Enqueue items
-            timeslots = []
-            for i in xrange(num_items):
-                t = random.randint(0, num_items)
-                structures.enqueue_backlog(queue, 0, 1, 1, t)
-                timeslots.append(t)
-
-            # Sort
-            structures.sort_backlog(queue, 0)
-
-            # Check order and validity of timeslots
-            edge_1 = structures.peek_head_backlog(queue)
-            structures.dequeue_backlog(queue)
-            self.assertIn(edge_1.timeslot, timeslots)
-            timeslots.remove(edge_1.timeslot)
-            while structures.is_empty_backlog(queue) == False:
-                edge_0 = edge_1
-                edge_1 = structures.peek_head_backlog(queue)
-                structures.dequeue_backlog(queue)
-                self.assertTrue(edge_0.timeslot <= edge_1.timeslot)
-                
-                self.assertIn(edge_1.timeslot, timeslots)
-                timeslots.remove(edge_1.timeslot)
-
-            self.assertEqual(structures.is_empty_backlog(queue), True)
-            self.assertEqual(len(timeslots), 0)
-
-        pass
-
-    def test_backlog_sorting_with_wraparound(self):
-        """Tests sorting of backlogs with overflowed timeslots."""
-
-        for num_items in xrange(2, 50, 3):
-            queue = structures.create_backlog_queue()
-
-            # Choose a minimum time
-            min_time = random.randint(0, num_items)
-
-            # Enqueue items
-            timeslots_early = []
-            timeslots_late = []
-            for i in xrange(num_items):
-                t = random.randint(0, num_items)
-                structures.enqueue_backlog(queue, 0, 1, 1, t)
-                if (t >= min_time):
-                    timeslots_early.append(t)
-                else:
-                    timeslots_late.append(t)
-
-            # Sort
-            structures.sort_backlog(queue, min_time)
-
-            # Check order and validity of timeslots
-            edge_1 = structures.peek_head_backlog(queue)
-            structures.dequeue_backlog(queue)
-            if (len(timeslots_early) > 0):
-                self.assertIn(edge_1.timeslot, timeslots_early)
-                timeslots_early.remove(edge_1.timeslot)
-            else:
-                self.assertIn(edge_1.timeslot, timeslots_late)
-                timeslots_late.remove(edge_1.timeslot)
-
-            # Check early timeslots
-            while structures.is_empty_backlog(queue) == False and len(timeslots_early) > 0:
-                edge_0 = edge_1
-                edge_1 = structures.peek_head_backlog(queue)
-                structures.dequeue_backlog(queue)
-                self.assertTrue(edge_0.timeslot <= edge_1.timeslot)
-                
-                self.assertIn(edge_1.timeslot, timeslots_early)
-                timeslots_early.remove(edge_1.timeslot)
-
-            # Check late timeslots
-            first = True
-            while structures.is_empty_backlog(queue) == False:
-                edge_0 = edge_1
-                edge_1 = structures.peek_head_backlog(queue)
-                structures.dequeue_backlog(queue)
-                self.assertTrue(first or (edge_0.timeslot <= edge_1.timeslot))
-                first = False
-                
-                self.assertIn(edge_1.timeslot, timeslots_late)
-                timeslots_late.remove(edge_1.timeslot)
-
-            self.assertEqual(structures.is_empty_backlog(queue), True)
-            self.assertEqual(len(timeslots_early), 0)
-            self.assertEqual(len(timeslots_late), 0)
-
-        pass
-  
     def test_oversubscribed(self):
         """Tests networks which are oversubscribed on the uplinks from racks/downlinks to racks."""
 
         queue_in = structures.create_backlog_queue()
         queue_out = structures.create_backlog_queue()
-        new_requests = structures.create_backlog_queue()
+        new_requests = structures.create_bin()
         admitted = structures.create_admitted_traffic()
         status = structures.create_admissible_status(True, 2)
         empty_queue = structures.create_backlog_queue()
@@ -416,7 +285,7 @@ class Test(unittest.TestCase):
 
         structures.destroy_backlog_queue(queue_in)
         structures.destroy_backlog_queue(queue_out)
-        structures.destroy_backlog_queue(new_requests)
+        structures.destroy_bin(new_requests)
         structures.destroy_admitted_traffic(admitted)
         structures.destroy_admissible_status(status)
         structures.destroy_backlog_queue(empty_queue)

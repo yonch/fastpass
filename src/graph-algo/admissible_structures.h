@@ -383,6 +383,24 @@ void set_last_demand(struct admissible_status *status, uint16_t src, uint16_t ds
     status->flows[src * MAX_NODES + dst].demand = demand;
 }
 
+// Resets the flow for this src/dst pair
+static inline
+void reset_flow(struct admissible_status *status, uint16_t src, uint16_t dst) {
+    assert(status != NULL);
+
+    struct flow_status *flow = &status->flows[src * MAX_NODES + dst];
+    if (flow->demand == flow->allocation) {
+        // No pending backog, reset both to zero
+        flow->demand = 0;
+        flow->allocation = 0;
+    }
+    else {
+        // Pending backlog - ensure only one packet will be allocated
+        flow->demand = 0;
+        flow->allocation = -1;
+    }
+}
+
 // Helper methods for testing in python
 static inline
 struct admitted_traffic *create_admitted_traffic() {

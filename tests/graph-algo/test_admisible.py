@@ -231,8 +231,8 @@ class Test(unittest.TestCase):
                     else:
                         del pending_requests[(edge.src, edge.dst)]
 
-                    rack_outputs[admissible.get_rack_from_id(edge.src)] += 1
-                    rack_inputs[admissible.get_rack_from_id(edge.dst)] += 1
+                    rack_outputs[structures.get_rack_from_id(edge.src)] += 1
+                    rack_inputs[structures.get_rack_from_id(edge.dst)] += 1
             
                 for index in range(len(rack_outputs)):
                     self.assertTrue(rack_outputs[index] <= rack_capacity)
@@ -275,9 +275,9 @@ class Test(unittest.TestCase):
         rack_2_in = 0
         for e in range(admitted.size):
             edge = structures.get_admitted_edge(admitted, e)
-            if admissible.get_rack_from_id(edge.src) == 0:
+            if structures.get_rack_from_id(edge.src) == 0:
                 rack_0_out += 1
-            if admissible.get_rack_from_id(edge.dst) == 2:
+            if structures.get_rack_from_id(edge.dst) == 2:
                 rack_2_in += 1
 
         self.assertEqual(rack_0_out, 2)
@@ -292,5 +292,88 @@ class Test(unittest.TestCase):
 
         pass
 
+    def test_reset_sender(self):
+        '''Tests resetting a sender.'''
+
+        queue_0 = structures.create_backlog_queue()
+        queue_1 = structures.create_backlog_queue()
+        new_requests = structures.create_bin()
+        admitted = structures.create_admitted_traffic()
+        status = structures.create_admissible_status(False, 0)
+        empty_queue = structures.create_backlog_queue()
+
+        # Make requests
+        admissible.request_timeslots(new_requests, status, 0, 10, structures.BATCH_SIZE)
+        admissible.request_timeslots(new_requests, status, 1, 10, structures.BATCH_SIZE)
+        admissible.request_timeslots(new_requests, status, 0, 20, structures.BATCH_SIZE)
+
+        # Get admissible traffic
+        admissible.get_admissible_traffic(queue_0, queue_1, new_requests,
+                                          admitted, status)
+   
+        # Check admitted traffic
+        for i in range(structures.BATCH_SIZE):
+            admitted_i = structures.get_admitted_struct(admitted, i)
+
+            if i % 2 == 0:
+                self.assertEqual(admitted_i.size, 1)
+                edge = structures.get_admitted_edge(admitted_i, 0)
+                self.assertEqual(edge.src, 0)
+                self.assertEqual(edge.dst, 10)
+            else:
+                self.assertEqual(admitted_i.size, 2)
+                edge_0 = structures.get_admitted_edge(admitted_i, 0)
+                self.assertEqual(edge_0.src, 1)
+                self.assertEqual(edge_0.dst, 10)
+                edge_1 = structures.get_admitted_edge(admitted_i, 1)
+                self.assertEqual(edge_1.src, 0)
+                self.assertEqual(edge_1.dst, 20)
+
+        # Reset src 0
+        admissible.reset_sender(status, 0)
+
+        # Get admissible traffic again
+        for i in range(structures.BATCH_SIZE):
+            admitted_i = structures.get_admitted_struct(admitted, i)
+            structures.init_admitted_traffic(admitted_i)
+        structures.init_backlog_queue(queue_0)
+        admissible.get_admissible_traffic(queue_1, queue_0, new_requests,
+                                          admitted, status)
+   
+        # Check that we admit only one more packet for each of src 0's
+        # pending flows
+        for i in range(structures.BATCH_SIZE):
+            admitted_i = structures.get_admitted_struct(admitted, i)
+            
+            if i == 0:
+                self.assertEqual(admitted_i.size, 1)
+                edge = structures.get_admitted_edge(admitted_i, 0)
+                self.assertEqual(edge.src, 0)
+                self.assertEqual(edge.dst, 10)
+            elif i == 1:
+                self.assertEqual(admitted_i.size, 2)
+                edge_0 = structures.get_admitted_edge(admitted_i, 0)
+                self.assertEqual(edge_0.src, 1)
+                self.assertEqual(edge_0.dst, 10)
+                edge_1 = structures.get_admitted_edge(admitted_i, 1)
+                self.assertEqual(edge_1.src, 0)
+                self.assertEqual(edge_1.dst, 20)
+            elif i < structures.BATCH_SIZE / 2 + 1:
+                self.assertEqual(admitted_i.size, 1)
+                edge = structures.get_admitted_edge(admitted_i, 0)
+                self.assertEqual(edge.src, 1)
+                self.assertEqual(edge.dst, 10)
+            else:
+                self.assertEqual(admitted_i.size, 0)
+        
+        structures.destroy_backlog_queue(queue_0)
+        structures.destroy_backlog_queue(queue_1)
+        structures.destroy_bin(new_requests)
+        structures.destroy_admitted_traffic(admitted)
+        structures.destroy_admissible_status(status)
+        structures.destroy_backlog_queue(empty_queue)
+
+        pass
+      
 if __name__ == "__main__":
     unittest.main()

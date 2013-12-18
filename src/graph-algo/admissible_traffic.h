@@ -25,9 +25,8 @@ void get_admissible_traffic(struct backlog_queue *queue_in,
                             struct admitted_traffic *traffic_out,
                             struct admissible_status *status);
 
-// Helper function to map ids to racks
-uint16_t get_rack_from_id(uint16_t id);
-
+// Reset state of all flows for which src is the sender
+void reset_sender(struct admissible_status *status, uint16_t src);
 
 #ifndef likely
 #define likely(x)  __builtin_expect((x),1)

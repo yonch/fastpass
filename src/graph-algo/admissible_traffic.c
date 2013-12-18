@@ -168,3 +168,16 @@ void get_admissible_traffic(struct backlog_queue *queue_in,
     // Update current timeslot
     status->current_timeslot += BATCH_SIZE;
 }
+
+// Reset state of all flows for which src is the sender
+void reset_sender(struct admissible_status *status, uint16_t src) {
+    assert(status != NULL);
+
+    // Do not change last send timeslots
+
+    // Reset pending demands
+    uint16_t dst;
+    for (dst = 0; dst < MAX_NODES; dst++) {
+        reset_flow(status, src, dst);
+    }
+}

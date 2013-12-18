@@ -105,7 +105,7 @@ void quicksort_requests(struct request_info *edges, uint32_t size, uint16_t min_
 
 // Based on a method suggested by wikipedia
 // http://en.wikipedia.org/wiki/Exponential_distribution
-double generate_exponential_variate(uint32_t mean_t_btwn_requests)
+double generate_exponential_variate(double mean_t_btwn_requests)
 {
   assert(mean_t_btwn_requests > 0);
 
@@ -116,7 +116,7 @@ double generate_exponential_variate(uint32_t mean_t_btwn_requests)
 // Returns the number of requests generated
 uint32_t generate_requests_poisson(struct request_info *edges, uint32_t size,
                                    uint32_t num_nodes, uint32_t duration,
-                                   double fraction, uint32_t mean)
+                                   double fraction, double mean)
 {
     assert(edges != NULL);
 
@@ -128,19 +128,19 @@ uint32_t generate_requests_poisson(struct request_info *edges, uint32_t size,
     uint32_t num_generated = 0;
     for (src = 0; src < num_nodes; src++) {
         uint16_t *cumulative_demands = calloc(num_nodes, sizeof(uint16_t));
-        double current_time = generate_exponential_variate(mean);
+        double current_time = generate_exponential_variate(mean / fraction);
         while (current_time < duration) {
             uint32_t dst = rand() / ((double) RAND_MAX) * (num_nodes - 1);
             if (dst >= src)
                 dst++;  // Don't send to self
             current_edge->src = src;
             current_edge->dst = dst;
-            cumulative_demands[dst] += (uint16_t) mean * fraction;
+            cumulative_demands[dst] += (uint16_t) mean;
             current_edge->backlog = cumulative_demands[dst];
             current_edge->timeslot = (uint16_t) current_time;
             num_generated++;
             current_edge++;
-            current_time += generate_exponential_variate(mean);
+            current_time += generate_exponential_variate(mean / fraction);
         }
         free(cumulative_demands);
     }
@@ -199,7 +199,7 @@ int main(void) {
     uint32_t duration = 60000;
     uint32_t num_nodes = 256;
     double fraction = 0.95;
-    uint32_t mean = 10;
+    double mean = 10;
 
     // Data structures
     struct bin *new_requests = create_bin();

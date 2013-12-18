@@ -116,6 +116,7 @@ void get_admissible_traffic(struct backlog_queue *queue_in,
 
     // Fetch last_send_time, sort, etc.
     prepare_new_requests(new_requests, status, queue_in);
+    assert(!has_duplicates(queue_in));
 
     struct batch_state batch_state;
     init_batch_state(&batch_state, status->oversubscribed,

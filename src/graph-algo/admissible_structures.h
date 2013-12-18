@@ -192,22 +192,41 @@ void print_backlog(struct backlog_queue *queue) {
         printf("\t%d\t%d\n", edge->src, edge->dst);
 }
 
-// Returns true if this bin contains duplicate entries for a src/dst pair
+// Prints the number of flows per src, dst, and bin
+static inline
+void print_backlog_counts(struct backlog_queue *queue) {
+    assert(queue != NULL);
+
+    printf("printing backlog bin counts\n");
+    uint16_t bin_num;
+    uint32_t bin_sums = 0;
+    for (bin_num = 0; bin_num < NUM_BINS; bin_num++) {
+        struct bin *bin = &queue->bins[bin_num];
+        printf("\tsize of bin %d: %d\n", bin_num, bin->tail - bin->head);
+        bin_sums += bin->tail - bin->head;
+    }
+    printf("total flows: %d\n", bin_sums);
+}
+
+// Returns true if this backlog queue contains duplicate entries for a src/dst pair
 // Used for debugging
 // Note this runs in n^2 time - super slow
 static inline
-bool has_duplicates(struct bin *bin) {
-    assert(bin != NULL);
+bool has_duplicates(struct backlog_queue *queue) {
+    assert(queue != NULL);
     
     uint16_t index;
-    for (index = bin->head; index < bin->tail - 1; index++) {
-        struct backlog_edge *edge = &bin->edges[index];
-        
-        uint16_t index2;
-        for (index2 = index + 1; index2 < bin->tail; index2++) {
-            struct backlog_edge *edge2 = &bin->edges[index2];
-            if (edge->src == edge2->src && edge->dst == edge2->dst)
+    uint16_t bin_num;
+    bool *flows = calloc(MAX_NODES * MAX_NODES, sizeof(bool));
+    assert(flows != NULL);
+
+    for (bin_num = 0; bin_num < NUM_BINS; bin_num++) {
+        struct bin *bin = &queue->bins[bin_num];
+        for (index = bin->head; index < bin->tail; index++) {
+            struct backlog_edge *edge = &bin->edges[index];
+            if (flows[edge->src * MAX_NODES + edge->dst] == true)
                 return true;
+            flows[edge->src * MAX_NODES + edge->dst] = true;
         }
     }
     return false;

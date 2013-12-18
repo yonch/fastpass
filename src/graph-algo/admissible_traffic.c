@@ -19,17 +19,18 @@ void request_timeslots(struct bin *new_requests, struct admissible_status *statu
     assert(status != NULL);
 
     // Get full quantity from 16-bit LSB
-    uint16_t prev = get_last_demand(status, src, dst);
+    uint32_t index = get_status_index(src, dst);
+    uint16_t prev = status->flows[index].demand;
     int16_t prev_wnd = prev - (1 << 15);
     int64_t new_demand = prev_wnd + ((demand_tslots - prev_wnd) & 0xFFFF);
 
     if (new_demand > prev) {
         // Just add this request at the end of the backlog queue with an invalid time
         // Obtain the last_sent_timeslot and sort later
-        if (get_backlog(status, src, dst) == 0)
+        if (status->flows[index].demand == status->flows[index].allocation)
             enqueue_bin(new_requests, src, dst);
 
-        set_last_demand(status, src, dst, (uint16_t) new_demand);
+        status->flows[index].demand = (uint16_t) new_demand;
         // Note: race condition involving the 3 preceding lines of code
         // Need to check backlog and set demand atomically, or else do this
         // check after we've finished the previous batch allocation
@@ -49,8 +50,8 @@ void prepare_new_requests(struct bin *new_requests,
     while (!is_empty_bin(new_requests)) {
         struct backlog_edge *current = peek_head_bin(new_requests);
 
-        uint64_t last_send_time = get_last_timeslot(status, current->src,
-                                                    current->dst);
+        uint32_t index = get_status_index(current->src, current->dst);
+        uint64_t last_send_time = status->timeslots[index];
   
         uint16_t bin_index = last_send_time - (status->current_timeslot - NUM_BINS);
         if (last_send_time < status->current_timeslot - NUM_BINS)
@@ -90,9 +91,10 @@ void try_allocation(struct bin *current_bin, struct batch_state *batch_state,
         set_timeslot_occupied(batch_state, src, dst, batch_timeslot);
        
         insert_admitted_edge(&traffic_out[batch_timeslot], src, dst);
-        set_last_timeslot(status, src, dst, status->current_timeslot + batch_timeslot);
-        increment_allocation(status, src, dst);
-        if (get_backlog(status, src, dst) > 0)
+        uint32_t index = get_status_index(src, dst);
+        status->timeslots[index] = status->current_timeslot + batch_timeslot;
+        status->flows[index].allocation += 1;
+        if (status->flows[index].demand - status->flows[index].allocation > 0)
             enqueue_bin(&admitted_backlog[batch_timeslot], src, dst);
     }
 

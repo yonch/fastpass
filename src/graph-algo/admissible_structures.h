@@ -331,56 +331,10 @@ void init_admissible_status(struct admissible_status *status, bool oversubscribe
     }
 }
 
-// Returns the last timeslot we transmitted in for this src/dst pair
+// Get the index of this flow in the status data structure
 static inline
-uint64_t get_last_timeslot(struct admissible_status *status, uint16_t src, uint16_t dst) {
-    assert(status != NULL);
-
-    return status->timeslots[src * MAX_NODES + dst];
-}
-
-// Sets the last timeslot we transmitted in for this src/dst pair
-static inline
-void set_last_timeslot(struct admissible_status *status, uint16_t src, uint16_t dst,
-                       uint64_t timeslot) {
-    assert(status != NULL);
-
-    status->timeslots[src * MAX_NODES + dst] = timeslot;
-}
-
-// Get the unallocated backlog
-static inline
-uint16_t get_backlog(struct admissible_status *status, uint16_t src, uint16_t dst)
-{
-    assert(status != NULL);
-    
-    return status->flows[src * MAX_NODES + dst].demand -
-        status->flows[src * MAX_NODES + dst].allocation;
-}
-
-// Increase allocation
-static inline
-void increment_allocation(struct admissible_status *status, uint16_t src, uint16_t dst) {
-    assert(status != NULL);
-
-    status->flows[src * MAX_NODES + dst].allocation += 1;
-}
-
-// Returns the last demand recorded for this src/dst pair
-static inline
-uint16_t get_last_demand(struct admissible_status *status, uint16_t src, uint16_t dst) {
-    assert(status != NULL);
-
-    return status->flows[src * MAX_NODES + dst].demand;
-}
-
-// Sets the last demand for this src/dst pair
-static inline
-void set_last_demand(struct admissible_status *status, uint16_t src, uint16_t dst,
-                     uint16_t demand) {
-    assert(status != NULL);
-    
-    status->flows[src * MAX_NODES + dst].demand = demand;
+uint32_t get_status_index(uint16_t src, uint16_t dst) {
+    return (src << NODES_SHIFT) + dst;
 }
 
 // Resets the flow for this src/dst pair
@@ -388,7 +342,7 @@ static inline
 void reset_flow(struct admissible_status *status, uint16_t src, uint16_t dst) {
     assert(status != NULL);
 
-    struct flow_status *flow = &status->flows[src * MAX_NODES + dst];
+    struct flow_status *flow = &status->flows[get_status_index(src, dst)];
     if (flow->demand == flow->allocation) {
         // No pending backog, reset both to zero
         flow->demand = 0;

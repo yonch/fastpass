@@ -220,6 +220,54 @@ void set_request_timer(struct fp_sched_data* q, u64 now)
 			      HRTIMER_MODE_ABS);
 }
 
+/**
+ * Called whenever a flow is enqueued for a request (either regular or
+ *    retransmission)
+ * Caller should hold the qdisc lock.
+ */
+void req_timer_flowqueue_enqueue(struct fp_sched_data* q)
+{
+	/* if enqueued first flow in q->unreq_flows, set request timer */
+	if (q->n_unreq_flows == 1) {
+		set_request_timer(q, fp_get_time_ns());
+		fastpass_pr_debug("set request timer to %llu\n", q->time_next_req);
+	}
+}
+
+/**
+ * Called when a request had been sent.
+ * Caller should hold the qdisc lock.
+ */
+void req_timer_sent_request(struct fp_sched_data* q, u64 now)
+{
+	/* update request credits */
+	q->req_t = max_t(u64, q->req_t, now - q->req_bucketlen) + q->req_cost;
+
+	/* set timer for next request, if a request would be required */
+	if (q->n_unreq_flows)
+		set_request_timer(q, now);
+	else
+		q->time_next_req = ~0ULL;
+}
+
+/**
+ * Called when the last of the sent packets had been acked
+ * Caller should hold the qdisc lock.
+ */
+void req_timer_all_acked(struct fp_sched_data* q)
+{
+
+}
+
+/**
+ * Called when there have been ACKs that change the earliest unacked packet
+ * @sent_time: the time when the earliest unacked packet was sent
+ * Caller should hold the qdisc lock.
+ */
+void req_timer_change_timeout(struct fp_sched_data* q, u64 sent_time)
+{
+
+}
 
 static bool flow_in_flowqueue(struct fp_flow *f)
 {
@@ -243,11 +291,8 @@ static void flowqueue_enqueue_request(struct fp_sched_data *q, struct fp_flow *f
 
 	q->n_unreq_flows++;
 
-	/* if enqueued first flow in q->unreq_flows, set request timer */
-	if (q->n_unreq_flows == 1) {
-		set_request_timer(q, fp_get_time_ns());
-		fastpass_pr_debug("set request timer to %llu\n", q->time_next_req);
-	}
+	/* update request timer if necessary */
+	req_timer_flowqueue_enqueue(q);
 }
 
 /**
@@ -269,11 +314,8 @@ static void flowqueue_enqueue_retransmit(struct fp_sched_data *q, struct fp_flow
 	}
 	f->state = FLOW_RETRANSMIT_QUEUE;
 
-	/* if enqueued first flow in q->unreq_flows, set request timer */
-	if (q->n_unreq_flows == 1) {
-		set_request_timer(q, fp_get_time_ns());
-		fastpass_pr_debug("set request timer to %llu\n", q->time_next_req);
-	}
+	/* update request timer if necessary */
+	req_timer_flowqueue_enqueue(q);
 }
 
 static bool flowqueue_is_empty(struct fp_sched_data* q)
@@ -891,14 +933,8 @@ static void send_request(struct Qdisc *sch, u64 now)
 
 	q->stat_requests++;
 
-update_credits:
-	/* update request credits */
-	q->req_t = max_t(u64, q->req_t, now - q->req_bucketlen) + q->req_cost;
-	/* set timer for next request, if a request would be required */
-	if (q->n_unreq_flows)
-		set_request_timer(q, now);
-	else
-		q->time_next_req = ~0ULL;
+out:
+	req_timer_sent_request(q, now);
 
 	spin_unlock_bh(root_lock);
 
@@ -910,7 +946,7 @@ update_credits:
 alloc_err:
 	q->stat_req_alloc_errors++;
 	fastpass_pr_debug("request allocation failed\n");
-	goto update_credits;
+	goto out;
 }
 
 static enum hrtimer_restart send_request_timer_func(struct hrtimer *timer)

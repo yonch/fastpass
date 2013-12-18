@@ -16,10 +16,7 @@
 
 #define FASTPASS_DEFAULT_PORT_NETORDER 1
 
-#define FASTPASS_REQ_HDR_SIZE 4
-#define FASTPASS_RSTREQ_HDR_SIZE 12
-#define MAX_FASTPASS_ONLY_HEADER 12
-#define MAX_TOTAL_FASTPASS_HEADERS (MAX_FASTPASS_ONLY_HEADER + MAX_HEADER)
+#define MAX_TOTAL_FASTPASS_HEADERS MAX_HEADER
 
 /**
  * The log of the size of outgoing packet window waiting for ACKs or timeout
@@ -80,11 +77,16 @@ struct fpproto_areq_desc {
 /**
  * A full packet sent to the controller
  * @n_areq: number of filled in destinations for A-REQ
+ * @sent_timestamp: a timestamp when the request was sent
  */
 struct fpproto_pktdesc {
 	u16							n_areq;
 	struct fpproto_areq_desc	areq[FASTPASS_PKT_MAX_AREQ];
 
+	u64							sent_timestamp;
+	u64							seqno;
+	bool						send_reset;
+	u64							reset_timestamp;
 };
 
 /**
@@ -147,7 +149,7 @@ struct fastpass_sock {
 
 	/* statistics */
 	u64 stat_tasklet_runs;  /* TODO: deprecate */
-	u64 stat_build_header_errors;
+	u64 stat_build_header_errors; /* TODO:deprecate */
 	u64 stat_xmit_errors;
 	u64 stat_invalid_rx_pkts;
 	u64 stat_redundant_reset;
@@ -167,12 +169,16 @@ struct fastpass_sock {
 extern int __init fpproto_register(void);
 void __exit fpproto_unregister(void);
 
+bool outwnd_empty(struct fastpass_sock* fp);
+u64 outwnd_earliest_timestamp(struct fastpass_sock* fp);
 
 void fpproto_set_qdisc(struct sock *sk, struct Qdisc *new_qdisc);
 
 struct fpproto_pktdesc *fpproto_pktdesc_alloc(void);
 void fpproto_pktdesc_free(struct fpproto_pktdesc *pd);
 
+void fpproto_commit_packet(struct sock *sk, struct fpproto_pktdesc *pkt,
+		u64 timestamp);
 void fpproto_send_packet(struct sock *sk, struct fpproto_pktdesc *pkt);
 
 static inline struct fastpass_sock *fastpass_sk(const struct sock *sk)

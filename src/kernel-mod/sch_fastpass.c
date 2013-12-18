@@ -106,6 +106,7 @@ struct fp_sched_data {
 	u32		req_min_gap;				/* min delay between requests (ns) */
 	__be32	ctrl_addr_netorder;			/* IP of the controller, network byte order */
 	u32		reset_window_us;			/* time window of acceptable resets */
+	u32		send_timeout_us;			/* when to resend packets */
 
 	/* state */
 	struct rb_root	*flow_hash_tbl;		/* table of rb-trees of flows */
@@ -210,10 +211,10 @@ static void horizon_set(struct fp_sched_data* q, u64 timeslot, u64 src_dst_key)
 }
 
 /* computes the time when next request should go out */
-void set_request_timer(struct fp_sched_data* q, u64 now)
+void set_request_timer(struct fp_sched_data* q, u64 when)
 {
-	q->time_next_req = max_t(u64, q->req_t + q->req_cost,
-								  now + q->req_min_gap);
+	/* rate limit sending of requests */
+	q->time_next_req = max_t(u64, q->req_t + q->req_cost, when);
 
 	hrtimer_start(&q->request_timer,
 			      ns_to_ktime(q->time_next_req),
@@ -221,52 +222,82 @@ void set_request_timer(struct fp_sched_data* q, u64 now)
 }
 
 /**
- * Called whenever a flow is enqueued for a request (either regular or
- *    retransmission)
+ * Called whenever a flow is enqueued for a request
  * Caller should hold the qdisc lock.
  */
 void req_timer_flowqueue_enqueue(struct fp_sched_data* q)
 {
 	/* if enqueued first flow in q->unreq_flows, set request timer */
 	if (q->n_unreq_flows == 1) {
-		set_request_timer(q, fp_get_time_ns());
+		set_request_timer(q, fp_get_time_ns() + q->req_min_gap);
 		fastpass_pr_debug("set request timer to %llu\n", q->time_next_req);
 	}
 }
 
 /**
- * Called when a request had been sent.
+ * Sets the timer based on timeouts.
+ * Assumes timer is not enqueued and there are no unrequested flows.
  * Caller should hold the qdisc lock.
  */
-void req_timer_sent_request(struct fp_sched_data* q, u64 now)
+void req_timer_set_from_timeout(struct fp_sched_data* q)
+{
+	struct fastpass_sock *fp;
+	u64 earliest;
+
+	/* not connected -> no timeout */
+	if (unlikely(q->ctrl_sock == NULL))
+		goto do_not_set;
+
+	fp = fastpass_sk(q->ctrl_sock->sk);
+
+	/* no unacked packets -> no timeout */
+	if (outwnd_empty(fp))
+		goto do_not_set;
+
+	/* find earliest unacked, and set timeout from it */
+	earliest = outwnd_earliest_timestamp(fp);
+	set_request_timer(q, earliest + q->send_timeout_us);
+	return;
+
+do_not_set:
+	q->time_next_req = ~0ULL;
+}
+
+/**
+ * Called when just about to send a request.
+ * Caller should hold the qdisc lock.
+ */
+void req_timer_sending_request(struct fp_sched_data* q, u64 now)
 {
 	/* update request credits */
 	q->req_t = max_t(u64, q->req_t, now - q->req_bucketlen) + q->req_cost;
 
 	/* set timer for next request, if a request would be required */
 	if (q->n_unreq_flows)
-		set_request_timer(q, now);
+		/* have more requests to send */
+		set_request_timer(q, now + q->req_min_gap);
 	else
-		q->time_next_req = ~0ULL;
-}
-
-/**
- * Called when the last of the sent packets had been acked
- * Caller should hold the qdisc lock.
- */
-void req_timer_all_acked(struct fp_sched_data* q)
-{
+		req_timer_set_from_timeout(q);
 
 }
 
 /**
- * Called when there have been ACKs that change the earliest unacked packet
- * @sent_time: the time when the earliest unacked packet was sent
+ * Called when there have been ACKs (at least one) that might change the timeout
  * Caller should hold the qdisc lock.
  */
-void req_timer_change_timeout(struct fp_sched_data* q, u64 sent_time)
+void req_timer_processed_acks(struct fp_sched_data* q)
 {
+	/* if there are unrequested flows, timer should fire at scheduled time  */
+	if (q->n_unreq_flows != 0)
+		return;
 
+	/* Before ACKs, there were unacked packets so the timer must have been set */
+	if (unlikely(hrtimer_try_to_cancel(&q->request_timer) != 0)) {
+		/* couldn't cancel. the tasklet will reschedule timer */
+		return;
+	}
+
+	req_timer_set_from_timeout(q);
 }
 
 static bool flow_in_flowqueue(struct fp_flow *f)
@@ -314,8 +345,10 @@ static void flowqueue_enqueue_retransmit(struct fp_sched_data *q, struct fp_flow
 	}
 	f->state = FLOW_RETRANSMIT_QUEUE;
 
-	/* update request timer if necessary */
-	req_timer_flowqueue_enqueue(q);
+	/**
+     * no update of request timer since this processing happens in send_request 
+     *   which will set timer correctly 
+     */
 }
 
 static bool flowqueue_is_empty(struct fp_sched_data* q)
@@ -902,11 +935,9 @@ static void send_request(struct Qdisc *sch, u64 now)
 			fastpass_sk(q->ctrl_sock->sk)->next_seqno);
 
 	BUG_ON(q->req_t + q->req_cost > now);
-	BUG_ON(flowqueue_is_empty(q));
 	BUG_ON(!q->ctrl_sock);
 
 	/* allocate packet descriptor */
-
 	pkt = fpproto_pktdesc_alloc();
 	if (!pkt)
 		goto alloc_err;
@@ -917,7 +948,7 @@ static void send_request(struct Qdisc *sch, u64 now)
 
 		new_requested = min_t(u64, f->demand_tslots,
 				f->alloc_tslots + FASTPASS_REQUEST_WINDOW_SIZE - 1);
-		BUG_ON(new_requested <= f->requested_tslots);
+		BUG_ON(new_requested <= f->acked_tslots);
 
 		pkt->areq[pkt->n_areq].src_dst_key = f->src_dst_key;
 		pkt->areq[pkt->n_areq].tslots = new_requested;
@@ -933,8 +964,10 @@ static void send_request(struct Qdisc *sch, u64 now)
 
 	q->stat_requests++;
 
+	fpproto_commit_packet(q->ctrl_sock->sk, pkt, now);
+
 out:
-	req_timer_sent_request(q, now);
+	req_timer_sending_request(q, now);
 
 	spin_unlock_bh(root_lock);
 
@@ -1347,6 +1380,7 @@ static int fp_tc_init(struct Qdisc *sch, struct nlattr *opt)
 	q->req_min_gap		= 1000;
 	q->ctrl_addr_netorder = htonl(0x7F000001); /* need sensible default? */
 	q->reset_window_us	= 2e6; /* 2 seconds */
+	q->send_timeout_us	= 1000000; /* 1ms timeout */
 	q->flow_hash_tbl	= NULL;
 	INIT_LIST_HEAD(&q->unreq_flows);
 	INIT_LIST_HEAD(&q->retrans_flows);

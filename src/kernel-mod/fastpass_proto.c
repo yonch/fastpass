@@ -183,28 +183,39 @@ s32	outwnd_at_or_before(struct fastpass_sock *fp, u64 tslot)
 }
 
 /**
- * Returns the timeslot of the earliest unacked timeslot.
- * Assumes such a timeslot exists!
+ * Returns the timeslot of the earliest unacked timeslot, given that that
+ *    earliest timeslot is not before @hint.
+ * Assumes such a timeslot exists, and that hint is within the outwnd.
  */
-u64 outwnd_earliest_unacked(struct fastpass_sock *fp)
+u64 outwnd_earliest_unacked_hint(struct fastpass_sock *fp, u64 hint)
 {
-	u32 head_index = outwnd_pos(fp->next_seqno - 1);
+	u32 hint_pos = outwnd_pos(hint);
 	u32 found_offset;
 	u64 earliest;
 
-	found_offset = find_last_bit(fp->bin_mask, head_index + FASTPASS_OUTWND_LEN);
+	found_offset = find_last_bit(fp->bin_mask, hint_pos + FASTPASS_OUTWND_LEN + 1);
 
 	/**
 	 * found_offset runs between head_index to head_index+FASTPASS_OUTWND_LEN-1
 	 * (found_offset-head_index) is #timeslots before next_seqno-1 of sought pkt
 	 */
-	earliest = fp->next_seqno - 1 - (found_offset - head_index);
+	earliest = hint + (hint_pos + FASTPASS_OUTWND_LEN - found_offset);
 
 	/* TODO: remove the check when debugged, for performance */
 	BUG_ON((earliest != fp->next_seqno - FASTPASS_OUTWND_LEN)
 			&& (outwnd_at_or_before(fp, earliest - 1) != -1));
 
 	return earliest;
+}
+
+/**
+ * Returns the timeslot of the earliest unacked timeslot.
+ * Assumes such a timeslot exists!
+ */
+u64 outwnd_earliest_unacked(struct fastpass_sock *fp)
+{
+	return outwnd_earliest_unacked_hint(fp,
+			fp->next_seqno - FASTPASS_OUTWND_LEN);
 }
 
 #ifdef FASTPASS_PERFORM_RUNTIME_TESTS
@@ -283,6 +294,23 @@ void outwnd_reset(struct fastpass_sock* fp)
 		fpproto_pktdesc_free(outwnd_pop(fp, tslot));
 		goto clear_next_unacked;
 	}
+}
+
+bool outwnd_empty(struct fastpass_sock* fp)
+{
+	return (fp->tx_num_unacked == 0);
+}
+
+/**
+ * Returns the timestamp of the earliest unacked packet in the outwnd
+ * Assumes outwnd is not empty.
+ */
+u64 outwnd_earliest_timestamp(struct fastpass_sock* fp)
+{
+	u64 earliest_seqno;
+
+	earliest_seqno = outwnd_earliest_unacked(fp);
+	return fp->bins[outwnd_pos(earliest_seqno)]->sent_timestamp;
 }
 
 static void do_proto_reset(struct fastpass_sock *fp, u64 reset_time)
@@ -692,56 +720,6 @@ static void fpproto_destroy_sock(struct sock *sk)
 	outwnd_reset(fastpass_sk(sk));
 }
 
-static int fpproto_build_header(struct sock *sk, struct sk_buff *skb)
-{
-	struct fastpass_sock *fp = fastpass_sk(sk);
-	struct fastpass_hdr *fh;
-
-	BUG_ON(skb == NULL);
-
-	/* Build header and checksum it. */
-	if (likely(fp->in_sync)) {
-		skb_push(skb, FASTPASS_REQ_HDR_SIZE);
-		skb_reset_transport_header(skb);
-		fh = memset(skb_transport_header(skb), 0, FASTPASS_REQ_HDR_SIZE);
-	} else {
-		u32 hi_word;
-		skb_push(skb, FASTPASS_RSTREQ_HDR_SIZE);
-		skb_reset_transport_header(skb);
-		fh = memset(skb_transport_header(skb), 0, FASTPASS_RSTREQ_HDR_SIZE);
-		hi_word = (FASTPASS_PTYPE_RSTREQ << 28) |
-					((fp->last_reset_time >> 32) & 0x00FFFFFF);
-		fh->rstreq.hi = htonl(hi_word);
-		fh->rstreq.lo = htonl((u32)fp->last_reset_time);
-	}
-
-	fh->seq = htons((u16)(fp->next_seqno));
-
-	/* These could be useful for updating state */
-//	dccp_update_gss(sk, dcb->dccpd_seq);
-//	dccp_hdr_set_seq(fh, fp->dccps_gss);
-//	if (set_ack)
-//		dccp_hdr_set_ack(dccp_hdr_ack_bits(skb), ackno);
-//
-//	switch (dcb->dccpd_type) {
-//	case DCCP_PKT_REQUEST:
-//		dccp_hdr_request(skb)->dccph_req_service =
-//						dp->dccps_service;
-//		/*
-//		 * Limit Ack window to ISS <= P.ackno <= GSS, so that
-//		 * only Responses to Requests we sent are considered.
-//		 */
-//		fp->dccps_awl = fp->dccps_iss;
-//		break;
-//	case DCCP_PKT_RESET:
-//		dccp_hdr_reset(skb)->dccph_reset_code =
-//						dcb->dccpd_reset_code;
-//		break;
-//	}
-
-	return 0;
-}
-
 void fpproto_egress_checksum(struct sock *sk, struct sk_buff *skb,
 		u64 seqno)
 {
@@ -753,43 +731,6 @@ void fpproto_egress_checksum(struct sock *sk, struct sk_buff *skb,
 	skb->csum = skb_checksum(skb, 0, skb->len, seq_hash);
 	fh->checksum = csum_tcpudp_magic(inet->inet_saddr, inet->inet_daddr,
 			skb->len, IPPROTO_FASTPASS, skb->csum);
-}
-
-static void fpproto_send_skb(struct sock *sk, struct sk_buff *skb)
-{
-	struct fastpass_sock *fp = fastpass_sk(sk);
-	struct inet_sock *inet = inet_sk(sk);
-	int rc;
-
-	fastpass_pr_debug("visited\n");
-
-	bh_lock_sock(sk);
-
-	/* write the fastpass header */
-	rc = fpproto_build_header(sk, skb);
-	if (unlikely(rc != 0))
-		goto build_header_error;
-
-	/* checksum */
-	fpproto_egress_checksum(sk, skb, fp->next_seqno);
-
-	/* send onwards */
-	rc = ip_queue_xmit(skb, &inet->cork.fl);
-	rc = net_xmit_eval(rc);
-	if (unlikely(rc != 0)) {
-		fp->stat_xmit_errors++;
-		fastpass_pr_debug("got error %d from ip_queue_xmit\n", rc);
-	}
-
-out_unlock:
-	bh_unlock_sock(sk);
-	return;
-
-build_header_error:
-	kfree_skb(skb);
-	fp->stat_build_header_errors++;
-	fastpass_pr_debug("got error %d while building header\n", rc);
-	goto out_unlock;
 }
 
 /**
@@ -807,9 +748,45 @@ void fpproto_handle_unacked_tx_packet(struct fastpass_sock *fp, u64 seq)
 		fpproto_pktdesc_free(pd);
 }
 
+/**
+ * Protocol will commit to guaranteeing the given packet is delivered.
+ *
+ * A sequence number is allocated to the packet, and timeouts will reflect the
+ *    packet.
+ *
+ * @pd: the packet
+ * @now: send timestamp from which timeouts are computed
+ */
+void fpproto_commit_packet(struct sock *sk, struct fpproto_pktdesc *pd,
+		u64 timestamp)
+{
+	struct fastpass_sock *fp = fastpass_sk(sk);
+	u64 window_edge;
+
+	pd->sent_timestamp = timestamp;
+	pd->seqno = fp->next_seqno;
+	pd->send_reset = !fp->in_sync;
+	pd->reset_timestamp = fp->last_reset_time;
+
+	/* make sure outwnd is not holding a packet descriptor where @pd will be */
+	window_edge = fp->next_seqno - FASTPASS_OUTWND_LEN;
+	if (fp->tx_num_unacked > 0 && outwnd_is_unacked(fp, window_edge)) {
+		/* treat packet going out of outwnd as if it was dropped */
+		fp->stat_fall_off_outwnd++;
+		fpproto_handle_unacked_tx_packet(fp, window_edge);
+	}
+
+	/* add packet to outwnd, will advance fp->next_seqno */
+	outwnd_add(fp, pd);
+}
+
+/**
+ * Constructs and sends one packet.
+ */
 void fpproto_send_packet(struct sock *sk, struct fpproto_pktdesc *pd)
 {
 	struct fastpass_sock *fp = fastpass_sk(sk);
+	struct inet_sock *inet = inet_sk(sk);
 	int max_header;
 	int payload_len;
 	struct sk_buff *skb = NULL;
@@ -817,11 +794,11 @@ void fpproto_send_packet(struct sock *sk, struct fpproto_pktdesc *pd)
 	int i;
 	u8 *data;
 	struct fastpass_areq *areq;
-	u64 window_edge;
-
 
 	/* calculate byte size in packet*/
-	payload_len = 2 + 4 * pd->n_areq;
+	payload_len = 4 /* header */
+				+ 8 * (pd->send_reset) /* RESET */
+				+ 2 + 4 * pd->n_areq /* A-REQ */;
 	max_header = sk->sk_prot->max_header;
 
 	/* allocate request skb */
@@ -831,13 +808,31 @@ void fpproto_send_packet(struct sock *sk, struct fpproto_pktdesc *pd)
 
 	/* reserve space for headers */
 	skb_reserve(skb, max_header);
+	/* set skb fastpass packet size */
+	skb_put(skb, payload_len);
 
 	data = &skb->data[0];
 
+	/* header */
+	skb_reset_transport_header(skb);
+	*(__be16 *)data = htons((u16)(pd->seqno));
+	data += 2;
+	*(__be16 *)data = 0; /* checksum */
+	data += 2;
+
+	/* RESET */
+	if (pd->send_reset) {
+		u32 hi_word;
+		hi_word = (FASTPASS_PTYPE_RSTREQ << 28) |
+					((pd->reset_timestamp >> 32) & 0x00FFFFFF);
+		*(__be32 *)data = htonl(hi_word);
+		*(__be32 *)(data + 4) = htonl((u32)pd->reset_timestamp);
+		data += 8;
+	}
+
 	/* A-REQ type short */
-	skb_put(skb, payload_len);
 	*(__be16 *)data = htons((FASTPASS_PTYPE_AREQ << 12) |
-					  ((payload_len >> 2) & 0x3F));
+					  (pd->n_areq & 0x3F));
 	data += 2;
 
 	/* A-REQ requests */
@@ -846,26 +841,31 @@ void fpproto_send_packet(struct sock *sk, struct fpproto_pktdesc *pd)
 		areq->dst = htons((__be16)pd->areq[i].src_dst_key);
 		areq->count = htons((u16)pd->areq[i].tslots);
 		data += 4;
-
 	}
 
-	fpproto_send_skb(sk, skb);
+	fastpass_pr_debug("sending packet\n");
 
-	/* treat packet going out of outwnd as if it was dropped */
-	window_edge = fp->next_seqno - FASTPASS_OUTWND_LEN;
-	if (fp->tx_num_unacked > 0 && outwnd_is_unacked(fp, window_edge)) {
-		fp->stat_fall_off_outwnd++;
-		fpproto_handle_unacked_tx_packet(fp, window_edge);
+	bh_lock_sock(sk);
+
+	/* checksum */
+	fpproto_egress_checksum(sk, skb, pd->seqno);
+
+	/* send onwards */
+	err = ip_queue_xmit(skb, &inet->cork.fl);
+	err = net_xmit_eval(err);
+	if (unlikely(err != 0)) {
+		fp->stat_xmit_errors++;
+		fastpass_pr_debug("got error %d from ip_queue_xmit\n", err);
 	}
 
-	/* add packet to outwnd */
-	outwnd_add(fp, pd);
+	bh_unlock_sock(sk);
 	return;
 
 alloc_err:
 	fp->stat_skb_alloc_error++;
 	fastpass_pr_debug("could not alloc skb of size %d\n",
 			payload_len + max_header);
+	/* no need to unlock */
 }
 
 static int fpproto_sk_init(struct sock *sk)
@@ -898,58 +898,7 @@ static int fpproto_sk_init(struct sock *sk)
 static int fpproto_userspace_sendmsg(struct kiocb *iocb, struct sock *sk,
 		struct msghdr *msg, size_t len)
 {
-	const struct fastpass_sock *fp = fastpass_sk(sk);
-	struct inet_sock *inet = inet_sk(sk);
-	const int flags = msg->msg_flags;
-	const int noblock = flags & MSG_DONTWAIT;
-	struct sk_buff *skb;
-	int rc, size;
-
-	fastpass_pr_debug("visited\n");
-
-	if (len > fp->mss_cache)
-		return -EMSGSIZE;
-
-	lock_sock(sk);
-
-	/* Send only works on connected sockets. */
-	if ((1 << sk->sk_state) & ~FASTPASSF_OPEN) {
-		rc = -ENOTCONN;
-		goto out_release;
-	}
-
-	/* Allocate an skb of suitable size */
-	size = sk->sk_prot->max_header + len;
-	release_sock(sk);
-	skb = sock_alloc_send_skb(sk, size, noblock, &rc);
-	lock_sock(sk);
-	if (skb == NULL)
-		goto out_release;
-
-	/* reserve header & copy contents from userspace */
-	skb_reserve(skb, sk->sk_prot->max_header);
-	rc = memcpy_fromiovec(skb_put(skb, len), msg->msg_iov, len);
-	if (rc != 0)
-		goto out_discard;
-
-	/* write the fastpass header */
-	rc = fpproto_build_header(sk, skb);
-	if (rc != 0)
-		goto out_discard;
-
-	/* checksum */
-	fpproto_egress_checksum(sk, skb, fp->next_seqno);
-
-	/* send onwards */
-	rc = ip_queue_xmit(skb, &inet->cork.fl);
-	rc = net_xmit_eval(rc);
-
-out_release:
-	release_sock(sk);
-	return rc ? : len;
-out_discard:
-	kfree_skb(skb);
-	goto out_release;
+	return -ENOTSUPP;
 }
 
 /* implementation of userspace recv() - unsupported */

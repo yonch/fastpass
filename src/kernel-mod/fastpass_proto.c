@@ -101,17 +101,17 @@ static inline u32 outwnd_pos(u64 tslot)
 }
 
 /**
- * Assumes tslot is in the correct range, returns whether the bin is unacked.
+ * Assumes seqno is in the correct range, returns whether the bin is unacked.
  */
-static bool outwnd_is_unacked(struct fastpass_sock *fp, u64 tslot)
+static bool outwnd_is_unacked(struct fastpass_sock *fp, u64 seqno)
 {
-	return !!test_bit(outwnd_pos(tslot), fp->bin_mask);
+	return !!test_bit(outwnd_pos(seqno), fp->bin_mask);
 }
 
 /**
  * Adds the packet descriptor as the next_seq
  */
-void outwnd_add(struct fastpass_sock *fp, struct fpproto_pktdesc *pd)
+static void outwnd_add(struct fastpass_sock *fp, struct fpproto_pktdesc *pd)
 {
 	u32 circular_index = outwnd_pos(fp->next_seqno);
 
@@ -127,17 +127,17 @@ void outwnd_add(struct fastpass_sock *fp, struct fpproto_pktdesc *pd)
 }
 
 /**
- * Removes the packet description at the given timeslot, marking it as acked.
- *    Returns the removed timeslot.
+ * Removes the packet description with the given seqno, marking it as acked.
+ *    Returns the removed packet.
  *
- * Assumes the timeslot is in the correct range.
+ * Assumes the seqno is in the correct range.
  */
-struct fpproto_pktdesc * outwnd_pop(struct fastpass_sock *fp, u64 tslot)
+static struct fpproto_pktdesc * outwnd_pop(struct fastpass_sock *fp, u64 seqno)
 {
-	u32 circular_index = outwnd_pos(tslot);
+	u32 circular_index = outwnd_pos(seqno);
 	struct fpproto_pktdesc *res = fp->bins[circular_index];
 
-	BUG_ON(!outwnd_is_unacked(fp, tslot));
+	BUG_ON(!outwnd_is_unacked(fp, seqno));
 
 	__clear_bit(circular_index, fp->bin_mask);
 	__clear_bit(circular_index + FASTPASS_OUTWND_LEN, fp->bin_mask);
@@ -147,47 +147,47 @@ struct fpproto_pktdesc * outwnd_pop(struct fastpass_sock *fp, u64 tslot)
 }
 
 /**
- * Returns the "tslot - first_tslot", where first_tslot is the timeslot of the
- *    first unacked packet *at* or *before* tslot if such exists within the
+ * Returns (@seqno - first_seqno), where first_seqno is the sequence no. of the
+ *    first unacked packet *at* or *before* @seqno if such exists within the
  *    window, or -1 if it doesn't.
  */
-s32	outwnd_at_or_before(struct fastpass_sock *fp, u64 tslot)
+static s32 outwnd_at_or_before(struct fastpass_sock *fp, u64 seqno)
 {
 	u32 head_index;
-	u32 tslot_index;
+	u32 seqno_index;
 	u32 found_offset;
 
-	BUG_ON(time_after_eq64(tslot, fp->next_seqno));
+	BUG_ON(time_after_eq64(seqno, fp->next_seqno));
 
-	if (unlikely(time_before64(tslot, fp->next_seqno - FASTPASS_OUTWND_LEN)))
+	if (unlikely(time_before64(seqno, fp->next_seqno - FASTPASS_OUTWND_LEN)))
 		return -1;
 
 	head_index = outwnd_pos(fp->next_seqno - 1);
 
 	/*
-	 * there are two indices that could correspond to tslot, get the first
+	 * there are two indices that could correspond to seqno, get the first
 	 *   one not smaller than head_index.
 	 */
-	tslot_index = head_index + outwnd_pos(tslot - (fp->next_seqno - 1));
+	seqno_index = head_index + outwnd_pos(seqno - (fp->next_seqno - 1));
 
 	found_offset = find_next_bit(fp->bin_mask,
 			head_index + FASTPASS_OUTWND_LEN,
-			tslot_index);
+			seqno_index);
 
 	/* TODO: remove later, for performance */
 	BUG_ON((found_offset != head_index + FASTPASS_OUTWND_LEN)
-			&& !outwnd_is_unacked(fp, tslot - (found_offset - tslot_index)));
+			&& !outwnd_is_unacked(fp, seqno - (found_offset - seqno_index)));
 
 	return (found_offset == head_index + FASTPASS_OUTWND_LEN) ?
-			-1 : (found_offset - tslot_index);
+			-1 : (found_offset - seqno_index);
 }
 
 /**
- * Returns the timeslot of the earliest unacked timeslot, given that that
- *    earliest timeslot is not before @hint.
- * Assumes such a timeslot exists, and that hint is within the outwnd.
+ * Returns the sequence no of the earliest unacked packet, given that that
+ *    earliest seqno is not before @hint.
+ * Assumes such a packet exists, and that hint is within the outwnd.
  */
-u64 outwnd_earliest_unacked_hint(struct fastpass_sock *fp, u64 hint)
+static u64 outwnd_earliest_unacked_hint(struct fastpass_sock *fp, u64 hint)
 {
 	u32 hint_pos = outwnd_pos(hint);
 	u32 found_offset;
@@ -196,8 +196,9 @@ u64 outwnd_earliest_unacked_hint(struct fastpass_sock *fp, u64 hint)
 	found_offset = find_last_bit(fp->bin_mask, hint_pos + FASTPASS_OUTWND_LEN + 1);
 
 	/**
-	 * found_offset runs between head_index to head_index+FASTPASS_OUTWND_LEN-1
-	 * (found_offset-head_index) is #timeslots before next_seqno-1 of sought pkt
+	 * found_offset runs between hint_pos+1 to hint_pos+FASTPASS_OUTWND_LEN
+	 * (hint_pos + FASTPASS_OUTWND_LEN - found_offset) is #timeslots after
+	 * 		@hint of sought pkt
 	 */
 	earliest = hint + (hint_pos + FASTPASS_OUTWND_LEN - found_offset);
 
@@ -209,17 +210,17 @@ u64 outwnd_earliest_unacked_hint(struct fastpass_sock *fp, u64 hint)
 }
 
 /**
- * Returns the timeslot of the earliest unacked timeslot.
- * Assumes such a timeslot exists!
+ * Returns the sequence no of the earliest unacked packet.
+ * Assumes such a packet exists!
  */
-u64 outwnd_earliest_unacked(struct fastpass_sock *fp)
+static u64 outwnd_earliest_unacked(struct fastpass_sock *fp)
 {
 	return outwnd_earliest_unacked_hint(fp,
 			fp->next_seqno - FASTPASS_OUTWND_LEN);
 }
 
 #ifdef FASTPASS_PERFORM_RUNTIME_TESTS
-void outwnd_test(struct fastpass_sock *fp) {
+static void outwnd_test(struct fastpass_sock *fp) {
 	u64 tslot;
 	s32 gap;
 	int i;
@@ -282,7 +283,7 @@ clear_next_unacked:
 }
 #endif
 
-void outwnd_reset(struct fastpass_sock* fp)
+static void outwnd_reset(struct fastpass_sock* fp)
 {
 	u64 tslot;
 	s32 gap;
@@ -296,21 +297,126 @@ void outwnd_reset(struct fastpass_sock* fp)
 	}
 }
 
-bool outwnd_empty(struct fastpass_sock* fp)
+static bool outwnd_empty(struct fastpass_sock* fp)
 {
 	return (fp->tx_num_unacked == 0);
 }
 
 /**
- * Returns the timestamp of the earliest unacked packet in the outwnd
- * Assumes outwnd is not empty.
+ * Returns the timestamp of the descriptor with @seqno
+ * Assumes @seqno is within the window and unacked
  */
-u64 outwnd_earliest_timestamp(struct fastpass_sock* fp)
+static u64 outwnd_timestamp(struct fastpass_sock* fp, u64 seqno)
 {
-	u64 earliest_seqno;
+	return fp->bins[outwnd_pos(seqno)]->sent_timestamp;
+}
 
-	earliest_seqno = outwnd_earliest_unacked(fp);
-	return fp->bins[outwnd_pos(earliest_seqno)]->sent_timestamp;
+void do_ack_seqno(struct fastpass_sock *fp, u64 seqno)
+{
+	struct fpproto_pktdesc *pd;
+
+	BUG_ON(time_after_eq64(seqno, fp->next_seqno));
+	BUG_ON(time_before64(seqno, fp->next_seqno - FASTPASS_OUTWND_LEN));
+
+	fastpass_pr_debug("ACK seqno 0x%08llX\n", seqno);
+	BUG_ON(!outwnd_is_unacked(fp, seqno));
+	pd = outwnd_pop(fp, seqno);
+
+	if (fp->ops->handle_ack)
+		fp->ops->handle_ack(fp->qdisc, pd);		/* will free pd */
+	else
+		fpproto_pktdesc_free(pd);
+}
+
+void do_neg_ack_seqno(struct fastpass_sock *fp, u64 seq)
+{
+	struct fpproto_pktdesc *pd = outwnd_pop(fp, seq);
+	fastpass_pr_debug("Unacked tx seq 0x%llX\n", seq);
+	if (fp->ops->handle_neg_ack)
+		fp->ops->handle_neg_ack(fp->qdisc, pd);		/* will free pd */
+	else
+		fpproto_pktdesc_free(pd);
+}
+
+void cancel_and_reset_retrans_timer(struct fastpass_sock *fp)
+{
+	u64 timeout;
+	u64 seqno;
+
+	if (unlikely(hrtimer_try_to_cancel(&fp->retrans_timer) != 0)) {
+		fastpass_pr_debug("could not cancel timer. tasklet will reset timer\n");
+		return;
+	}
+
+	if (outwnd_empty(fp)) {
+		fastpass_pr_debug("all packets acked, no need to set timer\n");
+		return;
+	}
+
+	/* find the earliest unacked, and the timeout */
+	seqno = outwnd_earliest_unacked(fp);
+	timeout = outwnd_timestamp(fp, seqno) + fp->send_timeout_us;
+
+	/* set timer and earliest_unacked */
+	fp->earliest_unacked = seqno;
+	hrtimer_start(&fp->retrans_timer, ns_to_ktime(timeout), HRTIMER_MODE_ABS);
+	fastpass_pr_debug("setting timer to %llu for seq#=0x%llX\n", timeout, seqno);
+}
+
+static enum hrtimer_restart retrans_timer_func(struct hrtimer *timer)
+{
+	struct fastpass_sock *fp =
+			container_of(timer, struct fastpass_sock, retrans_timer);
+
+	/* schedule tasklet to write request */
+	tasklet_schedule(&fp->retrans_tasklet);
+
+	return HRTIMER_NORESTART;
+}
+
+static void retrans_tasklet(unsigned long int param)
+{
+	struct fastpass_sock *fp = (struct fastpass_sock *)param;
+	u64 now = fp_get_time_ns();
+	struct Qdisc *sch;
+	u64 seqno;
+	u64 timeout;
+
+	/* Lock the qdisc */
+	sch = fpproto_lock_qdisc((struct sock *)fp);
+	if (unlikely(sch == NULL))
+		goto qdisc_destroyed;
+
+
+	/* notify qdisc of expired timeouts */
+	seqno = fp->earliest_unacked;
+	while (!outwnd_empty(fp)) {
+		/* find seqno and timeout of next unacked packet */
+		seqno = outwnd_earliest_unacked_hint(fp, seqno);
+		timeout = outwnd_timestamp(fp, seqno) + fp->send_timeout_us;
+
+		/* if timeout hasn't expired, we're done */
+		if (unlikely(time_after64(timeout, now)))
+			goto set_next_timer;
+
+		do_neg_ack_seqno(fp, seqno);
+	}
+	fastpass_pr_debug("outwnd empty, not setting timer\n");
+	goto out; /* outwnd is empty */
+
+set_next_timer:
+	/* seqno is the earliest unacked seqno, and timeout is its timeout */
+	fp->earliest_unacked = seqno;
+	hrtimer_start(&fp->retrans_timer, ns_to_ktime(timeout), HRTIMER_MODE_ABS);
+	fastpass_pr_debug("setting timer to %llu for seq#=0x%llX\n", timeout, seqno);
+
+out:
+	fpproto_unlock_qdisc(sch);
+	return;
+
+qdisc_destroyed:
+	fastpass_pr_debug("qdisc seems to have been destroyed\n");
+	return;
 }
 
 static void do_proto_reset(struct fastpass_sock *fp, u64 reset_time)
@@ -380,30 +486,13 @@ static void fpproto_handle_reset(struct fastpass_sock *fp,
  * Acks a single timeslot.
  * Assumes timeslot is within the window and has not been acked yet.
  */
-void fpproto_ack_seqno(struct fastpass_sock *fp, u64 seqno)
-{
-	struct fpproto_pktdesc *pd;
-
-	BUG_ON(time_after_eq64(seqno, fp->next_seqno));
-	BUG_ON(time_before64(seqno, fp->next_seqno - FASTPASS_OUTWND_LEN));
-
-	fastpass_pr_debug("ACK seqno 0x%08llX\n", seqno);
-	if (!outwnd_is_unacked(fp, seqno))
-		fastpass_pr_debug("huh?\n");
-	pd = outwnd_pop(fp, seqno);
-
-	if (fp->ops->handle_ack)
-		fp->ops->handle_ack(fp->qdisc, pd);		/* will free pd */
-	else
-		fpproto_pktdesc_free(pd);
-}
-
 void fpproto_handle_ack(struct fastpass_sock *fp,
 		struct Qdisc *sch, u16 ack_seq, u32 ack_runlen)
 {
 	u64 cur_seqno;
 	s32 next_unacked;
 	u64 end_seqno;
+	int n_acked = 0;
 
 	/* find full seqno, strictly before fp->next_seqno */
 	cur_seqno = fp->next_seqno - (1 << 16);
@@ -414,19 +503,20 @@ void fpproto_handle_ack(struct fastpass_sock *fp,
 		goto ack_too_early;
 
 	/* if the ack_seq is unacknowledged, process the ack on it */
-	if (outwnd_is_unacked(fp, cur_seqno))
-		fpproto_ack_seqno(fp, cur_seqno);
+	if (outwnd_is_unacked(fp, cur_seqno)) {
+		do_ack_seqno(fp, cur_seqno);
+		n_acked++;
+	}
 	end_seqno = cur_seqno - 1;
 
 	/* start with the positive nibble */
 	ack_runlen <<= 4;
-	goto handle_positive;
 
-handle_positive:
+do_next_positive:
 	cur_seqno = end_seqno;
 	end_seqno -= (ack_runlen >> 28);
 	ack_runlen <<= 4;
-next_unacked:
+do_next_unacked:
 	/* find next unacked */
 	next_unacked = outwnd_at_or_before(fp, cur_seqno);
 	if (next_unacked == -1)
@@ -435,17 +525,20 @@ next_unacked:
 
 	if (likely(time_after64(cur_seqno, end_seqno))) {
 		/* got ourselves an unacked seqno that should be acked */
-		fpproto_ack_seqno(fp, cur_seqno);
+		do_ack_seqno(fp, cur_seqno);
+		n_acked++;
 		/* try to find another seqno that should be acked */
-		goto next_unacked;
+		goto do_next_unacked;
 	}
 	/* finished handling this run. if more runs, handle them as well */
 	if (likely(ack_runlen != 0)) {
 		end_seqno -= (ack_runlen >> 28);
 		ack_runlen <<= 4;
-		goto handle_positive; /* continue handling */
+		goto do_next_positive; /* continue handling */
 	}
 done:
+	if (n_acked > 0)
+		cancel_and_reset_retrans_timer(fp);
 	return;
 
 ack_too_early:
@@ -488,6 +581,11 @@ int fpproto_rcv(struct sk_buff *skb)
 	}
 
 	sch = fpproto_lock_qdisc(sk);
+	if (unlikely(sch == NULL)) {
+		fastpass_pr_debug("qdisc seems to have been destroyed\n");
+		kfree_skb(skb);
+		return 0;
+	}
 
 	fp->stat_rx_pkts++;
 
@@ -711,13 +809,22 @@ static int fpproto_disconnect(struct sock *sk, int flags)
 
 static void fpproto_destroy_sock(struct sock *sk)
 {
+	struct fastpass_sock *fp = fastpass_sk(sk);
+
 	fastpass_pr_debug("visited\n");
 
 	/* might not be necessary, doing for safety */
 	fpproto_set_qdisc(sk, NULL);
 
 	/* clear unacked packets */
-	outwnd_reset(fastpass_sk(sk));
+	outwnd_reset(fp);
+
+	/* eliminate the retransmission timer */
+	hrtimer_cancel(&fp->retrans_timer);
+
+	/* kill tasklet */
+	tasklet_kill(&fp->retrans_tasklet);
+
 }
 
 void fpproto_egress_checksum(struct sock *sk, struct sk_buff *skb,
@@ -738,14 +845,25 @@ void fpproto_egress_checksum(struct sock *sk, struct sk_buff *skb,
  *    controller successfully, either because of falling off the outwnd end,
  *    or a timeout.
  */
-void fpproto_handle_unacked_tx_packet(struct fastpass_sock *fp, u64 seq)
+/**
+ * Make sure fpproto is ready to accept a new packet.
+ *
+ * This might NACK a packet.
+ */
+void fpproto_prepare_to_send(struct sock *sk)
 {
-	struct fpproto_pktdesc *pd = outwnd_pop(fp, seq);
-	fastpass_pr_debug("Unacked tx seq 0x%llX\n", seq);
-	if (fp->ops->handle_neg_ack)
-		fp->ops->handle_neg_ack(fp->qdisc, pd);		/* will free pd */
-	else
-		fpproto_pktdesc_free(pd);
+	struct fastpass_sock *fp = fastpass_sk(sk);
+	u64 window_edge = fp->next_seqno - FASTPASS_OUTWND_LEN;
+
+	/* make sure outwnd is not holding a packet descriptor where @pd will be */
+	if (outwnd_is_unacked(fp, window_edge)) {
+		/* treat packet going out of outwnd as if it was dropped */
+		fp->stat_fall_off_outwnd++;
+		do_neg_ack_seqno(fp, window_edge);
+
+		/* reset timer if needed */
+		cancel_and_reset_retrans_timer(fp);
+	}
 }
 
 /**
@@ -761,23 +879,22 @@ void fpproto_commit_packet(struct sock *sk, struct fpproto_pktdesc *pd,
 		u64 timestamp)
 {
 	struct fastpass_sock *fp = fastpass_sk(sk);
-	u64 window_edge;
 
 	pd->sent_timestamp = timestamp;
 	pd->seqno = fp->next_seqno;
 	pd->send_reset = !fp->in_sync;
 	pd->reset_timestamp = fp->last_reset_time;
 
-	/* make sure outwnd is not holding a packet descriptor where @pd will be */
-	window_edge = fp->next_seqno - FASTPASS_OUTWND_LEN;
-	if (fp->tx_num_unacked > 0 && outwnd_is_unacked(fp, window_edge)) {
-		/* treat packet going out of outwnd as if it was dropped */
-		fp->stat_fall_off_outwnd++;
-		fpproto_handle_unacked_tx_packet(fp, window_edge);
-	}
-
 	/* add packet to outwnd, will advance fp->next_seqno */
 	outwnd_add(fp, pd);
+
+	/* if first packet in outwnd, enqueue timer and set fp->earliest_unacked */
+	if (fp->tx_num_unacked == 1) {
+		u64 timeout = pd->sent_timestamp + fp->send_timeout_us;
+		fp->earliest_unacked = pd->seqno;
+		hrtimer_start(&fp->retrans_timer, ns_to_ktime(timeout), HRTIMER_MODE_ABS);
+		fastpass_pr_debug("first packet in outwnd. setting timer to %llu for seq#=0x%llX\n", timeout, pd->seqno);
+	}
 }
 
 /**
@@ -887,6 +1004,14 @@ static int fpproto_sk_init(struct sock *sk)
 #ifdef FASTPASS_PERFORM_RUNTIME_TESTS
 	outwnd_test(fp);
 #endif
+	/* initialize retransmission timer */
+	hrtimer_init(&fp->retrans_timer, CLOCK_REALTIME, HRTIMER_MODE_ABS);
+	fp->retrans_timer.function = retrans_timer_func;
+
+	/* initialize tasklet */
+	tasklet_init(&fp->retrans_tasklet, &retrans_tasklet,
+			(unsigned long int)fp);
+
 
 	/* choose reset time */
 	do_proto_reset(fp, fp_get_time_ns());

@@ -222,7 +222,7 @@ void set_request_timer(struct fp_sched_data* q, u64 when)
 }
 
 /**
- * Called whenever a flow is enqueued for a request
+ * Called whenever a flow is enqueued for a request or retransmit
  * Caller should hold the qdisc lock.
  */
 void req_timer_flowqueue_enqueue(struct fp_sched_data* q)
@@ -232,35 +232,6 @@ void req_timer_flowqueue_enqueue(struct fp_sched_data* q)
 		set_request_timer(q, fp_get_time_ns() + q->req_min_gap);
 		fastpass_pr_debug("set request timer to %llu\n", q->time_next_req);
 	}
-}
-
-/**
- * Sets the timer based on timeouts.
- * Assumes timer is not enqueued and there are no unrequested flows.
- * Caller should hold the qdisc lock.
- */
-void req_timer_set_from_timeout(struct fp_sched_data* q)
-{
-	struct fastpass_sock *fp;
-	u64 earliest;
-
-	/* not connected -> no timeout */
-	if (unlikely(q->ctrl_sock == NULL))
-		goto do_not_set;
-
-	fp = fastpass_sk(q->ctrl_sock->sk);
-
-	/* no unacked packets -> no timeout */
-	if (outwnd_empty(fp))
-		goto do_not_set;
-
-	/* find earliest unacked, and set timeout from it */
-	earliest = outwnd_earliest_timestamp(fp);
-	set_request_timer(q, earliest + q->send_timeout_us);
-	return;
-
-do_not_set:
-	q->time_next_req = ~0ULL;
 }
 
 /**
@@ -277,27 +248,8 @@ void req_timer_sending_request(struct fp_sched_data* q, u64 now)
 		/* have more requests to send */
 		set_request_timer(q, now + q->req_min_gap);
 	else
-		req_timer_set_from_timeout(q);
+		q->time_next_req = ~0ULL;
 
-}
-
-/**
- * Called when there have been ACKs (at least one) that might change the timeout
- * Caller should hold the qdisc lock.
- */
-void req_timer_processed_acks(struct fp_sched_data* q)
-{
-	/* if there are unrequested flows, timer should fire at scheduled time  */
-	if (q->n_unreq_flows != 0)
-		return;
-
-	/* Before ACKs, there were unacked packets so the timer must have been set */
-	if (unlikely(hrtimer_try_to_cancel(&q->request_timer) != 0)) {
-		/* couldn't cancel. the tasklet will reschedule timer */
-		return;
-	}
-
-	req_timer_set_from_timeout(q);
 }
 
 static bool flow_in_flowqueue(struct fp_flow *f)
@@ -345,10 +297,8 @@ static void flowqueue_enqueue_retransmit(struct fp_sched_data *q, struct fp_flow
 	}
 	f->state = FLOW_RETRANSMIT_QUEUE;
 
-	/**
-     * no update of request timer since this processing happens in send_request 
-     *   which will set timer correctly 
-     */
+	/* update request timer if necessary */
+	req_timer_flowqueue_enqueue(q);
 }
 
 static bool flowqueue_is_empty(struct fp_sched_data* q)
@@ -935,12 +885,19 @@ static void send_request(struct Qdisc *sch, u64 now)
 			fastpass_sk(q->ctrl_sock->sk)->next_seqno);
 
 	BUG_ON(q->req_t + q->req_cost > now);
+	BUG_ON(flowqueue_is_empty(q));
 	BUG_ON(!q->ctrl_sock);
 
 	/* allocate packet descriptor */
 	pkt = fpproto_pktdesc_alloc();
 	if (!pkt)
 		goto alloc_err;
+
+	/**
+	 * this might NACK a packet, but the request timer will not be set because
+	 *   already flow queue is not empty
+	 */
+	fpproto_prepare_to_send(q->ctrl_sock->sk);
 
 	pkt->n_areq = 0;
 	while ((pkt->n_areq < FASTPASS_PKT_MAX_AREQ) && !flowqueue_is_empty(q)) {
@@ -1043,6 +1000,8 @@ struct fpproto_ops fastpass_sch_proto_ops = {
 static int reconnect_ctrl_socket(struct Qdisc *sch)
 {
 	struct fp_sched_data *q = qdisc_priv(sch);
+	struct sock *sk;
+	struct fastpass_sock *fp;
 	int rc;
 	struct sockaddr_in sock_addr = {
 			.sin_family = AF_INET,
@@ -1064,22 +1023,26 @@ static int reconnect_ctrl_socket(struct Qdisc *sch)
 		return rc;
 	}
 
+	sk = q->ctrl_sock->sk;
+	fp = fastpass_sk(sk);
+
 	/* set socket priority */
-	q->ctrl_sock->sk->sk_priority = TC_PRIO_CONTROL;
+	sk->sk_priority = TC_PRIO_CONTROL;
 
 	/* skb allocation must be atomic (done under the qdisc lock) */
-	q->ctrl_sock->sk->sk_allocation = GFP_ATOMIC;
+	sk->sk_allocation = GFP_ATOMIC;
 
 	/* give socket a reference to this qdisc for watchdog */
-	fpproto_set_qdisc(q->ctrl_sock->sk, sch);
+	fpproto_set_qdisc(sk, sch);
 
 	/* set protocol ops */
-	fastpass_sk(q->ctrl_sock->sk)->ops = &fastpass_sch_proto_ops;
+	fp->ops = &fastpass_sch_proto_ops;
 
 	/* set reset window */
-	fastpass_sk(q->ctrl_sock->sk)->rst_win_ns =
-				(u64)q->reset_window_us * NSEC_PER_USEC;
+	fp->rst_win_ns = (u64)q->reset_window_us * NSEC_PER_USEC;
 
+	/* set send timeout */
+	fp->send_timeout_us = q->send_timeout_us;
 
 	/* connect */
 	sock_addr.sin_addr.s_addr = q->ctrl_addr_netorder;
@@ -1306,6 +1269,8 @@ static int fp_tc_change(struct Qdisc *sch, struct nlattr *opt) {
 					(u64)q->reset_window_us * NSEC_PER_USEC;
 	}
 
+	/* TODO: when changing send_timeout, also change inside ctrl socket */
+
 	if (!err && (should_reconnect || !q->ctrl_sock))
 		err = reconnect_ctrl_socket(sch);
 
@@ -1380,7 +1345,7 @@ static int fp_tc_init(struct Qdisc *sch, struct nlattr *opt)
 	q->req_min_gap		= 1000;
 	q->ctrl_addr_netorder = htonl(0x7F000001); /* need sensible default? */
 	q->reset_window_us	= 2e6; /* 2 seconds */
-	q->send_timeout_us	= 1000000; /* 1ms timeout */
+	q->send_timeout_us	= 5000000; /* 5ms timeout */
 	q->flow_hash_tbl	= NULL;
 	INIT_LIST_HEAD(&q->unreq_flows);
 	INIT_LIST_HEAD(&q->retrans_flows);

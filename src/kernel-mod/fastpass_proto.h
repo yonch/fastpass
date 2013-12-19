@@ -117,8 +117,11 @@ struct fpproto_ops {
  * @qdisc: the qdisc that owns the socket
  * @last_reset_time: the time used in the last sent reset
  * @rst_win_ns: time window within which resets are accepted, in nanoseconds
+ * @send_timeout_ns: number of ns after which a tx packet is deemed lost
  * @bin_mask: a mask for each bin, 1 if it has not been acked yet.
  * @bins: pointers to the packet descriptors of each bin
+ * @earliest_unacked: sequence number of the earliest unacked packet in the
+ * 		outwnd. only valid if the outwnd is not empty.
  *
  * Statistics:
  * @stat_tasklet_runs: the number of times the tasklet ran
@@ -140,12 +143,15 @@ struct fastpass_sock {
 	u32						in_sync:1;
 	struct fpproto_ops		*ops;
 	u64 					rst_win_ns;
+	u32						send_timeout_us;
 
 	/* outwnd */
 	unsigned long			bin_mask[BITS_TO_LONGS(2 * FASTPASS_OUTWND_LEN)];
 	struct fpproto_pktdesc	*bins[FASTPASS_OUTWND_LEN];
 	u32						tx_num_unacked;
-
+	struct hrtimer			retrans_timer;
+	struct tasklet_struct 	retrans_tasklet;
+	u64						earliest_unacked;
 
 	/* statistics */
 	u64 stat_tasklet_runs;  /* TODO: deprecate */
@@ -169,14 +175,12 @@ struct fastpass_sock {
 extern int __init fpproto_register(void);
 void __exit fpproto_unregister(void);
 
-bool outwnd_empty(struct fastpass_sock* fp);
-u64 outwnd_earliest_timestamp(struct fastpass_sock* fp);
-
 void fpproto_set_qdisc(struct sock *sk, struct Qdisc *new_qdisc);
 
 struct fpproto_pktdesc *fpproto_pktdesc_alloc(void);
 void fpproto_pktdesc_free(struct fpproto_pktdesc *pd);
 
+void fpproto_prepare_to_send(struct sock *sk);
 void fpproto_commit_packet(struct sock *sk, struct fpproto_pktdesc *pkt,
 		u64 timestamp);
 void fpproto_send_packet(struct sock *sk, struct fpproto_pktdesc *pkt);

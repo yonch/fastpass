@@ -319,6 +319,7 @@ void do_ack_seqno(struct fastpass_sock *fp, u64 seqno)
 	BUG_ON(time_before64(seqno, fp->next_seqno - FASTPASS_OUTWND_LEN));
 
 	fastpass_pr_debug("ACK seqno 0x%08llX\n", seqno);
+	fp->stat_acked_packets++;
 	BUG_ON(!outwnd_is_unacked(fp, seqno));
 	pd = outwnd_pop(fp, seqno);
 
@@ -360,6 +361,7 @@ void cancel_and_reset_retrans_timer(struct fastpass_sock *fp)
 	/* set timer and earliest_unacked */
 	fp->earliest_unacked = seqno;
 	hrtimer_start(&fp->retrans_timer, ns_to_ktime(timeout), HRTIMER_MODE_ABS);
+	fp->stat_reprogrammed_timer++;
 	fastpass_pr_debug("setting timer to %llu for seq#=0x%llX\n", timeout, seqno);
 }
 
@@ -387,6 +389,7 @@ static void retrans_tasklet(unsigned long int param)
 	if (unlikely(sch == NULL))
 		goto qdisc_destroyed;
 
+	fp->stat_tasklet_runs++;
 
 	/* notify qdisc of expired timeouts */
 	seqno = fp->earliest_unacked;
@@ -399,6 +402,7 @@ static void retrans_tasklet(unsigned long int param)
 		if (unlikely(time_after64(timeout, now)))
 			goto set_next_timer;
 
+		fp->stat_timeout_pkts++;
 		do_neg_ack_seqno(fp, seqno);
 	}
 	fastpass_pr_debug("outwnd empty, not setting timer\n");
@@ -494,6 +498,8 @@ void fpproto_handle_ack(struct fastpass_sock *fp,
 	u64 end_seqno;
 	int n_acked = 0;
 
+	fp->stat_ack_payloads++;
+
 	/* find full seqno, strictly before fp->next_seqno */
 	cur_seqno = fp->next_seqno - (1 << 16);
 	cur_seqno += (ack_seq - cur_seqno) & 0xFFFF;
@@ -537,8 +543,10 @@ do_next_unacked:
 		goto do_next_positive; /* continue handling */
 	}
 done:
-	if (n_acked > 0)
+	if (n_acked > 0) {
 		cancel_and_reset_retrans_timer(fp);
+		fp->stat_informative_ack_payloads++;
+	}
 	return;
 
 ack_too_early:

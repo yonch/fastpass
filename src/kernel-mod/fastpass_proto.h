@@ -154,7 +154,7 @@ struct fastpass_sock {
 	u64						earliest_unacked;
 
 	/* statistics */
-	u64 stat_tasklet_runs;  /* TODO: deprecate */
+	u64 stat_tasklet_runs;  /* TODO: change description */
 	u64 stat_build_header_errors; /* TODO:deprecate */
 	u64 stat_xmit_errors;
 	u64 stat_invalid_rx_pkts;
@@ -170,6 +170,11 @@ struct fastpass_sock {
 	u64 stat_fall_off_outwnd; /*TODO:report*/
 	u64 stat_rx_incomplete_ack; /*TODO:report*/
 	u64 stat_too_early_ack; /*TODO:report*/
+	u64 stat_acked_packets; /* TODO:report*/
+	u64 stat_timeout_pkts; /*TODO:report*/
+	u64 stat_ack_payloads; /*TODO:report*/
+	u64 stat_informative_ack_payloads; /*TODO:report*/
+	u64 stat_reprogrammed_timer;
 };
 
 extern int __init fpproto_register(void);

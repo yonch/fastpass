@@ -448,7 +448,7 @@ static void fpproto_handle_reset(struct fastpass_sock *fp,
 	u64 full_tstamp = now - (1ULL << 55);
 	full_tstamp += (partial_tstamp - full_tstamp) & ((1ULL << 56) - 1);
 
-	fastpass_pr_debug("got RESET 0x%llX, last is 0x%llX, full %llu, now %llu\n",
+	fastpass_pr_debug("got RESET 0x%llX, last is 0x%llX, full 0x%llX, now 0x%llX\n",
 			partial_tstamp, fp->last_reset_time, full_tstamp, now);
 
 	if (full_tstamp == fp->last_reset_time) {

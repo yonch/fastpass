@@ -157,6 +157,8 @@ struct fp_sched_data {
 	u64 	stat_ntp_packets; /* TODO: report to tc */
 	u64		stat_late_allocation_tslots; /* TODO: report to tc */
 	u64		stat_too_futuristic_alloc_tslots; /* TODO: report to tc */
+	u64		stat_unwanted_alloc; /* TODO .. */
+	u64		stat_queued_flow_already_acked; /* TODO ..*/
 };
 
 static struct kmem_cache *fp_flow_cachep __read_mostly;
@@ -467,6 +469,13 @@ static bool flow_is_below_watermark(struct fp_flow* f)
 
 void flow_inc_alloc(struct fp_sched_data* q, struct fp_flow* f)
 {
+	if (unlikely(f->alloc_tslots == f->demand_tslots)) {
+		fastpass_pr_debug("got an allocation over demand, flow 0x%04llX, demand %llu\n",
+				f->src_dst_key, f->demand_tslots);
+		q->stat_unwanted_alloc++;
+		return;
+	}
+
 	f->alloc_tslots++;
 	q->alloc_tslots++;
 
@@ -720,7 +729,51 @@ static void handle_reset(struct Qdisc *sch)
 {
 	struct fp_sched_data *q = qdisc_priv(sch);
 
-	(void)q;/* TODO */
+	struct rb_node *cur, *next;
+	struct rb_root *root;
+	struct fp_flow *f;
+	u32 idx;
+	u32 base_idx = src_dst_key_hash(fp_get_time_ns()) >> (32 - q->hash_tbl_log);
+	u32 mask = (1U << q->hash_tbl_log) - 1;
+
+	/* for each cell in hash table: */
+	for (idx = 0; idx < (1U << q->hash_tbl_log); idx++) {
+		root = &q->flow_hash_tbl[(idx + base_idx) & mask];
+		next = rb_first(root); /* we traverse tree in-order */
+
+		/* while haven't finished traversing rbtree: */
+		while (next != NULL) {
+			cur = next;
+			next = rb_next(cur);
+
+			f = container_of(cur, struct fp_flow, fp_node);
+
+			/* can we garbage-collect this flow? */
+			if (f->demand_tslots == f->alloc_tslots) {
+				/* yes, let's gc */
+				BUG_ON(f->qlen != 0);
+				BUG_ON(f->state != FLOW_UNQUEUED);
+				/* erase from old tree */
+				rb_erase(cur, root);
+				fastpass_pr_debug("gc flow 0x%04llX, used %llu timeslots\n",
+						f->src_dst_key, f->demand_tslots);
+				continue;
+			}
+
+			/* has timeslots pending, rebase counters to 0 */
+			f->demand_tslots -= f->alloc_tslots;
+			f->alloc_tslots = 0;
+			f->acked_tslots = 0;
+			f->requested_tslots = 0;
+
+			fastpass_pr_debug("rebased flow 0x%04llX, new demand %llu timeslots\n",
+					f->src_dst_key, f->demand_tslots);
+
+			/* add flow to request queue if it's not already there */
+			if (f->state == FLOW_UNQUEUED)
+				flowqueue_enqueue_request(q, f);
+		}
+	}
 }
 
 /**
@@ -814,6 +867,7 @@ static void handle_ack(struct Qdisc *sch, struct fpproto_pktdesc *pd)
 		BUG_ON(f == NULL);
 		new_acked = pd->areq[i].tslots;
 		if (f->acked_tslots < new_acked) {
+			BUG_ON(new_acked > f->demand_tslots);
 			delta = new_acked - f->acked_tslots;
 			q->acked_tslots += delta;
 			f->acked_tslots = new_acked;
@@ -884,7 +938,9 @@ static void send_request(struct Qdisc *sch, u64 now)
 			q->time_next_req, (s64 )now - (s64 )q->time_next_req,
 			fastpass_sk(q->ctrl_sock->sk)->next_seqno);
 
-	BUG_ON(q->req_t + q->req_cost > now);
+	WARN(q->req_t + q->req_cost > now,
+			"send_request called too early req_t=%llu, req_cost=%u, now=%llu (diff=%lld)\n",
+			q->req_t, q->req_cost, now, (s64)now - (s64)(q->req_t + q->req_cost));
 	BUG_ON(flowqueue_is_empty(q));
 	BUG_ON(!q->ctrl_sock);
 
@@ -905,7 +961,12 @@ static void send_request(struct Qdisc *sch, u64 now)
 
 		new_requested = min_t(u64, f->demand_tslots,
 				f->alloc_tslots + FASTPASS_REQUEST_WINDOW_SIZE - 1);
-		BUG_ON(new_requested <= f->acked_tslots);
+		if(new_requested <= f->acked_tslots) {
+			q->stat_queued_flow_already_acked++;
+			fastpass_pr_debug("flow 0x%04llX was in queue, but already fully acked\n",
+					f->src_dst_key);
+			continue;
+		}
 
 		pkt->areq[pkt->n_areq].src_dst_key = f->src_dst_key;
 		pkt->areq[pkt->n_areq].tslots = new_requested;

@@ -344,7 +344,7 @@ void cancel_and_reset_retrans_timer(struct fastpass_sock *fp)
 	u64 timeout;
 	u64 seqno;
 
-	if (unlikely(hrtimer_try_to_cancel(&fp->retrans_timer) != 0)) {
+	if (unlikely(hrtimer_try_to_cancel(&fp->retrans_timer) == -1)) {
 		fastpass_pr_debug("could not cancel timer. tasklet will reset timer\n");
 		return;
 	}

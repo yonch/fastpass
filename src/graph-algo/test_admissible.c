@@ -13,9 +13,99 @@
 #include "admissible_structures.h"
 #include "../linux-test/common.h"  // For timing
 
+// Info about incoming requests
+struct request_info {
+    uint16_t src;
+    uint16_t dst;
+    uint16_t backlog;
+    uint16_t timeslot;
+};
+
+// Compare two request infos based on timeslot only
+// Returns a positive value if edge1 > edge2, 0 if they're equal, and a
+// negative value if edge1 < edge2
+// Min time gives the time that should be considered earliest (to handle overflow)
+static inline
+int64_t compare_request_info(struct request_info *edge1, struct request_info *edge2,
+                              uint16_t min_time) {
+    assert(edge1 != NULL);
+    assert(edge2 != NULL);
+
+    if (edge1->timeslot == edge2->timeslot)
+        return 0;
+
+    if ((edge1->timeslot >= min_time && edge2->timeslot >= min_time) ||
+        (edge1->timeslot < min_time && edge2->timeslot < min_time))
+        return edge1->timeslot - edge2->timeslot;
+    else if (edge1->timeslot > edge2->timeslot)
+        return -1;
+    else
+        return 1;
+}
+
+// Swap two request infos. Used in quicksort.
+static inline
+void swap_request_info(struct request_info *edge_0, struct request_info *edge_1) {
+    assert(edge_0 != NULL);
+    assert(edge_1 != NULL);
+
+    struct request_info temp;
+    temp.src = edge_0->src;
+    temp.dst = edge_0->dst;
+    temp.backlog = edge_0->backlog;
+    temp.timeslot = edge_0->timeslot;
+
+    edge_0->src = edge_1->src;
+    edge_0->dst = edge_1->dst;
+    edge_0->backlog = edge_1->backlog;
+    edge_0->timeslot = edge_1->timeslot;
+
+    edge_1->src = temp.src;
+    edge_1->dst = temp.dst;
+    edge_1->backlog = temp.backlog;
+    edge_1->timeslot = temp.timeslot;
+}
+
+// Recursive quicksort on requests, using the compare function above
+// Assume size is at least 2
+static inline
+void quicksort_requests(struct request_info *edges, uint32_t size, uint16_t min_time) {
+    assert(edges != NULL);
+    assert(size >= 2);
+
+    // Store partition element
+    struct request_info *partition = &edges[0];
+    
+    struct request_info *low = partition + 1;
+    struct request_info *high = partition + size - 1;
+    while (low < high) {
+        // Find an out of place low element and high element
+        while (compare_request_info(low, partition, min_time) <= 0 && low < high)
+            low++;
+        while (compare_request_info(high, partition, min_time) >= 0 && low < high)
+            high--;
+
+        // Swap low and high
+        swap_request_info(low, high);
+    }
+
+    // Swap partition into place
+    struct request_info *partition_location = high;
+    if (low == high && compare_request_info(low, partition, min_time) > 0)
+        partition_location = high - 1;
+    swap_request_info(partition_location, partition);
+
+    // Recursively sort portions
+    uint32_t size_0 = partition_location - partition;
+    if (size_0 >= 2)
+        quicksort_requests(edges, size_0, min_time);
+    if (size - size_0 - 1 >= 2)
+        quicksort_requests(partition_location + 1, size - size_0 - 1, min_time);
+}
+
 // Based on a method suggested by wikipedia
 // http://en.wikipedia.org/wiki/Exponential_distribution
-double generate_exponential_variate(uint32_t mean_t_btwn_requests)
+double generate_exponential_variate(double mean_t_btwn_requests)
 {
   assert(mean_t_btwn_requests > 0);
 
@@ -24,33 +114,33 @@ double generate_exponential_variate(uint32_t mean_t_btwn_requests)
 }
 // Generate a sequence of requests with Poisson arrival times, puts them in edges
 // Returns the number of requests generated
-uint32_t generate_requests_poisson(struct backlog_edge *edges, uint32_t size,
+uint32_t generate_requests_poisson(struct request_info *edges, uint32_t size,
                                    uint32_t num_nodes, uint32_t duration,
-                                   double fraction, uint32_t mean)
+                                   double fraction, double mean)
 {
     assert(edges != NULL);
 
     // Generate a sequence of requests with Poisson arrival times per sender
     // and receivers chosen uniformly at random
 
-    struct backlog_edge *current_edge = edges;
+    struct request_info *current_edge = edges;
     uint16_t src;
     uint32_t num_generated = 0;
     for (src = 0; src < num_nodes; src++) {
         uint16_t *cumulative_demands = calloc(num_nodes, sizeof(uint16_t));
-        double current_time = generate_exponential_variate(mean);
+        double current_time = generate_exponential_variate(mean / fraction);
         while (current_time < duration) {
             uint32_t dst = rand() / ((double) RAND_MAX) * (num_nodes - 1);
             if (dst >= src)
                 dst++;  // Don't send to self
             current_edge->src = src;
             current_edge->dst = dst;
-            cumulative_demands[dst] += (uint16_t) mean * fraction;
+            cumulative_demands[dst] += (uint16_t) mean;
             current_edge->backlog = cumulative_demands[dst];
             current_edge->timeslot = (uint16_t) current_time;
             num_generated++;
             current_edge++;
-            current_time += generate_exponential_variate(mean);
+            current_time += generate_exponential_variate(mean / fraction);
         }
         free(cumulative_demands);
     }
@@ -58,58 +148,24 @@ uint32_t generate_requests_poisson(struct backlog_edge *edges, uint32_t size,
     assert(num_generated <= size);
 
     // Sort by timeslot!
-    quicksort_backlog(edges, num_generated, 0);
-
-    return num_generated;
-}
-
-
-// Generate a uniformly random sequence of requests, puts them in edges
-// Returns the number of requests generated
-// TODO: update this to use new API for admissible_traffic (cumulative demands)
-uint32_t generate_requests_uniformly(struct backlog_edge *edges, uint32_t size,
-                                     uint32_t num_nodes, uint32_t duration,
-                                     double fraction)
-{
-    assert(edges != NULL);
-
-    // Use simple method to randomly generate one new request per timeslot
-
-    uint32_t t;
-    struct backlog_edge *current_edge = edges;
-    uint32_t num_generated = 0;
-    for (t = 0; t < duration; t++) {
-        uint16_t src = rand() / ((double) RAND_MAX) * num_nodes;
-        uint16_t dst = rand() / ((double) RAND_MAX) * (num_nodes - 1);
-        if (dst >= src)
-            dst++;  // Don't send to self
-        current_edge->src = src;
-        current_edge->dst = dst;
-        current_edge->backlog = (uint16_t) (num_nodes * fraction);
-        current_edge->timeslot = t;
-
-        num_generated++;
-        current_edge++;
-    }
-
-    assert(num_generated <= size);
+    quicksort_requests(edges, num_generated, 0);
 
     return num_generated;
 }
 
 // Runs one experiment. Returns the number of packets admitted.
-uint32_t run_experiment(struct backlog_edge *requests, uint32_t duration, uint32_t num_requests,
-                        struct backlog_queue *new_requests, struct admissible_status *status,
+uint32_t run_experiment(struct request_info *requests, uint32_t duration, uint32_t num_requests,
+                        struct bin *new_requests, struct admissible_status *status,
                         struct backlog_queue *queue_0, struct backlog_queue *queue_1,
                         struct admitted_traffic *admitted) {
     assert(requests != NULL);
 
     uint32_t b;
     uint32_t num_admitted = 0;
-    struct backlog_edge *current_request = requests;
+    struct request_info *current_request = requests;
     for (b = 0; b < (duration >> BATCH_SHIFT); b++) {
         // Issue all new requests for this batch
-        init_backlog_queue(new_requests);
+        init_bin(new_requests);
         while ((current_request->timeslot >> BATCH_SHIFT) == (b % (65536 >> BATCH_SHIFT)) &&
                current_request < requests + num_requests) {
             request_timeslots(new_requests, status, current_request->src,
@@ -132,8 +188,6 @@ uint32_t run_experiment(struct backlog_edge *requests, uint32_t duration, uint32
                                admitted, status);
         for (i = 0; i < BATCH_SIZE; i++)
             num_admitted += admitted[i].size;
-            
-        assert(!out_of_order(queue_out, false));
     }
     return num_admitted;
 }
@@ -145,10 +199,10 @@ int main(void) {
     uint32_t duration = 60000;
     uint32_t num_nodes = 256;
     double fraction = 0.95;
-    uint32_t mean = 10;
+    double mean = 10;
 
     // Data structures
-    struct backlog_queue *new_requests = create_backlog_queue();
+    struct bin *new_requests = create_bin();
     struct admissible_status *status = create_admissible_status(false, 0);
     struct backlog_queue *queue_0 = create_backlog_queue();
     struct backlog_queue *queue_1 = create_backlog_queue();
@@ -166,7 +220,7 @@ int main(void) {
         // Allocate enough space for new requests
         // (this is sufficient for <= 1 request per node per timeslot)
         uint32_t max_requests = duration * num_nodes;
-        struct backlog_edge *requests = malloc(max_requests * sizeof(struct backlog_edge));
+        struct request_info *requests = malloc(max_requests * sizeof(struct request_info));
 
         // Generate new requests
         uint32_t num_requests = generate_requests_poisson(requests, max_requests, num_nodes,
@@ -192,7 +246,7 @@ int main(void) {
     free(queue_0);
     free(queue_1);
     free(new_requests);
-    free(status->admitted_queues);
+    free(status->admitted_bins);
     free(status);
     free(admitted);
 }

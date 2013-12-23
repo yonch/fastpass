@@ -1,0 +1,7 @@
+.*.o.cmd
+.*.ko.cmd
+.tmp_versions/
+Module.symvers
+fastpass.ko
+fastpass.mod.c
+modules.order

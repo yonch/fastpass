@@ -941,7 +941,7 @@ static void send_request(struct Qdisc *sch, u64 now)
 	WARN(q->req_t + q->req_cost > now,
 			"send_request called too early req_t=%llu, req_cost=%u, now=%llu (diff=%lld)\n",
 			q->req_t, q->req_cost, now, (s64)now - (s64)(q->req_t + q->req_cost));
-	BUG_ON(flowqueue_is_empty(q));
+	WARN(flowqueue_is_empty(q), "got empty queue\n");
 	BUG_ON(!q->ctrl_sock);
 
 	/* allocate packet descriptor */

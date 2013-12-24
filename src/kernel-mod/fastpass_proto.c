@@ -218,6 +218,7 @@ static void do_proto_reset(struct fastpass_sock *fp, u64 reset_time)
 	/* set new sequence numbers */
 	fp->last_reset_time = reset_time;
 	fp->next_seqno = reset_time + time_hash + ((u64)time_hash << 32);
+	fp->in_max_seqno = fp->next_seqno + 0xDEADBEEF;
 }
 
 static bool tstamp_in_window(u64 tstamp, u64 win_middle, u64 win_size) {
@@ -344,14 +345,33 @@ ack_too_early:
 /**
  * Receives a packet destined for the protocol. (part of inet socket API)
  */
+__sum16 fpproto_checksum(struct sock *sk, struct sk_buff *skb, u64 seqno)
+{
+	const struct inet_sock *inet = inet_sk(sk);
+
+	u32 seq_hash = jhash_1word((u32)seqno, seqno >> 32);
+
+	skb->csum = skb_checksum(skb, 0, skb->len, seq_hash);
+	return csum_tcpudp_magic(inet->inet_saddr, inet->inet_daddr,
+			skb->len, IPPROTO_FASTPASS, skb->csum);
+}
+
+void fpproto_egress_checksum(struct sock *sk, struct sk_buff *skb,
+		u64 seqno)
+{
+	fastpass_hdr(skb)->checksum = fpproto_checksum(sk, skb, seqno);
+}
+
 int fpproto_rcv(struct sk_buff *skb)
 {
 	struct sock *sk;
 	struct fastpass_sock *fp;
 	struct fastpass_hdr *hdr;
 	struct Qdisc *sch;
+	u64 full_seqno;
 	u16 payload_type;
 	u64 rst_tstamp;
+	__sum16 checksum;
 	int i;
 	unsigned char *data;
 	unsigned char *data_end;
@@ -360,8 +380,6 @@ int fpproto_rcv(struct sk_buff *skb)
 	u32 alloc_base_tslot;
 	u16 ack_seq;
 	u32 ack_runlen;
-
-	fastpass_pr_debug("visited\n");
 
 	sk = __inet_lookup_skb(&fastpass_hashinfo, skb,
 			FASTPASS_DEFAULT_PORT_NETORDER /*sport*/,
@@ -387,6 +405,24 @@ int fpproto_rcv(struct sk_buff *skb)
 		goto packet_too_short;
 
 	hdr = (struct fastpass_hdr *)skb->data;
+
+	/* get full 64-bit sequence number */
+	full_seqno = fp->in_max_seqno - (1 << 14);
+	full_seqno += (ntohs(hdr->seq) - full_seqno) & 0xFFFF;
+	fastpass_pr_debug("packet with seqno 0x%04X (full 0x%llX, prev_max 0x%llX)\n",
+			ntohs(hdr->seq), full_seqno, fp->in_max_seqno);
+
+	/* verify checksum */
+	checksum = fpproto_checksum(sk, skb, full_seqno);
+	if (unlikely(checksum != 0)) {
+		fastpass_pr_debug("checksum error. expected 0, got 0x%04X\n", checksum);
+		// goto bad_checksum;
+		/* TODO: drop the packet, once RESET handling is fixed */
+	}
+
+	if (time_after64(full_seqno, fp->in_max_seqno))
+		fp->in_max_seqno = full_seqno;
+
 	data = &skb->data[4];
 	data_end = &skb->data[skb->len];
 
@@ -488,6 +524,11 @@ incomplete_ack_payload:
 	fp->stat_rx_incomplete_ack++;
 	fastpass_pr_debug("ACK payload incomplete: expected 6 bytes, got %d\n",
 			(int)(data_end - data));
+	goto cleanup;
+
+bad_checksum:
+	fp->stat_checksum_error++;
+	fastpass_pr_debug("checksum error. expected 0, got 0x%04X\n", checksum);
 	goto cleanup;
 
 packet_too_short:
@@ -619,23 +660,6 @@ static void fpproto_destroy_sock(struct sock *sk)
 	/* kill tasklet */
 	tasklet_kill(&fp->retrans_tasklet);
 
-}
-
-__sum16 fpproto_checksum(struct sock *sk, struct sk_buff *skb, u64 seqno)
-{
-	const struct inet_sock *inet = inet_sk(sk);
-
-	u32 seq_hash = jhash_1word((u32)seqno, seqno >> 32);
-
-	skb->csum = skb_checksum(skb, 0, skb->len, seq_hash);
-	return csum_tcpudp_magic(inet->inet_saddr, inet->inet_daddr,
-			skb->len, IPPROTO_FASTPASS, skb->csum);
-}
-
-void fpproto_egress_checksum(struct sock *sk, struct sk_buff *skb,
-		u64 seqno)
-{
-	fastpass_hdr(skb)->checksum = fpproto_checksum(sk, skb, seqno);
 }
 
 /**

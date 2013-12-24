@@ -140,6 +140,7 @@ struct fastpass_sock {
 	struct Qdisc			*qdisc;
 	u64						last_reset_time;
 	u64						next_seqno;
+	u64						in_max_seqno;
 	u32						in_sync:1;
 	struct fpproto_ops		*ops;
 	u64 					rst_win_ns;
@@ -175,6 +176,7 @@ struct fastpass_sock {
 	u64 stat_ack_payloads; /*TODO:report*/
 	u64 stat_informative_ack_payloads; /*TODO:report*/
 	u64 stat_reprogrammed_timer;
+	u64 stat_checksum_error;
 };
 
 extern int __init fpproto_register(void);

@@ -621,17 +621,21 @@ static void fpproto_destroy_sock(struct sock *sk)
 
 }
 
-void fpproto_egress_checksum(struct sock *sk, struct sk_buff *skb,
-		u64 seqno)
+__sum16 fpproto_checksum(struct sock *sk, struct sk_buff *skb, u64 seqno)
 {
 	const struct inet_sock *inet = inet_sk(sk);
-	struct fastpass_hdr *fh = fastpass_hdr(skb);
 
 	u32 seq_hash = jhash_1word((u32)seqno, seqno >> 32);
 
 	skb->csum = skb_checksum(skb, 0, skb->len, seq_hash);
-	fh->checksum = csum_tcpudp_magic(inet->inet_saddr, inet->inet_daddr,
+	return csum_tcpudp_magic(inet->inet_saddr, inet->inet_daddr,
 			skb->len, IPPROTO_FASTPASS, skb->csum);
+}
+
+void fpproto_egress_checksum(struct sock *sk, struct sk_buff *skb,
+		u64 seqno)
+{
+	fastpass_hdr(skb)->checksum = fpproto_checksum(sk, skb, seqno);
 }
 
 /**

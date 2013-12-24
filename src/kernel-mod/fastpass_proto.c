@@ -219,6 +219,7 @@ static void do_proto_reset(struct fastpass_sock *fp, u64 reset_time)
 	fp->last_reset_time = reset_time;
 	fp->next_seqno = reset_time + time_hash + ((u64)time_hash << 32);
 	fp->in_max_seqno = fp->next_seqno + 0xDEADBEEF;
+	fp->consecutive_bad_pkts = 0;
 }
 
 static bool tstamp_in_window(u64 tstamp, u64 win_middle, u64 win_size) {
@@ -259,7 +260,7 @@ static void fpproto_handle_reset(struct fastpass_sock *fp,
 
 	/* if we already processed a newer reset within the window */
 	if (unlikely(tstamp_in_window(fp->last_reset_time, now, fp->rst_win_ns)
-			&& (full_tstamp < fp->last_reset_time))) {
+			&& time_before64(full_tstamp, fp->last_reset_time))) {
 		fastpass_pr_debug("Already processed reset within window which is %lluns more recent\n",
 						fp->last_reset_time - full_tstamp);
 		fp->stat_outdated_reset++;
@@ -362,6 +363,44 @@ void fpproto_egress_checksum(struct sock *sk, struct sk_buff *skb,
 	fastpass_hdr(skb)->checksum = fpproto_checksum(sk, skb, seqno);
 }
 
+void got_bad_packet(struct fastpass_sock *fp, struct Qdisc *sch)
+{
+	u64 now = fp_get_time_ns();
+
+	fp->consecutive_bad_pkts++;
+	fastpass_pr_debug("#%u consecutive bad packets\n", fp->consecutive_bad_pkts);
+
+	if (fp->consecutive_bad_pkts < FASTPASS_BAD_PKT_RESET_THRESHOLD)
+		goto out;
+
+	/* got too many bad packets */
+
+	/* reset bad packet count to 0 for continued operation */
+	fp->consecutive_bad_pkts = 0;
+
+	/* was there a recent reset? */
+	if (time_in_range64(
+			now - FASTPASS_RESET_WINDOW_NS,
+			fp->last_reset_time,
+			now + FASTPASS_RESET_WINDOW_NS)) {
+		/* will not trigger a new one */
+		fp->stat_no_reset_because_recent++;
+		fastpass_pr_debug("had a recent reset (last %llu, now %llu). not issuing a new one.\n",
+				fp->last_reset_time, now);
+	} else {
+		/* Will send a RSTREQ */
+		fp->stat_reset_from_bad_pkts++;
+		do_proto_reset(fp, now);
+		if (fp->ops->handle_reset)
+			fp->ops->handle_reset(sch);
+	}
+
+out:
+	/* Whatever happens, trigger an outgoing packet to make progress */
+	if (fp->ops->trigger_request)
+		fp->ops->trigger_request(sch);
+}
+
 int fpproto_rcv(struct sk_buff *skb)
 {
 	struct sock *sk;
@@ -416,6 +455,7 @@ int fpproto_rcv(struct sk_buff *skb)
 	checksum = fpproto_checksum(sk, skb, full_seqno);
 	if (unlikely(checksum != 0)) {
 		fastpass_pr_debug("checksum error. expected 0, got 0x%04X\n", checksum);
+		got_bad_packet(fp, sch);
 		// goto bad_checksum;
 		/* TODO: drop the packet, once RESET handling is fixed */
 	}

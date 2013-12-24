@@ -26,6 +26,9 @@
 #define FASTPASS_OUTWND_LOG			8
 #define FASTPASS_OUTWND_LEN			(1 << FASTPASS_OUTWND_LOG)
 
+#define FASTPASS_BAD_PKT_RESET_THRESHOLD	10
+#define FASTPASS_RESET_WINDOW_NS	(1000*1000*1000)
+
 #define FASTPASS_PKT_MAX_AREQ		10
 
 #define FASTPASS_PTYPE_RSTREQ		0x0
@@ -109,6 +112,13 @@ struct fpproto_ops {
 	 * @note: this function becomes responsible for freeing the memory of @pd
 	 */
 	void	(*handle_neg_ack)(struct Qdisc *q, struct fpproto_pktdesc *pd);
+
+	/**
+	 * The protocol needs to send information to the controller -- the user
+	 *    should send a packet, so that information can piggy back.
+	 */
+	void	(*trigger_request)(struct Qdisc *q);
+
 };
 
 /**
@@ -145,6 +155,7 @@ struct fastpass_sock {
 	struct fpproto_ops		*ops;
 	u64 					rst_win_ns;
 	u32						send_timeout_us;
+	u32						consecutive_bad_pkts;
 
 	/* outwnd */
 	unsigned long			bin_mask[BITS_TO_LONGS(2 * FASTPASS_OUTWND_LEN)];
@@ -177,6 +188,8 @@ struct fastpass_sock {
 	u64 stat_informative_ack_payloads; /*TODO:report*/
 	u64 stat_reprogrammed_timer;
 	u64 stat_checksum_error;
+	u64 stat_no_reset_because_recent;
+	u64 stat_reset_from_bad_pkts;
 };
 
 extern int __init fpproto_register(void);

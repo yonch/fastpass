@@ -363,6 +363,11 @@ void fpproto_egress_checksum(struct sock *sk, struct sk_buff *skb,
 	fastpass_hdr(skb)->checksum = fpproto_checksum(sk, skb, seqno);
 }
 
+void got_good_packet(struct fastpass_sock *fp, struct Qdisc *sch)
+{
+	fp->consecutive_bad_pkts = 0;
+}
+
 void got_bad_packet(struct fastpass_sock *fp, struct Qdisc *sch)
 {
 	u64 now = fp_get_time_ns();
@@ -458,6 +463,8 @@ int fpproto_rcv(struct sk_buff *skb)
 		got_bad_packet(fp, sch);
 		// goto bad_checksum;
 		/* TODO: drop the packet, once RESET handling is fixed */
+	} else {
+		got_good_packet(fp, sch);
 	}
 
 	if (time_after64(full_seqno, fp->in_max_seqno))

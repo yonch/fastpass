@@ -1538,6 +1538,8 @@ static int __init fastpass_module_init(void)
 {
 	int ret = -ENOMEM;
 
+	pr_info("%s: initializing\n", __func__);
+
 	fp_flow_cachep = kmem_cache_create("fp_flow_cache",
 					   sizeof(struct fp_flow),
 					   0, 0, NULL);
@@ -1552,6 +1554,7 @@ static int __init fastpass_module_init(void)
 	if (ret)
 		goto out_unregister_qdisc;
 
+	pr_info("%s: success\n", __func__);
 	return 0;
 
 out_unregister_qdisc:
@@ -1559,6 +1562,7 @@ out_unregister_qdisc:
 out_destroy_cache:
 	kmem_cache_destroy(fp_flow_cachep);
 out:
+	pr_info("%s: failed, ret=%d\n", __func__, ret);
 	return ret;
 }
 

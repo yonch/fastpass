@@ -905,7 +905,7 @@ static struct inet_protosw fastpass4_protosw = {
 	.prot		=  &fastpass_prot,
 	.ops		=  &inet_dgram_ops,
 	.no_check	=  0,		/* must checksum (RFC 3828) */
-	.flags		=  INET_PROTOSW_PERMANENT,
+	.flags		=  0,
 };
 
 /* Global data for the protocol */
@@ -959,25 +959,27 @@ int __init fpproto_register(void)
 					   sizeof(struct fpproto_pktdesc),
 					   0, 0, NULL);
 	if (!fpproto_pktdesc_cachep) {
-		FASTPASS_CRIT("Cannot create kmem cache for fpproto_pktdesc\n");
+		FASTPASS_CRIT("%s: Cannot create kmem cache for fpproto_pktdesc\n", __func__);
 		goto out;
 	}
 
 	err = init_hashinfo();
 	if (err) {
-		FASTPASS_CRIT("Cannot allocate hashinfo tables\n");
+		FASTPASS_CRIT("%s: Cannot allocate hashinfo tables\n", __func__);
 		goto out_destroy_cache;
 	}
 
 	err = proto_register(&fastpass_prot, 1);
 	if (err) {
-		FASTPASS_CRIT("Cannot add FastPass/IP protocol\n");
+		FASTPASS_CRIT("%s: Cannot add FastPass/IP protocol\n", __func__);
 		goto out_destroy_hashinfo;
 	}
 
 	err = inet_add_protocol(&fastpass_protocol, IPPROTO_FASTPASS);
-	if (err < 0)
+	if (err < 0) {
+		FASTPASS_CRIT("%s: Cannot add protocol to inet\n", __func__);
 		goto out_unregister_proto;
+	}
 
 	inet_register_protosw(&fastpass4_protosw);
 
@@ -990,12 +992,16 @@ out_destroy_hashinfo:
 out_destroy_cache:
 	kmem_cache_destroy(fpproto_pktdesc_cachep);
 out:
+	pr_info("%s: failed, ret=%d\n", __func__, err);
 	return err;
 }
 
 void __exit fpproto_unregister(void)
 {
+	pr_info("%s: unregistering protocol\n", __func__);
 	inet_unregister_protosw(&fastpass4_protosw);
+	if (inet_del_protocol(&fastpass_protocol, IPPROTO_FASTPASS) != 0)
+		FASTPASS_CRIT("%s: could not inet_del_protocol\n", __func__);
 	proto_unregister(&fastpass_prot);
 	destroy_hashinfo();
 	kmem_cache_destroy(fpproto_pktdesc_cachep);

@@ -10,4 +10,8 @@ KDIR ?= /home/yonch/huge/linux-build/
 
 default:
 	$(MAKE) -C $(KDIR) M=$$PWD
+	
+test:
+	gcc -g -O0 -o tests/window_test tests/window_test.c
+	tests/window_test
 endif

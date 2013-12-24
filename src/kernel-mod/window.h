@@ -8,16 +8,14 @@
 #ifndef WINDOW_H_
 #define WINDOW_H_
 
-#include "fastpass_proto.h"
-
 /**
  * The log of the size of outgoing packet window waiting for ACKs or timeout
  *    expiry. Setting this at < 6 is a bit wasteful since a full word has 64
  *    bits, and the algorithm works with word granularity
  */
 #define FASTPASS_WND_LOG			8
-#define FASTPASS_WND_LEN			(1 << FASTPASS_WND_LOG)
-#define FASTPASS_WND_WORDS			(BITS_TO_LONGS(FASTPASS_WND_LEN))
+#define FASTPASS_WND_LEN			((1 << FASTPASS_WND_LOG) - BITS_PER_LONG)
+#define FASTPASS_WND_WORDS			(BITS_TO_LONGS(1 << FASTPASS_WND_LOG))
 
 struct fp_window {
 	unsigned long	marked[FASTPASS_WND_WORDS];
@@ -30,7 +28,7 @@ struct fp_window {
 
 static inline u32 wnd_pos(u64 tslot)
 {
-	return tslot & (FASTPASS_WND_LEN-1);
+	return tslot & ((1 << FASTPASS_WND_LOG) - 1);
 }
 
 static inline u32 summary_pos(struct fp_window *wnd, u32 pos) {
@@ -100,7 +98,7 @@ static s32 wnd_at_or_before(struct fp_window *wnd, u64 seqno)
 		return BITS_PER_LONG - 1 - __fls(tmp);
 
 	/* didn't find in first word, look at summary of all words strictly after */
-	tmp = wnd->summary >> summary_pos(seqno_word);
+	tmp = wnd->summary >> summary_pos(wnd, seqno_index);
 	tmp &= ~1UL;
 	if (tmp == 0)
 		return -1; /* summary indicates no marks there */
@@ -135,7 +133,7 @@ static void wnd_reset(struct fp_window *wnd, u64 head)
 {
 	memset(wnd->marked, 0, sizeof(wnd->marked));
 	wnd->head = head;
-	wnd->head_word = BIT_WORD(head);
+	wnd->head_word = BIT_WORD(wnd_pos(head));
 	wnd->summary = 0UL;
 	wnd->num_marked = 0;
 }
@@ -152,12 +150,13 @@ static void wnd_advance(struct fp_window *wnd, u64 amount)
 		memset(wnd->marked, 0, sizeof(wnd->marked));
 		wnd->summary = 0UL;
 	} else {
-		BUG_ON(time_before_eq64(wnd_earliest_marked(wnd),
-				wnd->head + amount - FASTPASS_WND_LEN + BITS_PER_LONG));
+		BUG_ON(!wnd_empty(wnd) &&
+				time_before_eq64(wnd_earliest_marked(wnd),
+						wnd->head + amount - FASTPASS_WND_LEN));
 		wnd->summary <<= word_shift;
 	}
 	wnd->head += amount;
-	wnd->head_word = BIT_WORD(wnd->head);
+	wnd->head_word = (wnd->head_word + word_shift) % FASTPASS_WND_WORDS;
 }
 
 #endif /* WINDOW_H_ */

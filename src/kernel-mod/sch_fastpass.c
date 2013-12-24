@@ -54,6 +54,8 @@
  */
 #define FASTPASS_REQUEST_LOW_WATERMARK (1 << 9)
 
+#define NO_NEXT_REQUEST			(~0ULL)
+
 enum {
 	FLOW_UNQUEUED,
 	FLOW_REQUEST_QUEUE,
@@ -159,6 +161,7 @@ struct fp_sched_data {
 	u64		stat_too_futuristic_alloc_tslots; /* TODO: report to tc */
 	u64		stat_unwanted_alloc; /* TODO .. */
 	u64		stat_queued_flow_already_acked; /* TODO ..*/
+	u64		stat_request_with_empty_flowqueue;
 };
 
 static struct kmem_cache *fp_flow_cachep __read_mostly;
@@ -216,11 +219,18 @@ static void horizon_set(struct fp_sched_data* q, u64 timeslot, u64 src_dst_key)
 void set_request_timer(struct fp_sched_data* q, u64 when)
 {
 	/* rate limit sending of requests */
-	q->time_next_req = max_t(u64, q->req_t + q->req_cost, when);
+	q->time_next_req = max_t(u64, q->req_t + q->req_cost, when + q->req_min_gap);
 
 	hrtimer_start(&q->request_timer,
 			      ns_to_ktime(q->time_next_req),
 			      HRTIMER_MODE_ABS);
+}
+
+void trigger_request(struct Qdisc *sch, u64 when)
+{
+	struct fp_sched_data *q = qdisc_priv(sch);
+	if (q->time_next_req == NO_NEXT_REQUEST)
+		set_request_timer(q, when);
 }
 
 /**
@@ -230,8 +240,8 @@ void set_request_timer(struct fp_sched_data* q, u64 when)
 void req_timer_flowqueue_enqueue(struct fp_sched_data* q)
 {
 	/* if enqueued first flow in q->unreq_flows, set request timer */
-	if (q->n_unreq_flows == 1) {
-		set_request_timer(q, fp_get_time_ns() + q->req_min_gap);
+	if (q->time_next_req == NO_NEXT_REQUEST) {
+		set_request_timer(q, fp_get_time_ns());
 		fastpass_pr_debug("set request timer to %llu\n", q->time_next_req);
 	}
 }
@@ -248,9 +258,9 @@ void req_timer_sending_request(struct fp_sched_data* q, u64 now)
 	/* set timer for next request, if a request would be required */
 	if (q->n_unreq_flows)
 		/* have more requests to send */
-		set_request_timer(q, now + q->req_min_gap);
+		set_request_timer(q, now);
 	else
-		q->time_next_req = ~0ULL;
+		q->time_next_req = NO_NEXT_REQUEST;
 
 }
 
@@ -941,7 +951,10 @@ static void send_request(struct Qdisc *sch, u64 now)
 	WARN(q->req_t + q->req_cost > now,
 			"send_request called too early req_t=%llu, req_cost=%u, now=%llu (diff=%lld)\n",
 			q->req_t, q->req_cost, now, (s64)now - (s64)(q->req_t + q->req_cost));
-	WARN(flowqueue_is_empty(q), "got empty queue\n");
+	if(flowqueue_is_empty(q)) {
+		fp->stat_request_with_empty_flowqueue++;
+		fastpass_pr_debug("was called with no flows pending (could be due to bad packets?)\n");
+	}
 	BUG_ON(!q->ctrl_sock);
 
 	/* allocate packet descriptor */
@@ -1055,6 +1068,7 @@ struct fpproto_ops fastpass_sch_proto_ops = {
 	.handle_alloc	= &handle_alloc,
 	.handle_ack		= &handle_ack,
 	.handle_neg_ack	= &handle_neg_ack,
+	.trigger_request= &trigger_request,
 };
 
 /* reconnects the control socket to the controller */
@@ -1411,7 +1425,7 @@ static int fp_tc_init(struct Qdisc *sch, struct nlattr *opt)
 	INIT_LIST_HEAD(&q->unreq_flows);
 	INIT_LIST_HEAD(&q->retrans_flows);
 	q->internal.src_dst_key = 0xD066F00DDEADBEEF;
-	q->time_next_req = ~0ULL;
+	q->time_next_req = NO_NEXT_REQUEST;
 
 	/* calculate timeslot from beginning of Epoch */
 	q->horizon.timeslot = now;

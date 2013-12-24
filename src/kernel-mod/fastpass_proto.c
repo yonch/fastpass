@@ -403,7 +403,7 @@ void got_bad_packet(struct fastpass_sock *fp, struct Qdisc *sch)
 out:
 	/* Whatever happens, trigger an outgoing packet to make progress */
 	if (fp->ops->trigger_request)
-		fp->ops->trigger_request(sch);
+		fp->ops->trigger_request(sch, now);
 }
 
 int fpproto_rcv(struct sk_buff *skb)

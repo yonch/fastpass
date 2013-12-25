@@ -12,6 +12,8 @@
 #include <linux/interrupt.h>
 #include <linux/hrtimer.h>
 
+#include "window.h"
+
 #define IPPROTO_FASTPASS 222
 
 #define FASTPASS_DEFAULT_PORT_NETORDER 1
@@ -164,6 +166,9 @@ struct fastpass_sock {
 	struct hrtimer			retrans_timer;
 	struct tasklet_struct 	retrans_tasklet;
 	u64						earliest_unacked;
+
+	/* inwnd */
+	struct fp_window		inwnd;
 
 	/* statistics */
 	u64 stat_tasklet_runs;  /* TODO: change description */

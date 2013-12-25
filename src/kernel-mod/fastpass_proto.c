@@ -212,13 +212,15 @@ qdisc_destroyed:
 static void do_proto_reset(struct fastpass_sock *fp, u64 reset_time)
 {
 	u32 time_hash = jhash_1word((u32)reset_time, reset_time >> 32);
+	u64 base_seqno = reset_time + time_hash + ((u64)time_hash << 32);
+
 	/* clear unacked packets */
 	outwnd_reset(fp);
 
 	/* set new sequence numbers */
 	fp->last_reset_time = reset_time;
-	fp->next_seqno = reset_time + time_hash + ((u64)time_hash << 32);
-	fp->in_max_seqno = fp->next_seqno + 0xDEADBEEF;
+	fp->next_seqno = base_seqno;
+	wnd_reset(&fp->inwnd, base_seqno + 0xDEADBEEF);
 	fp->consecutive_bad_pkts = 0;
 }
 
@@ -406,6 +408,70 @@ out:
 		fp->ops->trigger_request(sch, now);
 }
 
+/**
+ * Updates the incoming packet window
+ * @return 0 if update is successful
+ * 		   1 if caller should drop the packet with seqno
+ */
+int update_inwnd(struct fastpass_sock *fp, u64 seqno)
+{
+	struct fp_window *inwnd = &fp->inwnd;
+	u64 head = wnd_head(inwnd);
+	u64 pos;
+	u64 gap;
+
+	if (likely(seqno == head + 1)) {
+		/* handle a packet sliding off the end of the window */
+		if (wnd_is_marked(inwnd, head - FASTPASS_WND_LEN + 1))
+			wnd_clear(inwnd, head - FASTPASS_WND_LEN + 1); /* TODO: NACK it? */
+
+		/* advance the window (no marking since seqno has been delivered) */
+		wnd_advance(inwnd, 1);
+
+		return 0;
+	}
+
+	if (likely(time_after64(seqno, head))) {
+		/* no overlap between new window and current window? */
+		if (unlikely(time_after_eq64(seqno, head + FASTPASS_WND_LEN)))
+			goto trigger_reset;
+
+		/* first clear all bits going out of the window */
+		pos = seqno - FASTPASS_WND_LEN;
+		while((gap = wnd_at_or_before(inwnd, pos)) >= 0) {
+			pos -= gap;
+			wnd_clear(inwnd, pos);
+			/* TODO: also NACK? */
+		}
+
+		/* okay, advance window */
+		wnd_advance(inwnd, seqno - head);
+
+		/* mark all packets in range (head, seqno), since we hadn't seen them */
+		/* note: we checked seqno > head + 1 */
+		wnd_mark_bulk(inwnd, head + 1, seqno - head - 1);
+
+		/* TODO: maybe we need to NACK some of the newly marked seqnos as well? */
+		return 0;
+	}
+
+	if (unlikely(time_before_eq64(seqno, head - FASTPASS_WND_LEN)))
+		/* packet is before the window - we already received/NACKed it */
+		return 1; /* drop! */
+
+	/* seqno is in the current window - had we received/NACKed it already */
+	if (!wnd_is_marked(inwnd, seqno))
+		return 1; /* already received/NACKed - drop! */
+
+	/* accept the packet - we mark it as received for future */
+	wnd_clear(inwnd, seqno);
+	return 0;
+
+trigger_reset:
+	/* TODO */;
+	return 1; /* we reset -- drop the packet */
+}
+
 int fpproto_rcv(struct sk_buff *skb)
 {
 	struct sock *sk;
@@ -451,10 +517,10 @@ int fpproto_rcv(struct sk_buff *skb)
 	hdr = (struct fastpass_hdr *)skb->data;
 
 	/* get full 64-bit sequence number */
-	full_seqno = fp->in_max_seqno - (1 << 14);
+	full_seqno = wnd_head(&fp->inwnd) - (1 << 14);
 	full_seqno += (ntohs(hdr->seq) - full_seqno) & 0xFFFF;
 	fastpass_pr_debug("packet with seqno 0x%04X (full 0x%llX, prev_max 0x%llX)\n",
-			ntohs(hdr->seq), full_seqno, fp->in_max_seqno);
+			ntohs(hdr->seq), full_seqno, wnd_head(&fp->inwnd));
 
 	/* verify checksum */
 	checksum = fpproto_checksum(sk, skb, full_seqno);
@@ -467,8 +533,9 @@ int fpproto_rcv(struct sk_buff *skb)
 		got_good_packet(fp, sch);
 	}
 
-	if (time_after64(full_seqno, fp->in_max_seqno))
-		fp->in_max_seqno = full_seqno;
+	/* update inwnd */
+	if (update_inwnd(fp, full_seqno) != 0)
+		goto cleanup; /* need to drop packet */
 
 	data = &skb->data[4];
 	data_end = &skb->data[skb->len];

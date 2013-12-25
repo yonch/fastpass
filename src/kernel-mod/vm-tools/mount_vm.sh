@@ -1,6 +1,6 @@
 #!/bin/bash
 
-. env.sh
+. ~/fastpass_env.sh
 
 sudo kpartx -av $VM_HD_IMAGE
 sudo mkdir -p $VM_HD_MOUNTPOINT

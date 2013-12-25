@@ -1,0 +1,8 @@
+
+1. Install NTP. edit /etc/ntp.conf, remark "server" lines and add
+	server 192.168.122.1 minpoll 4 maxpoll 4 burst
+
+2. Add "-l /sbin/sulogin -n" to /etc/init/ttyS0.conf for auto-login, i.e.,
+	exec /sbin/getty -l /sbin/sulogin -n -L 115200 ttyS0 vt102
+
+

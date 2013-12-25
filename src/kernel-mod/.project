@@ -4,6 +4,7 @@
 	<comment></comment>
 	<projects>
 		<project>linux_kernel</project>
+		<project>linux-kernel</project>
 	</projects>
 	<buildSpec>
 		<buildCommand>

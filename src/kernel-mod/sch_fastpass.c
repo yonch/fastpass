@@ -952,7 +952,7 @@ static void send_request(struct Qdisc *sch, u64 now)
 			"send_request called too early req_t=%llu, req_cost=%u, now=%llu (diff=%lld)\n",
 			q->req_t, q->req_cost, now, (s64)now - (s64)(q->req_t + q->req_cost));
 	if(flowqueue_is_empty(q)) {
-		fp->stat_request_with_empty_flowqueue++;
+		q->stat_request_with_empty_flowqueue++;
 		fastpass_pr_debug("was called with no flows pending (could be due to bad packets?)\n");
 	}
 	BUG_ON(!q->ctrl_sock);

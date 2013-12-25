@@ -444,6 +444,8 @@ int update_inwnd(struct fastpass_sock *fp, struct Qdisc *sch, u64 seqno)
 			return 1; /* packet useless after reset -- drop */
 		}
 
+		fp->stat_inwnd_jumped++;
+
 		/* first clear all bits going out of the window */
 		pos = seqno - FASTPASS_WND_LEN;
 		while((gap = wnd_at_or_before(inwnd, pos)) >= 0) {
@@ -463,13 +465,17 @@ int update_inwnd(struct fastpass_sock *fp, struct Qdisc *sch, u64 seqno)
 		return 0;
 	}
 
-	if (unlikely(time_before_eq64(seqno, head - FASTPASS_WND_LEN)))
+	if (unlikely(time_before_eq64(seqno, head - FASTPASS_WND_LEN))) {
 		/* packet is before the window - we already received/NACKed it */
+		fp->stat_seqno_before_inwnd++;
 		return 1; /* drop! */
+	}
 
 	/* seqno is in the current window - had we received/NACKed it already */
-	if (!wnd_is_marked(inwnd, seqno))
+	if (!wnd_is_marked(inwnd, seqno)) {
+		fp->stat_ctrl_packet_unmarked_inwnd++;
 		return 1; /* already received/NACKed - drop! */
+	}
 
 	/* accept the packet - we mark it as received for future */
 	wnd_clear(inwnd, seqno);
@@ -952,7 +958,6 @@ static int fpproto_sk_init(struct sock *sk)
 	/* initialize tasklet */
 	tasklet_init(&fp->retrans_tasklet, &retrans_tasklet,
 			(unsigned long int)fp);
-
 
 	/* choose reset time */
 	do_proto_reset(fp, fp_get_time_ns(), false);

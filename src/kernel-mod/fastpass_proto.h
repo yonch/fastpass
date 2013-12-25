@@ -195,6 +195,7 @@ struct fastpass_sock {
 	u64 stat_checksum_error;
 	u64 stat_no_reset_because_recent;
 	u64 stat_reset_from_bad_pkts;
+	u64 stat_reset_seqno_too_advanced;
 };
 
 extern int __init fpproto_register(void);

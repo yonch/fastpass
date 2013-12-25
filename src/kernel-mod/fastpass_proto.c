@@ -416,7 +416,7 @@ out:
  * @return 0 if update is successful
  * 		   1 if caller should drop the packet with seqno
  */
-int update_inwnd(struct fastpass_sock *fp, u64 seqno)
+int update_inwnd(struct fastpass_sock *fp, struct Qdisc *sch, u64 seqno)
 {
 	struct fp_window *inwnd = &fp->inwnd;
 	u64 head = wnd_head(inwnd);
@@ -436,8 +436,13 @@ int update_inwnd(struct fastpass_sock *fp, u64 seqno)
 
 	if (likely(time_after64(seqno, head))) {
 		/* no overlap between new window and current window? */
-		if (unlikely(time_after_eq64(seqno, head + FASTPASS_WND_LEN)))
-			goto trigger_reset;
+		if (unlikely(time_after_eq64(seqno, head + FASTPASS_WND_LEN))) {
+			fp->stat_reset_seqno_too_advanced++;
+			do_proto_reset(fp, fp_get_time_ns(), false);
+			if (fp->ops->handle_reset)
+				fp->ops->handle_reset(sch);
+			return 1; /* packet useless after reset -- drop */
+		}
 
 		/* first clear all bits going out of the window */
 		pos = seqno - FASTPASS_WND_LEN;
@@ -469,10 +474,6 @@ int update_inwnd(struct fastpass_sock *fp, u64 seqno)
 	/* accept the packet - we mark it as received for future */
 	wnd_clear(inwnd, seqno);
 	return 0;
-
-trigger_reset:
-	/* TODO */;
-	return 1; /* we reset -- drop the packet */
 }
 
 int fpproto_rcv(struct sk_buff *skb)
@@ -540,7 +541,7 @@ int fpproto_rcv(struct sk_buff *skb)
 	}
 
 	/* update inwnd */
-	if ((payload_type != FASTPASS_PTYPE_RESET) && (update_inwnd(fp, full_seqno) != 0))
+	if ((payload_type != FASTPASS_PTYPE_RESET) && (update_inwnd(fp, sch, full_seqno) != 0))
 		goto cleanup; /* need to drop packet */
 
 

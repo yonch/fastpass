@@ -1,10 +1,14 @@
 #!/bin/sh
 
-. env.sh
+. ~/fastpass_env.sh
 
 ./mount_vm.sh
 
 sudo cp ~/fastpass/src/kernel-mod/fastpass.ko $VM_HD_MOUNTPOINT/root
+sudo cp ~/fastpass/src/kernel-mod/vm-tools/* $VM_HD_MOUNTPOINT/root
+sudo rm $VM_HD_MOUNTPOINT/sbin/tc
+sudo rm $VM_HD_MOUNTPOINT/root/tc
+sudo cp ~/src/iproute2.git/tc/tc $VM_HD_MOUNTPOINT/sbin
 sync;
 
 ./umount_vm.sh

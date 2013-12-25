@@ -50,19 +50,81 @@ static bool wnd_is_marked(struct fp_window *wnd, u64 seqno)
 
 static void wnd_mark(struct fp_window *wnd, u64 seqno)
 {
+	u32 seqno_index = wnd_pos(seqno);
 	BUG_ON(wnd_is_marked(wnd, seqno));
 
-	u32 seqno_index = wnd_pos(seqno);
 	__set_bit(seqno_index, wnd->marked);
 	__set_bit(summary_pos(wnd, seqno_index), &wnd->summary);
 	wnd->num_marked++;
 }
 
+/**
+ * marks a consecutive stretch of sequence numbers [seqno, seqno+amount)
+ */
+static void wnd_mark_bulk(struct fp_window *wnd, u64 seqno, u32 amount)
+{
+	u32 start_index;
+	u32 cur_word;
+	u32 start_offset;
+	u32 end_index;
+	u32 end_word;
+	u32 end_offset;
+	unsigned long mask;
+
+	BUG_ON(time_before_eq64(seqno, wnd->head - FASTPASS_WND_LEN));
+	BUG_ON(time_after64(seqno + amount - 1, wnd->head));
+
+	start_index = wnd_pos(seqno);
+	start_offset = start_index % BITS_PER_LONG;
+	end_index = wnd_pos(seqno + amount - 1);
+	end_word = BIT_WORD(end_index);
+	end_offset = end_index % BITS_PER_LONG;
+
+	cur_word = BIT_WORD(start_index);
+	mask = (~0UL << start_offset);
+
+	if (cur_word == end_word)
+		goto end_word;
+
+	/* separate start word and end word */
+	/* start word: */
+	BUG_ON((wnd->marked[cur_word] & mask) != 0);
+	wnd->marked[cur_word] |= mask;
+	mask = ~0UL;
+
+	/* intermediate words */
+next_intermediate:
+	cur_word = (cur_word + 1) % FASTPASS_WND_WORDS;
+	if (likely(cur_word != end_word)) {
+		BUG_ON(wnd->marked[cur_word] != 0);
+		wnd->marked[cur_word] = ~0UL;
+		goto next_intermediate;
+	}
+
+	/* end word */
+	/* changes contained in one word */
+end_word:
+	mask &= (~0UL >> (BITS_PER_LONG - 1 - end_offset));
+	BUG_ON((wnd->marked[cur_word] & mask) != 0);
+	wnd->marked[cur_word] |= mask;
+
+	/* update summary */
+	mask = ~0UL >> (BITS_PER_LONG - 1 - summary_pos(wnd, start_index));
+	mask &= ~0UL << summary_pos(wnd, end_index);
+	wnd->summary |= mask;
+
+	/* update num_marked */
+	wnd->num_marked += amount;
+
+	return;
+}
+
 static void wnd_clear(struct fp_window *wnd, u64 seqno)
 {
+	u32 seqno_index = wnd_pos(seqno);
+
 	BUG_ON(!wnd_is_marked(wnd, seqno));
 
-	u32 seqno_index = wnd_pos(seqno);
 	__clear_bit(seqno_index, wnd->marked);
 	if (unlikely(wnd->marked[BIT_WORD(seqno_index)] == 0))
 		__clear_bit(summary_pos(wnd, seqno_index), &wnd->summary);

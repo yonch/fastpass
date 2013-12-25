@@ -9,20 +9,17 @@
 #include <string.h>
 #include <stdlib.h>
 
+void panic() {
+	exit(-1);
+}
+
 /** from linux's include/asm-generic/bug.h */
 #define BUG() do { \
 	printf("BUG: failure at %s:%d/%s()!\n", __FILE__, __LINE__, __func__); \
-	exit(-1); \
+	panic(); \
 } while (0)
 
-#ifndef BUG_USING_FUNCTION
 #define BUG_ON(condition) do { if (unlikely(condition)) BUG(); } while(0)
-#else
-void BUG_ON(int condition) {
-	if (condition)
-		BUG();
-}
-#endif
 
 /* from kernel.h */
 #define DIV_ROUND_UP(n,d) (((n) + (d) - 1) / (d))
@@ -67,6 +64,7 @@ typedef int s32;
 typedef _Bool			bool;
 
 #define unlikely
+#define likely
 
 /* typecheck.h */
 #define typecheck(type,x) \
@@ -95,12 +93,28 @@ typedef _Bool			bool;
 
 #include "../window.h"
 
+void bulk_test(u64 BASE, u64 seqno, u32 amount, u64 m0, u64 m1, u64 m2, u64 m3, u64 e_summary)
+{
+	int i;
+	struct fp_window wnd;
+	struct fp_window *wndp = &wnd;
+	wnd_reset(wndp, BASE-1);
+	wnd_advance(wndp, FASTPASS_WND_LEN);
+	wnd_mark_bulk(wndp, seqno, amount);
+	BUG_ON(wndp->summary != e_summary);
+	BUG_ON(wndp->marked[0] != m0);
+	BUG_ON(wndp->marked[1] != m1);
+	BUG_ON(wndp->marked[2] != m2);
+	BUG_ON(wndp->marked[3] != m3);
+}
+
+
 /* test */
 int main(void) {
 	u64 tslot;
 	s32 gap;
 	int i;
-	const int BASE = 10007;
+	const int BASE = 10071;
 	struct fp_window wnd;
 	struct fp_window *wndp = &wnd;
 
@@ -143,6 +157,18 @@ int main(void) {
 
 	wnd_clear(wndp, BASE+1);
 	BUG_ON(wnd_earliest_marked(wndp) != BASE+152);
+
+	/* prepared for BASE = 10071 */
+	/* all marks within a single word, first word */
+	bulk_test(BASE, BASE+18, 16, 0,0x1FFFE0000000000UL,0,0, 0x8);
+	/* all marks within a single word, second word */
+	bulk_test(BASE, BASE+18+64, 16, 0,0,0x1FFFE0000000000UL,0, 0x4);
+	/* all marks within a single word, last word */
+	bulk_test(BASE, BASE+3*64-19, 16, 0xFFFF0UL,0,0,0, 0x1);
+	/* span multiple words, at word boundary */
+	bulk_test(BASE, BASE+41, 128, 0,0,~0UL,~0UL, 0x6);
+	/* span multiple words, with intermediate*/
+	bulk_test(BASE, BASE+37, 4+128+9, 0x1FF,0xFUL << 60,~0UL,~0UL, 0xf);
 
 	printf("done testing wnd, cleaning up\n");
 

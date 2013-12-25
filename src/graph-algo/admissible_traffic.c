@@ -12,6 +12,8 @@
 #include <stdio.h>
 #include <stdlib.h>
 
+#define MAX(a,b) (((a) > (b)) ? (a) : (b))
+
 // Request num_slots additional timeslots from src to dst
 void request_timeslots(struct bin *new_requests, struct admissible_status *status,
                        uint16_t src, uint16_t dst, uint16_t demand_tslots) {
@@ -136,7 +138,7 @@ void get_admissible_traffic(struct backlog_queue *queue_in,
         struct bin *current_bin = &queue_in->bins[bin];
 
         while (!is_empty_bin(current_bin)) {
-            struct bin *bin_out = &queue_out->bins[NUM_BINS - BATCH_SIZE];
+            struct bin *bin_out = &queue_out->bins[MAX(0, bin - BATCH_SIZE)];
             
             try_allocation(current_bin, &batch_state, bin_out, traffic_out,
                            admitted_backlog, status);

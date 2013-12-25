@@ -515,6 +515,9 @@ int fpproto_rcv(struct sk_buff *skb)
 		goto packet_too_short;
 
 	hdr = (struct fastpass_hdr *)skb->data;
+	data = &skb->data[4];
+	data_end = &skb->data[skb->len];
+	payload_type = *data >> 4;
 
 	/* get full 64-bit sequence number */
 	full_seqno = wnd_head(&fp->inwnd) - (1 << 14);
@@ -534,11 +537,9 @@ int fpproto_rcv(struct sk_buff *skb)
 	}
 
 	/* update inwnd */
-	if (update_inwnd(fp, full_seqno) != 0)
+	if ((payload_type != FASTPASS_PTYPE_RESET) && (update_inwnd(fp, full_seqno) != 0))
 		goto cleanup; /* need to drop packet */
 
-	data = &skb->data[4];
-	data_end = &skb->data[skb->len];
 
 handle_payload:
 	/* at this point we know there is at least one byte remaining */

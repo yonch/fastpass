@@ -209,7 +209,8 @@ qdisc_destroyed:
 	return;
 }
 
-static void do_proto_reset(struct fastpass_sock *fp, u64 reset_time)
+static void do_proto_reset(struct fastpass_sock *fp, u64 reset_time,
+		bool in_sync)
 {
 	u32 time_hash = jhash_1word((u32)reset_time, reset_time >> 32);
 	u64 base_seqno = reset_time + time_hash + ((u64)time_hash << 32);
@@ -222,6 +223,9 @@ static void do_proto_reset(struct fastpass_sock *fp, u64 reset_time)
 	fp->next_seqno = base_seqno;
 	wnd_reset(&fp->inwnd, base_seqno + 0xDEADBEEF);
 	fp->consecutive_bad_pkts = 0;
+
+	/* are we in sync? */
+	fp->in_sync = in_sync;
 }
 
 static bool tstamp_in_window(u64 tstamp, u64 win_middle, u64 win_size) {
@@ -270,8 +274,7 @@ static void fpproto_handle_reset(struct fastpass_sock *fp,
 	}
 
 	/* okay, accept the reset */
-	do_proto_reset(fp, full_tstamp);
-	fp->in_sync = 1;
+	do_proto_reset(fp, full_tstamp, true);
 	if (fp->ops->handle_reset)
 		fp->ops->handle_reset(sch);
 }
@@ -397,7 +400,7 @@ void got_bad_packet(struct fastpass_sock *fp, struct Qdisc *sch)
 	} else {
 		/* Will send a RSTREQ */
 		fp->stat_reset_from_bad_pkts++;
-		do_proto_reset(fp, now);
+		do_proto_reset(fp, now, false);
 		if (fp->ops->handle_reset)
 			fp->ops->handle_reset(sch);
 	}
@@ -951,8 +954,7 @@ static int fpproto_sk_init(struct sock *sk)
 
 
 	/* choose reset time */
-	do_proto_reset(fp, fp_get_time_ns());
-	fp->in_sync = 0;
+	do_proto_reset(fp, fp_get_time_ns(), false);
 
 	return 0;
 }

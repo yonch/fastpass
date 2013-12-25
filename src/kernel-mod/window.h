@@ -35,7 +35,7 @@ static inline u32 summary_pos(struct fp_window *wnd, u32 pos) {
 	return (wnd->head_word - BIT_WORD(pos)) % FASTPASS_WND_WORDS;
 }
 
-static bool wnd_empty(struct fp_window *wnd)
+static inline bool wnd_empty(struct fp_window *wnd)
 {
 	return (wnd->num_marked == 0);
 }
@@ -43,12 +43,12 @@ static bool wnd_empty(struct fp_window *wnd)
 /**
  * Assumes seqno is in the correct range, returns whether the bin is unacked.
  */
-static bool wnd_is_marked(struct fp_window *wnd, u64 seqno)
+static inline bool wnd_is_marked(struct fp_window *wnd, u64 seqno)
 {
 	return !!test_bit(wnd_pos(seqno), wnd->marked);
 }
 
-static void wnd_mark(struct fp_window *wnd, u64 seqno)
+static inline void wnd_mark(struct fp_window *wnd, u64 seqno)
 {
 	u32 seqno_index = wnd_pos(seqno);
 	BUG_ON(wnd_is_marked(wnd, seqno));
@@ -61,7 +61,7 @@ static void wnd_mark(struct fp_window *wnd, u64 seqno)
 /**
  * marks a consecutive stretch of sequence numbers [seqno, seqno+amount)
  */
-static void wnd_mark_bulk(struct fp_window *wnd, u64 seqno, u32 amount)
+static inline void wnd_mark_bulk(struct fp_window *wnd, u64 seqno, u32 amount)
 {
 	u32 start_index;
 	u32 cur_word;
@@ -119,7 +119,7 @@ end_word:
 	return;
 }
 
-static void wnd_clear(struct fp_window *wnd, u64 seqno)
+static inline void wnd_clear(struct fp_window *wnd, u64 seqno)
 {
 	u32 seqno_index = wnd_pos(seqno);
 
@@ -136,7 +136,7 @@ static void wnd_clear(struct fp_window *wnd, u64 seqno)
  *    first unacked packet *at* or *before* @seqno if such exists within the
  *    window, or -1 if it doesn't.
  */
-static s32 wnd_at_or_before(struct fp_window *wnd, u64 seqno)
+static inline s32 wnd_at_or_before(struct fp_window *wnd, u64 seqno)
 {
 	u32 seqno_index;
 	u32 seqno_word;
@@ -174,7 +174,7 @@ static s32 wnd_at_or_before(struct fp_window *wnd, u64 seqno)
  * Returns the sequence no of the earliest unacked packet.
  * Assumes such a packet exists!
  */
-static u64 wnd_earliest_marked(struct fp_window *wnd)
+static inline u64 wnd_earliest_marked(struct fp_window *wnd)
 {
 	u32 word_offset;
 	u64 result;
@@ -191,7 +191,7 @@ static u64 wnd_earliest_marked(struct fp_window *wnd)
 	return result;
 }
 
-static void wnd_reset(struct fp_window *wnd, u64 head)
+static inline void wnd_reset(struct fp_window *wnd, u64 head)
 {
 	memset(wnd->marked, 0, sizeof(wnd->marked));
 	wnd->head = head;
@@ -204,7 +204,7 @@ static void wnd_reset(struct fp_window *wnd, u64 head)
  * Caller must make sure there are at most FASTPASS_WND_LEN - BITS_PER_LONG
  *    marked slots in the new window (or unmark them first)
  */
-static void wnd_advance(struct fp_window *wnd, u64 amount)
+static inline void wnd_advance(struct fp_window *wnd, u64 amount)
 {
 	u64 word_shift = BIT_WORD(wnd->head + amount) - BIT_WORD(wnd->head);
 	if (word_shift >= FASTPASS_WND_WORDS) {
@@ -219,6 +219,11 @@ static void wnd_advance(struct fp_window *wnd, u64 amount)
 	}
 	wnd->head += amount;
 	wnd->head_word = (wnd->head_word + word_shift) % FASTPASS_WND_WORDS;
+}
+
+static inline u64 wnd_head(struct fp_window *wnd)
+{
+	return wnd->head;
 }
 
 #endif /* WINDOW_H_ */

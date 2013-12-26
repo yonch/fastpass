@@ -9,6 +9,8 @@
 #include <string.h>
 #include <stdlib.h>
 
+#define CONFIG_64BIT
+
 void panic() {
 	exit(-1);
 }
@@ -169,6 +171,46 @@ int main(void) {
 	bulk_test(BASE, BASE+41, 128, 0,0,~0UL,~0UL, 0x6);
 	/* span multiple words, with intermediate*/
 	bulk_test(BASE, BASE+37, 4+128+9, 0x1FF,0xFUL << 60,~0UL,~0UL, 0xf);
+
+
+	/* test getting bitmap */
+	wnd_reset(wndp, BASE-1);
+	wnd_advance(wndp, FASTPASS_WND_LEN);
+	wnd_mark(wndp, BASE);
+	wnd_mark(wndp, BASE + 1);
+	wnd_mark(wndp, BASE + FASTPASS_WND_LEN - 1);
+	wnd_mark(wndp, BASE + FASTPASS_WND_LEN - 3);
+	wnd_mark(wndp, BASE + FASTPASS_WND_LEN - 33);
+	wnd_mark(wndp, BASE + 42);
+	/* last word */
+	BUG_ON(wnd_get_mask(wndp, BASE + 2) != (3UL << 61));
+	/* last bit */
+	BUG_ON(wnd_get_mask(wndp, BASE) != (1UL << 63));
+	/* just before last bit */
+	BUG_ON(wnd_get_mask(wndp, BASE - 1) != 0);
+	/* two bits before last bit - shouldn't catch bit BASE+FASTPASS_WND_LEN-1 */
+	BUG_ON(wnd_get_mask(wndp, BASE - 2) != 0);
+	/* full word (last word) */
+	BUG_ON(wnd_get_mask(wndp, BASE + 40) != (3UL << 23));
+	/* two words */
+	BUG_ON(wnd_get_mask(wndp, BASE + 64) != 1 + (1UL << 41));
+	/* bits up to head */
+	BUG_ON(wnd_get_mask(wndp, wndp->head) != (5UL << 61) + (1UL << 31));
+	/* bit before head */
+	BUG_ON(wnd_get_mask(wndp, wndp->head - 1) != (1UL << 62) + (1UL << 32));
+	/* bit after head */
+	BUG_ON(wnd_get_mask(wndp, wndp->head + 1) != (5UL << 60)  + (1UL << 30));
+	/* just before losing the bit in prev word */
+	BUG_ON(wnd_get_mask(wndp, wndp->head + 31) != (5UL << 30)  + 1UL);
+	/* just after losing the bit in prev word */
+	BUG_ON(wnd_get_mask(wndp, wndp->head + 32) != (5UL << 29));
+	/* when only the head is in the bitmask */
+	BUG_ON(wnd_get_mask(wndp, wndp->head + 63) != 1UL);
+	/* when the head just went out of the bitmask */
+	BUG_ON(wnd_get_mask(wndp, wndp->head + 64) != 0);
+	/* way after the head */
+	BUG_ON(wnd_get_mask(wndp, wndp->head + 65) != 0);
+	BUG_ON(wnd_get_mask(wndp, wndp->head + 1005) != 0);
 
 	printf("done testing wnd, cleaning up\n");
 

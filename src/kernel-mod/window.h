@@ -226,5 +226,59 @@ static inline u64 wnd_head(struct fp_window *wnd)
 	return wnd->head;
 }
 
+/**
+ * See wnd_get_mask
+ * This version assumes @pos is in the range
+ * 		[head-FASTPASS_WND_LEN, head+BITS_PER_LONG]
+ */
+static inline u64 wnd_get_mask_unsafe(struct fp_window *wnd, u64 pos)
+{
+	u64 res = 0;
+	u32 pos_index;
+	u32 pos_word;
+	u32 pos_offset;
+
+	pos_index = wnd_pos(pos);
+	pos_word = BIT_WORD(pos_index);
+	pos_offset = pos_index % BITS_PER_LONG;
+
+	if (unlikely(pos_offset == BITS_PER_LONG - 1))
+		/* the mask is a full word in wnd->marked, return it */
+		return wnd->marked[pos_word];
+
+	/**
+	 * we use the fact that between the head and tail of the array there
+	 * are BITS_PER_LONG zeros, which are safe to take
+	 */
+	res = wnd->marked[pos_word] << (BITS_PER_LONG - 1 - pos_offset);
+	pos_word = (pos_word - 1) % FASTPASS_WND_WORDS;
+	res |= wnd->marked[pos_word] >> (pos_offset + 1);
+
+	return res;
+}
+
+/**
+ * Gets a 64-bit bit-mask of marked packets, of bits [@pos-63,@pos] where @pos
+ *   is MSB (i.e., bit i is @pos-63+i).
+ *
+ * Locations in [@pos-63,@pos] that do not overlap the window will be 0.
+ */
+static inline u64 wnd_get_mask(struct fp_window *wnd, u64 pos)
+{
+#ifndef CONFIG_64BIT
+#error "wnd_get_mask assumes unsigned long is 64-bit long"
+#endif
+
+	/* is pos before the window? */
+	if (unlikely(time_before_eq64(pos, wnd->head - FASTPASS_WND_LEN)))
+		return 0;
+
+	/* is pos so large the bitmap wouldn't overlap the window? */
+	if (unlikely(time_after_eq64(pos, wnd->head + BITS_PER_LONG)))
+		return 0;
+
+	return wnd_get_mask_unsafe(wnd, pos);
+}
+
 #endif /* WINDOW_H_ */
 

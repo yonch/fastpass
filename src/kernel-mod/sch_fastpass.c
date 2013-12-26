@@ -410,7 +410,7 @@ static struct fp_flow *fpq_classify(struct sk_buff *skb, struct fp_sched_data *q
 
 	/* special case for NTP packets, let them through with high priority */
 	if (unlikely(keys.ip_proto == IPPROTO_UDP && keys.port16[1] == htons(123))) {
-		q->stat.ntp_packets++;
+		q->stat.ntp_pkts++;
 		return &q->internal;
 	}
 
@@ -1490,6 +1490,7 @@ static int fp_tc_dump_stats(struct Qdisc *sch, struct gnet_dump *d)
 		.flows				= q->flows,
 		.inactive_flows		= q->inactive_flows,
 		.n_unreq_flows		= q->n_unreq_flows,
+		.stat_timestamp		= now,
 		.current_timeslot	= q->horizon.timeslot,
 		.horizon_mask		= q->horizon.mask,
 		.time_next_request	= q->time_next_req - ( ~q->time_next_req ? now : 0),

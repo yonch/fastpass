@@ -234,6 +234,9 @@ static void do_proto_reset(struct fastpass_sock *fp, u64 reset_time,
 
 	/* are we in sync? */
 	fp->in_sync = in_sync;
+
+	/* statistics */
+	fp->stat.proto_resets++;
 }
 
 static bool tstamp_in_window(u64 tstamp, u64 win_middle, u64 win_size) {
@@ -246,6 +249,7 @@ static void fpproto_handle_reset(struct fastpass_sock *fp,
 {
 	u64 now = fp_get_time_ns();
 
+	fp->stat.reset_payloads++;
 	fastpass_pr_debug("got RESET, last is 0x%llX, full 0x%llX, now 0x%llX\n",
 			fp->last_reset_time, full_tstamp, now);
 
@@ -546,6 +550,9 @@ int fpproto_rcv(struct sk_buff *skb)
 	if (unlikely(payload_type == FASTPASS_PTYPE_RESET)) {
 		fpproto_handle_reset(fp, sch, rst_tstamp);
 		data += 8;
+		if (data == data_end)
+			/* only RESET in this packet, we're done with it */
+			goto cleanup;
 	}
 
 	/* update inwnd */

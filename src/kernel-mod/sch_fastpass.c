@@ -1509,6 +1509,15 @@ static int fp_tc_dump_stats(struct Qdisc *sch, struct gnet_dump *d)
 		struct sock *sk = q->ctrl_sock->sk;
 		struct fastpass_sock *fp = fastpass_sk(sk);
 		memcpy(&st.socket_stats[0], &fp->stat, sizeof(fp->stat));
+
+		st.last_reset_time		= fp->last_reset_time;
+		st.out_max_seqno		= fp->next_seqno - 1;
+		st.in_max_seqno			= fp->in_max_seqno;
+		st.in_sync				= fp->in_sync;
+		st.consecutive_bad_pkts	= (__u16)fp->consecutive_bad_pkts;
+		st.tx_num_unacked		= (__u16)fp->tx_num_unacked;
+		st.earliest_unacked		= fp->earliest_unacked;
+		st.inwnd				= fp->inwnd;
 	}
 	return gnet_stats_copy_app(d, &st, sizeof(st));
 }

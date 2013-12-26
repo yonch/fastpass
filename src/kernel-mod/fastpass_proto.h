@@ -213,13 +213,9 @@ enum {
  */
 struct fastpass_hdr {
 	__be16	seq;
+	__be16	ack_seq;
+	__be16	ack_vec;
 	__sum16	checksum;
-	union {
-		struct {
-			__be32		hi;
-			__be32		lo;
-		} rstreq;
-	};
 };
 
 struct fastpass_areq {

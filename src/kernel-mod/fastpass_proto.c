@@ -503,11 +503,11 @@ int fpproto_rcv(struct sk_buff *skb)
 
 	fp->stat.rx_pkts++;
 
-	if (skb->len < 5)
+	if (skb->len < 9)
 		goto packet_too_short;
 
 	hdr = (struct fastpass_hdr *)skb->data;
-	data = &skb->data[4];
+	data = &skb->data[8];
 	data_end = &skb->data[skb->len];
 	payload_type = *data >> 4;
 
@@ -857,7 +857,7 @@ void fpproto_send_packet(struct sock *sk, struct fpproto_pktdesc *pd)
 	struct fastpass_areq *areq;
 
 	/* calculate byte size in packet*/
-	payload_len = 4 /* header */
+	payload_len = 8 /* header */
 				+ 8 * (pd->send_reset) /* RESET */
 				+ 2 + 4 * pd->n_areq /* A-REQ */;
 	max_header = sk->sk_prot->max_header;
@@ -878,6 +878,8 @@ void fpproto_send_packet(struct sock *sk, struct fpproto_pktdesc *pd)
 	skb_reset_transport_header(skb);
 	*(__be16 *)data = htons((u16)(pd->seqno));
 	data += 2;
+	/* TODO: ack_seq and ack_vec */
+	data += 4;
 	*(__be16 *)data = 0; /* checksum */
 	data += 2;
 

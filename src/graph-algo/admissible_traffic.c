@@ -27,8 +27,8 @@ void request_timeslots(struct bin *new_requests, struct admissible_status *statu
     int64_t new_demand = prev_wnd + ((demand_tslots - prev_wnd) & 0xFFFF);
 
     if (new_demand > prev) {
-        // Just add this request at the end of the backlog queue with an invalid time
-        // Obtain the last_sent_timeslot and sort later
+        // Just add this request at the end of the bin
+        // Obtain the last_sent_timeslot and sort into bins later
         if (status->flows[index].demand == status->flows[index].allocation)
             enqueue_bin(new_requests, src, dst);
 
@@ -62,7 +62,7 @@ void prepare_new_requests(struct bin *new_requests,
         enqueue_bin(&queue_in->bins[bin_index], current->src, current->dst);
         dequeue_bin(new_requests);
         // Note: this does not preserve fair ordering between flows that arrive in
-        // the same timeslot and are older than all currently backlogged flows
+        // the same timeslot and are older than the last bin
     }
 }
 
@@ -136,13 +136,11 @@ void get_admissible_traffic(struct backlog_queue *queue_in,
     uint16_t bin;
     for (bin = 0; bin < NUM_BINS; bin++) {
         struct bin *current_bin = &queue_in->bins[bin];
+        struct bin *bin_out = &queue_out->bins[MAX(0, bin - BATCH_SIZE)];
 
-        while (!is_empty_bin(current_bin)) {
-            struct bin *bin_out = &queue_out->bins[MAX(0, bin - BATCH_SIZE)];
-            
+        while (!is_empty_bin(current_bin))
             try_allocation(current_bin, &batch_state, bin_out, traffic_out,
                            admitted_backlog, status);
-        }
     }
 
     // TODO: combine these two loops?
@@ -151,13 +149,11 @@ void get_admissible_traffic(struct backlog_queue *queue_in,
     uint8_t batch;
     for (batch = 1; batch < BATCH_SIZE; batch++) {
         struct bin *current_bin = &admitted_backlog[batch - 1];
-   
-        while (!is_empty_bin(current_bin)) {
-            struct bin *bin_out = &queue_out->bins[NUM_BINS - BATCH_SIZE + batch];
+        struct bin *bin_out = &queue_out->bins[NUM_BINS - BATCH_SIZE + batch];
 
+        while (!is_empty_bin(current_bin))
             try_allocation(current_bin, &batch_state, bin_out, traffic_out,
                            admitted_backlog, status);
-        }
     }
 
     // Add backlogs for last admitted traffic to end of queue

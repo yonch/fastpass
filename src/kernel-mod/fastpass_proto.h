@@ -168,7 +168,7 @@ struct fastpass_sock {
 	u64						earliest_unacked;
 
 	/* inwnd */
-	struct fp_window		inwnd;
+	u64						inwnd;
 
 	/* statistics */
 	u64 stat_tasklet_runs;  /* TODO: change description */
@@ -198,7 +198,8 @@ struct fastpass_sock {
 	u64 stat_reset_seqno_too_advanced;
 	u64 stat_inwnd_jumped;
 	u64 stat_seqno_before_inwnd;
-	u64 stat_ctrl_packet_unmarked_inwnd;
+	u64 stat_rx_dup_pkt;
+	u64 stat_rx_out_of_order;
 };
 
 extern int __init fpproto_register(void);

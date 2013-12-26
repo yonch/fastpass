@@ -12,6 +12,7 @@
 #include <linux/interrupt.h>
 #include <linux/hrtimer.h>
 
+#include "fp_statistics.h"
 #include "window.h"
 
 #define IPPROTO_FASTPASS 222
@@ -174,35 +175,7 @@ struct fastpass_sock {
 	u64						inwnd;
 
 	/* statistics */
-	u64 stat_tasklet_runs;  /* TODO: change description */
-	u64 stat_build_header_errors; /* TODO:deprecate */
-	u64 stat_xmit_errors;
-	u64 stat_invalid_rx_pkts;
-	u64 stat_redundant_reset;
-	u64 stat_reset_out_of_window; /* TODO: report */
-	u64 stat_outdated_reset; /* TODO: report */
-	u64 stat_skb_alloc_error; /* TODO: report */
-	u64 stat_rx_unknown_payload; /* TODO: report */
-	u64 stat_rx_incomplete_reset; /* TODO: report */
-	u64 stat_rx_incomplete_alloc; /* TODO: report */
-	u64 stat_rx_too_short; /* TODO: report */
-	u64 stat_rx_pkts; /* TODO: report */
-	u64 stat_fall_off_outwnd; /*TODO:report*/
-	u64 stat_rx_incomplete_ack; /*TODO:report*/
-	u64 stat_too_early_ack; /*TODO:report*/
-	u64 stat_acked_packets; /* TODO:report*/
-	u64 stat_timeout_pkts; /*TODO:report*/
-	u64 stat_ack_payloads; /*TODO:report*/
-	u64 stat_informative_ack_payloads; /*TODO:report*/
-	u64 stat_reprogrammed_timer;
-	u64 stat_checksum_error;
-	u64 stat_no_reset_because_recent;
-	u64 stat_reset_from_bad_pkts;
-	u64 stat_reset_seqno_too_advanced;
-	u64 stat_inwnd_jumped;
-	u64 stat_seqno_before_inwnd;
-	u64 stat_rx_dup_pkt;
-	u64 stat_rx_out_of_order;
+	struct fp_socket_stat	stat;
 };
 
 extern int __init fpproto_register(void);

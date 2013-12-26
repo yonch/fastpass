@@ -105,7 +105,7 @@ void do_ack_seqno(struct fastpass_sock *fp, u64 seqno)
 	BUG_ON(time_before64(seqno, fp->next_seqno - FASTPASS_OUTWND_LEN));
 
 	fastpass_pr_debug("ACK seqno 0x%08llX\n", seqno);
-	fp->stat_acked_packets++;
+	fp->stat.acked_packets++;
 	BUG_ON(!outwnd_is_unacked(fp, seqno));
 	pd = outwnd_pop(fp, seqno);
 
@@ -147,7 +147,7 @@ void cancel_and_reset_retrans_timer(struct fastpass_sock *fp)
 	/* set timer and earliest_unacked */
 	fp->earliest_unacked = seqno;
 	hrtimer_start(&fp->retrans_timer, ns_to_ktime(timeout), HRTIMER_MODE_ABS);
-	fp->stat_reprogrammed_timer++;
+	fp->stat.reprogrammed_timer++;
 	fastpass_pr_debug("setting timer to %llu for seq#=0x%llX\n", timeout, seqno);
 }
 
@@ -175,7 +175,7 @@ static void retrans_tasklet(unsigned long int param)
 	if (unlikely(sch == NULL))
 		goto qdisc_destroyed;
 
-	fp->stat_tasklet_runs++;
+	fp->stat.tasklet_runs++;
 
 	/* notify qdisc of expired timeouts */
 	seqno = fp->earliest_unacked;
@@ -188,7 +188,7 @@ static void retrans_tasklet(unsigned long int param)
 		if (unlikely(time_after64(timeout, now)))
 			goto set_next_timer;
 
-		fp->stat_timeout_pkts++;
+		fp->stat.timeout_pkts++;
 		do_neg_ack_seqno(fp, seqno);
 	}
 	fastpass_pr_debug("outwnd empty, not setting timer\n");
@@ -254,7 +254,7 @@ static void fpproto_handle_reset(struct fastpass_sock *fp,
 			fp->in_sync = 1;
 			fastpass_pr_debug("Now in sync\n");
 		} else {
-			fp->stat_redundant_reset++;
+			fp->stat.redundant_reset++;
 			fastpass_pr_debug("received redundant reset\n");
 		}
 		return;
@@ -264,7 +264,7 @@ static void fpproto_handle_reset(struct fastpass_sock *fp,
 	if (unlikely(!tstamp_in_window(full_tstamp, now, fp->rst_win_ns))) {
 		fastpass_pr_debug("Reset was out of reset window (diff=%lld)\n",
 				(s64)full_tstamp - (s64)now);
-		fp->stat_reset_out_of_window++;
+		fp->stat.reset_out_of_window++;
 		return;
 	}
 
@@ -273,7 +273,7 @@ static void fpproto_handle_reset(struct fastpass_sock *fp,
 			&& time_before64(full_tstamp, fp->last_reset_time))) {
 		fastpass_pr_debug("Already processed reset within window which is %lluns more recent\n",
 						fp->last_reset_time - full_tstamp);
-		fp->stat_outdated_reset++;
+		fp->stat.outdated_reset++;
 		return;
 	}
 
@@ -295,7 +295,7 @@ void fpproto_handle_ack(struct fastpass_sock *fp,
 	u64 end_seqno;
 	int n_acked = 0;
 
-	fp->stat_ack_payloads++;
+	fp->stat.ack_payloads++;
 
 	/* find full seqno, strictly before fp->next_seqno */
 	cur_seqno = fp->next_seqno - (1 << 16);
@@ -342,14 +342,14 @@ do_next_unacked:
 done:
 	if (n_acked > 0) {
 		cancel_and_reset_retrans_timer(fp);
-		fp->stat_informative_ack_payloads++;
+		fp->stat.informative_ack_payloads++;
 	}
 	return;
 
 ack_too_early:
 	fastpass_pr_debug("too_early_ack: earliest %llu, got %llu\n",
 			fp->next_seqno - FASTPASS_OUTWND_LEN, cur_seqno);
-	fp->stat_too_early_ack++;
+	fp->stat.too_early_ack++;
 }
 
 /**
@@ -398,12 +398,12 @@ void got_bad_packet(struct fastpass_sock *fp, struct Qdisc *sch)
 			fp->last_reset_time,
 			now + FASTPASS_RESET_WINDOW_NS)) {
 		/* will not trigger a new one */
-		fp->stat_no_reset_because_recent++;
+		fp->stat.no_reset_because_recent++;
 		fastpass_pr_debug("had a recent reset (last %llu, now %llu). not issuing a new one.\n",
 				fp->last_reset_time, now);
 	} else {
 		/* Will send a RSTREQ */
-		fp->stat_reset_from_bad_pkts++;
+		fp->stat.reset_from_bad_pkts++;
 		do_proto_reset(fp, now, false);
 		if (fp->ops->handle_reset)
 			fp->ops->handle_reset(sch);
@@ -426,7 +426,7 @@ int update_inwnd(struct fastpass_sock *fp, struct Qdisc *sch, u64 seqno)
 
 	/* seqno >= head + 64 ? */
 	if (unlikely(time_after_eq64(seqno, head + 64))) {
-		fp->stat_inwnd_jumped++;
+		fp->stat.inwnd_jumped++;
 		fp->in_max_seqno = seqno;
 		fp->inwnd = 1UL;
 		return 0; /* accept */
@@ -444,19 +444,19 @@ int update_inwnd(struct fastpass_sock *fp, struct Qdisc *sch, u64 seqno)
 	/* seqno before the bits kept in inwnd ? */
 	if (unlikely(time_before_eq64(seqno, head - 64))) {
 		/* we don't know whether we had already previously processed packet */
-		fp->stat_seqno_before_inwnd++;
+		fp->stat.seqno_before_inwnd++;
 		return 1; /* drop */
 	}
 
 	/* seqno in [head-63, head] */
 	if (fp->inwnd & (1UL << (head - seqno))) {
 		/* already marked as received */
-		fp->stat_rx_dup_pkt++;
+		fp->stat.rx_dup_pkt++;
 		return 1; /* drop */
 	}
 
 	fp->inwnd |= (1UL << (head - seqno));
-	fp->stat_rx_out_of_order++;
+	fp->stat.rx_out_of_order++;
 	return 0; /* accept */
 }
 
@@ -497,7 +497,7 @@ int fpproto_rcv(struct sk_buff *skb)
 		return 0;
 	}
 
-	fp->stat_rx_pkts++;
+	fp->stat.rx_pkts++;
 
 	if (skb->len < 5)
 		goto packet_too_short;
@@ -614,40 +614,40 @@ cleanup:
 	return NET_RX_SUCCESS;
 
 unknown_payload_type:
-	fp->stat_rx_unknown_payload++;
+	fp->stat.rx_unknown_payload++;
 	fastpass_pr_debug("got unknown payload type %d\n", payload_type);
 	goto cleanup;
 
 incomplete_reset_payload:
-	fp->stat_rx_incomplete_reset++;
+	fp->stat.rx_incomplete_reset++;
 	fastpass_pr_debug("RESET payload incomplete, expected 8 bytes, got %d\n",
 			(int)(data_end - data));
 	goto cleanup;
 
 incomplete_alloc_payload_one_byte:
-	fp->stat_rx_incomplete_alloc++;
+	fp->stat.rx_incomplete_alloc++;
 	fastpass_pr_debug("ALLOC payload incomplete, only got one byte\n");
 	goto cleanup;
 
 incomplete_alloc_payload:
-	fp->stat_rx_incomplete_alloc++;
+	fp->stat.rx_incomplete_alloc++;
 	fastpass_pr_debug("ALLOC payload incomplete: expected %d bytes, got %d\n",
 			2 + 2 * alloc_n_dst + alloc_n_tslots, (int)(data_end - data));
 	goto cleanup;
 
 incomplete_ack_payload:
-	fp->stat_rx_incomplete_ack++;
+	fp->stat.rx_incomplete_ack++;
 	fastpass_pr_debug("ACK payload incomplete: expected 6 bytes, got %d\n",
 			(int)(data_end - data));
 	goto cleanup;
 
 bad_checksum:
-	fp->stat_checksum_error++;
+	fp->stat.rx_checksum_error++;
 	fastpass_pr_debug("checksum error. expected 0, got 0x%04X\n", checksum);
 	goto cleanup;
 
 packet_too_short:
-	fp->stat_rx_too_short++;
+	fp->stat.rx_too_short++;
 	fastpass_pr_debug("packet less than minimal size (len=%d)\n", skb->len);
 	goto cleanup;
 }
@@ -795,7 +795,7 @@ void fpproto_prepare_to_send(struct sock *sk)
 	/* make sure outwnd is not holding a packet descriptor where @pd will be */
 	if (outwnd_is_unacked(fp, window_edge)) {
 		/* treat packet going out of outwnd as if it was dropped */
-		fp->stat_fall_off_outwnd++;
+		fp->stat.fall_off_outwnd++;
 		do_neg_ack_seqno(fp, window_edge);
 
 		/* reset timer if needed */
@@ -908,7 +908,7 @@ void fpproto_send_packet(struct sock *sk, struct fpproto_pktdesc *pd)
 	err = ip_queue_xmit(skb, &inet->cork.fl);
 	err = net_xmit_eval(err);
 	if (unlikely(err != 0)) {
-		fp->stat_xmit_errors++;
+		fp->stat.xmit_errors++;
 		fastpass_pr_debug("got error %d from ip_queue_xmit\n", err);
 	}
 
@@ -916,7 +916,7 @@ void fpproto_send_packet(struct sock *sk, struct fpproto_pktdesc *pd)
 	return;
 
 alloc_err:
-	fp->stat_skb_alloc_error++;
+	fp->stat.skb_alloc_error++;
 	fastpass_pr_debug("could not alloc skb of size %d\n",
 			payload_len + max_header);
 	/* no need to unlock */

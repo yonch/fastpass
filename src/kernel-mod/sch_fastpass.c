@@ -746,6 +746,13 @@ static void handle_reset(struct Qdisc *sch)
 	u32 base_idx = src_dst_key_hash(fp_get_time_ns()) >> (32 - q->hash_tbl_log);
 	u32 mask = (1U << q->hash_tbl_log) - 1;
 
+	q->flows = 0;
+	q->inactive_flows = 0;		/* will remain 0 when we're done */
+	q->demand_tslots = 0;
+	q->requested_tslots = 0;	/* will remain 0 when we're done */
+	q->alloc_tslots = 0;		/* will remain 0 when we're done */
+	q->acked_tslots = 0; 		/* will remain 0 when we're done */
+
 	/* for each cell in hash table: */
 	for (idx = 0; idx < (1U << q->hash_tbl_log); idx++) {
 		root = &q->flow_hash_tbl[(idx + base_idx) & mask];
@@ -775,6 +782,9 @@ static void handle_reset(struct Qdisc *sch)
 			f->alloc_tslots = 0;
 			f->acked_tslots = 0;
 			f->requested_tslots = 0;
+
+			q->flows++;
+			q->demand_tslots += f->demand_tslots;
 
 			fastpass_pr_debug("rebased flow 0x%04llX, new demand %llu timeslots\n",
 					f->src_dst_key, f->demand_tslots);

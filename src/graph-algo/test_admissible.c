@@ -13,6 +13,9 @@
 #include "admissible_structures.h"
 #include "../linux-test/common.h"  // For timing
 
+#define NUM_FRACTIONS 10
+#define NUM_SIZES 7
+
 // Info about incoming requests
 struct request_info {
     uint16_t src;
@@ -135,12 +138,12 @@ uint32_t generate_requests_poisson(struct request_info *edges, uint32_t size,
                 dst++;  // Don't send to self
             current_edge->src = src;
             current_edge->dst = dst;
-            cumulative_demands[dst] += (uint16_t) mean;
+            cumulative_demands[dst] += generate_exponential_variate(mean) * fraction + 0.5;
             current_edge->backlog = cumulative_demands[dst];
             current_edge->timeslot = (uint16_t) current_time;
             num_generated++;
             current_edge++;
-            current_time += generate_exponential_variate(mean / fraction);
+            current_time += generate_exponential_variate(mean);
         }
         free(cumulative_demands);
     }
@@ -154,16 +157,16 @@ uint32_t generate_requests_poisson(struct request_info *edges, uint32_t size,
 }
 
 // Runs one experiment. Returns the number of packets admitted.
-uint32_t run_experiment(struct request_info *requests, uint32_t duration, uint32_t num_requests,
-                        struct bin *new_requests, struct admissible_status *status,
+uint32_t run_experiment(struct request_info *requests, uint32_t start_time, uint32_t end_time,
+                        uint32_t num_requests, struct bin *new_requests, struct admissible_status *status,
                         struct backlog_queue *queue_0, struct backlog_queue *queue_1,
-                        struct admitted_traffic *admitted) {
+                        struct admitted_traffic *admitted, struct request_info **next_request) {
     assert(requests != NULL);
 
     uint32_t b;
     uint32_t num_admitted = 0;
     struct request_info *current_request = requests;
-    for (b = 0; b < (duration >> BATCH_SHIFT); b++) {
+    for (b = (start_time >> BATCH_SHIFT); b < (end_time >> BATCH_SHIFT); b++) {
         // Issue all new requests for this batch
         init_bin(new_requests);
         while ((current_request->timeslot >> BATCH_SHIFT) == (b % (65536 >> BATCH_SHIFT)) &&
@@ -189,17 +192,23 @@ uint32_t run_experiment(struct request_info *requests, uint32_t duration, uint32
         for (i = 0; i < BATCH_SIZE; i++)
             num_admitted += admitted[i].size;
     }
+
+    *next_request = current_request;
+
     return num_admitted;
 }
 
-// For now, a simple experiment in which we randomly issue 1 new request per timeslot
+// Simple experiment with Poisson arrivals and exponentially distributed request sizes
 int main(void) {
-    uint16_t experiments = 10;
     // keep duration less than 65536 or else Poisson wont work correctly due to sorting
     uint32_t duration = 60000;
-    uint32_t num_nodes = 256;
-    double fraction = 0.95;
-    double mean = 10;
+    uint32_t warm_up_duration = 10000;
+    double mean = 10; // Mean request size and inter-arrival time
+
+    // Each experiment tries out a different combination of target network utilization
+    // and number of nodes
+    double fractions [NUM_FRACTIONS] = {0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9, 0.95};
+    uint32_t sizes [NUM_SIZES] = {256, 128, 64, 32, 16, 8, 4};
 
     // Data structures
     struct bin *new_requests = create_bin();
@@ -208,39 +217,59 @@ int main(void) {
     struct backlog_queue *queue_1 = create_backlog_queue();
     struct admitted_traffic *admitted = create_admitted_traffic();
 
-    printf("running with %d nodes, requesting %f percent of capacity\n", num_nodes, fraction);
+    printf("target_utilization, ");
+    uint16_t i, j;
+    for (j = 0; j < NUM_SIZES; j++) {
+        printf("%d nodes, ", sizes[j]);
+    }
+    printf("\n");
 
-    uint16_t i;
-    for (i = 0; i < experiments; i++) {
-        // Initialize data structures
-        init_admissible_status(status, false, 0);
-        init_backlog_queue(queue_0);
-        init_backlog_queue(queue_1);
+    for (i = 0; i < NUM_FRACTIONS; i++) {
 
-        // Allocate enough space for new requests
-        // (this is sufficient for <= 1 request per node per timeslot)
-        uint32_t max_requests = duration * num_nodes;
-        struct request_info *requests = malloc(max_requests * sizeof(struct request_info));
+        double fraction = fractions[i];
+        printf("%f, ", fraction);
 
-        // Generate new requests
-        uint32_t num_requests = generate_requests_poisson(requests, max_requests, num_nodes,
-                                                          duration, fraction, mean);
+        for (j = 0; j < NUM_SIZES; j++) {
+            // Initialize data structures
+            init_admissible_status(status, false, 0);
+            init_backlog_queue(queue_0);
+            init_backlog_queue(queue_1);
 
-        // Start timining
-        uint64_t start_time = current_time();
+            uint32_t num_nodes = sizes[j];
 
-        // Run the experiment
-        uint32_t num_admitted = run_experiment(requests, duration, num_requests, new_requests,
-                                               status, queue_0, queue_1, admitted);
-        
-        uint64_t end_time = current_time();
-        double time_per_experiment = (end_time - start_time) / (2.8 * 1000 * duration);
+            // Allocate enough space for new requests
+            // (this is sufficient for <= 1 request per node per timeslot)
+            uint32_t max_requests = duration * num_nodes;
+            struct request_info *requests = malloc(max_requests * sizeof(struct request_info));
 
-        // Print stats - percent of requested traffic admitted, percent of network
-        // capacity utilized, computation time per admitted timeslot (in microseconds)
-        printf("percent of network capacity utilized: %f, ",
-               ((double) num_admitted) / (duration * num_nodes));
-        printf("avg time (microseconds): %f\n", time_per_experiment);
+            // Generate new requests
+            uint32_t num_requests = generate_requests_poisson(requests, max_requests, num_nodes,
+                                                              duration, fraction, mean);
+
+            // Issue/process some requests. This is a warm-up period so that there are pending
+            // requests once we start timing
+            struct request_info *next_request;
+            run_experiment(requests, 0, warm_up_duration, num_requests, new_requests,
+                           status, queue_0, queue_1, admitted, &next_request);
+   
+            // Start timining
+            uint64_t start_time = current_time();
+
+            // Run the experiment
+            uint32_t num_admitted = run_experiment(next_request, warm_up_duration, duration,
+                                                   num_requests - (next_request - requests),
+                                                   new_requests, status, queue_0, queue_1, admitted,
+                                                   &next_request);        
+            uint64_t end_time = current_time();
+            double time_per_experiment = (end_time - start_time) / (2.8 * 1000 * (duration - warm_up_duration));
+
+            //printf("utilization: %f\n", ((double) num_admitted) / ((duration - warm_up_duration) * num_nodes));
+
+            // Print stats - percent of network capacity utilized and computation time
+            // per admitted timeslot (in microseconds) for different numbers of nodes
+            printf("%f, ", time_per_experiment);
+        }
+        printf("\n");
     }
 
     free(queue_0);

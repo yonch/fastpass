@@ -229,7 +229,7 @@ static void do_proto_reset(struct fastpass_sock *fp, u64 reset_time,
 	fp->last_reset_time = reset_time;
 	fp->next_seqno = base_seqno + FASTPASS_TO_CONTROLLER_SEQNO_OFFSET;
 	fp->in_max_seqno = base_seqno + FASTPASS_TO_ENDPOINT_SEQNO_OFFSET - 1;
-	fp->inwnd = ~0UL;
+	fp->inwnd = 0UL;
 	fp->consecutive_bad_pkts = 0;
 
 	/* are we in sync? */
@@ -555,6 +555,7 @@ int fpproto_rcv(struct sk_buff *skb)
 		if (fpproto_handle_reset(fp, sch, rst_tstamp) != 0)
 			/* reset was not applied, drop packet */
 			goto cleanup;
+		data += 8;
 		if (data == data_end)
 			/* only RESET in this packet, we're done with it */
 			goto cleanup;

@@ -94,6 +94,8 @@ struct fpproto_pktdesc {
 
 	u64							sent_timestamp;
 	u64							seqno;
+	u16							ack_seq;
+	u16							ack_vec;
 	bool						send_reset;
 	u64							reset_timestamp;
 };

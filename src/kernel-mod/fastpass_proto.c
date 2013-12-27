@@ -244,7 +244,10 @@ static bool tstamp_in_window(u64 tstamp, u64 win_middle, u64 win_size) {
 			&& (tstamp < win_middle + ((win_size + 1) / 2));
 }
 
-static void fpproto_handle_reset(struct fastpass_sock *fp,
+/*
+ * returns 0 if okay to continue processing, 1 to drop
+ */
+static int fpproto_handle_reset(struct fastpass_sock *fp,
 		struct Qdisc *sch, u64 full_tstamp)
 {
 	u64 now = fp_get_time_ns();
@@ -261,7 +264,7 @@ static void fpproto_handle_reset(struct fastpass_sock *fp,
 			fp->stat.redundant_reset++;
 			fastpass_pr_debug("received redundant reset\n");
 		}
-		return;
+		return 0;
 	}
 
 	/* reject resets outside the time window */
@@ -269,7 +272,7 @@ static void fpproto_handle_reset(struct fastpass_sock *fp,
 		fastpass_pr_debug("Reset was out of reset window (diff=%lld)\n",
 				(s64)full_tstamp - (s64)now);
 		fp->stat.reset_out_of_window++;
-		return;
+		return 1;
 	}
 
 	/* if we already processed a newer reset within the window */
@@ -278,13 +281,14 @@ static void fpproto_handle_reset(struct fastpass_sock *fp,
 		fastpass_pr_debug("Already processed reset within window which is %lluns more recent\n",
 						fp->last_reset_time - full_tstamp);
 		fp->stat.outdated_reset++;
-		return;
+		return 1;
 	}
 
 	/* okay, accept the reset */
 	do_proto_reset(fp, full_tstamp, true);
 	if (fp->ops->handle_reset)
 		fp->ops->handle_reset(sch);
+	return 0;
 }
 
 /**
@@ -548,8 +552,9 @@ int fpproto_rcv(struct sk_buff *skb)
 	}
 
 	if (unlikely(payload_type == FASTPASS_PTYPE_RESET)) {
-		fpproto_handle_reset(fp, sch, rst_tstamp);
-		data += 8;
+		if (fpproto_handle_reset(fp, sch, rst_tstamp) != 0)
+			/* reset was not applied, drop packet */
+			goto cleanup;
 		if (data == data_end)
 			/* only RESET in this packet, we're done with it */
 			goto cleanup;
@@ -828,6 +833,9 @@ void fpproto_commit_packet(struct sock *sk, struct fpproto_pktdesc *pd,
 	pd->seqno = fp->next_seqno;
 	pd->send_reset = !fp->in_sync;
 	pd->reset_timestamp = fp->last_reset_time;
+	pd->ack_seq = (u16)fp->in_max_seqno;
+	pd->ack_vec = ((fp->inwnd >> 1) & 0x7FFF);
+	pd->ack_vec |= ((fp->inwnd & (~0UL << 16)) == (~0UL << 16)) << 15;
 
 	/* add packet to outwnd, will advance fp->next_seqno */
 	outwnd_add(fp, pd);
@@ -878,8 +886,10 @@ void fpproto_send_packet(struct sock *sk, struct fpproto_pktdesc *pd)
 	skb_reset_transport_header(skb);
 	*(__be16 *)data = htons((u16)(pd->seqno));
 	data += 2;
-	/* TODO: ack_seq and ack_vec */
-	data += 4;
+	*(__be16 *)data = htons((u16)(pd->ack_seq));
+	data += 2;
+	*(__be16 *)data = htons((u16)(pd->ack_vec));
+	data += 2;
 	*(__be16 *)data = 0; /* checksum */
 	data += 2;
 

@@ -124,7 +124,7 @@ void get_admissible_traffic(struct backlog_queue *queue_in,
 
     struct batch_state batch_state;
     init_batch_state(&batch_state, status->oversubscribed,
-                     status->inter_rack_capacity);
+                     status->inter_rack_capacity, status->num_nodes);
 
     // TODO: could use smaller bins here
     struct bin *admitted_backlog = status->admitted_bins;

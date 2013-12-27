@@ -14,7 +14,8 @@
 #include "../linux-test/common.h"  // For timing
 
 #define NUM_FRACTIONS 10
-#define NUM_SIZES 7
+#define NUM_SIZES 9
+#define PROCESSOR_SPEED 2.8
 
 // Info about incoming requests
 struct request_info {
@@ -208,11 +209,11 @@ int main(void) {
     // Each experiment tries out a different combination of target network utilization
     // and number of nodes
     double fractions [NUM_FRACTIONS] = {0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9, 0.95};
-    uint32_t sizes [NUM_SIZES] = {256, 128, 64, 32, 16, 8, 4};
+    uint32_t sizes [NUM_SIZES] = {1024, 512, 256, 128, 64, 32, 16, 8, 4};
 
     // Data structures
     struct bin *new_requests = create_bin();
-    struct admissible_status *status = create_admissible_status(false, 0);
+    struct admissible_status *status = create_admissible_status(false, 0, 0);
     struct backlog_queue *queue_0 = create_backlog_queue();
     struct backlog_queue *queue_1 = create_backlog_queue();
     struct admitted_traffic *admitted = create_admitted_traffic();
@@ -230,12 +231,12 @@ int main(void) {
         printf("%f, ", fraction);
 
         for (j = 0; j < NUM_SIZES; j++) {
+            uint32_t num_nodes = sizes[j];
+
             // Initialize data structures
-            init_admissible_status(status, false, 0);
+            init_admissible_status(status, false, 0, num_nodes);
             init_backlog_queue(queue_0);
             init_backlog_queue(queue_1);
-
-            uint32_t num_nodes = sizes[j];
 
             // Allocate enough space for new requests
             // (this is sufficient for <= 1 request per node per timeslot)
@@ -261,7 +262,7 @@ int main(void) {
                                                    new_requests, status, queue_0, queue_1, admitted,
                                                    &next_request);        
             uint64_t end_time = current_time();
-            double time_per_experiment = (end_time - start_time) / (2.8 * 1000 * (duration - warm_up_duration));
+            double time_per_experiment = (end_time - start_time) / (PROCESSOR_SPEED * 1000 * (duration - warm_up_duration));
 
             //printf("utilization: %f\n", ((double) num_admitted) / ((duration - warm_up_duration) * num_nodes));
 

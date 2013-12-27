@@ -24,7 +24,7 @@ class Test(unittest.TestCase):
         queue_1 = structures.create_backlog_queue()
         new_requests = structures.create_bin()
         admitted = structures.create_admitted_traffic()
-        status = structures.create_admissible_status(False, 0)
+        status = structures.create_admissible_status(False, 0, 2)
 
         # Make a request
         admissible.request_timeslots(new_requests, status, 0, 1, 5)
@@ -59,7 +59,7 @@ class Test(unittest.TestCase):
         queue_1 = structures.create_backlog_queue()
         new_requests = structures.create_bin()
         admitted = structures.create_admitted_traffic()
-        status = structures.create_admissible_status(False, 0)
+        status = structures.create_admissible_status(False, 0, 8)
         empty_queue = structures.create_backlog_queue()
 
         # Make a few competing requests
@@ -98,7 +98,7 @@ class Test(unittest.TestCase):
         new_requests = structures.create_bin()
         admitted_batch_0 = structures.create_admitted_traffic()
         admitted_batch_1 = structures.create_admitted_traffic()
-        status = structures.create_admissible_status(False, 0)
+        status = structures.create_admissible_status(False, 0, 8)
         empty_queue = structures.create_backlog_queue()
 
         # Make two competing requests
@@ -172,7 +172,7 @@ class Test(unittest.TestCase):
         queue_1 = structures.create_backlog_queue()
         new_requests = structures.create_bin()
         admitted = structures.create_admitted_traffic()
-        status = structures.create_admissible_status(True, rack_capacity)
+        status = structures.create_admissible_status(True, rack_capacity, n_nodes)
 
         num_admitted = 0
         num_requested = 0
@@ -255,7 +255,7 @@ class Test(unittest.TestCase):
         queue_out = structures.create_backlog_queue()
         new_requests = structures.create_bin()
         admitted = structures.create_admitted_traffic()
-        status = structures.create_admissible_status(True, 2)
+        status = structures.create_admissible_status(True, 2, 128)
         empty_queue = structures.create_backlog_queue()
 
         # Make requests that could overfill the links above the ToRs
@@ -299,7 +299,7 @@ class Test(unittest.TestCase):
         queue_1 = structures.create_backlog_queue()
         new_requests = structures.create_bin()
         admitted = structures.create_admitted_traffic()
-        status = structures.create_admissible_status(False, 0)
+        status = structures.create_admissible_status(False, 0, 32)
         empty_queue = structures.create_backlog_queue()
 
         # Make requests

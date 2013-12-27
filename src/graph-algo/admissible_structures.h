@@ -14,8 +14,8 @@
 #include <stdio.h>
 #include <stdlib.h>
 
-#define MAX_NODES 256  // should be a multiple of 64, due to bitmaps
-#define NODES_SHIFT 8  // 2^NODES_SHIFT = MAX_NODES
+#define MAX_NODES 1024  // should be a multiple of 64, due to bitmaps
+#define NODES_SHIFT 10  // 2^NODES_SHIFT = MAX_NODES
 #define MAX_RACKS 16
 #define TOR_SHIFT 5  // number of machines per rack is at most 2^TOR_SHIFT
 #define BATCH_SIZE 64  // must be consistent with bitmaps in batch_state
@@ -23,7 +23,7 @@
 #define NONE_AVAILABLE 251
 #define MAX_TIME 66535
 #define BIN_SIZE MAX_NODES * MAX_NODES // TODO: try smaller values
-#define NUM_BINS MAX_NODES
+#define NUM_BINS 256
 
 struct admitted_edge {
     uint16_t src;
@@ -79,6 +79,7 @@ struct admissible_status {
     uint64_t current_timeslot;
     bool oversubscribed;
     uint16_t inter_rack_capacity;  // Only valid if oversubscribed is true
+    uint16_t num_nodes;
     uint64_t timeslots[MAX_NODES * MAX_NODES];
     struct flow_status flows[MAX_NODES * MAX_NODES];
     struct bin *admitted_bins;  // pool of backlog bins
@@ -241,27 +242,36 @@ uint16_t get_rack_from_id(uint16_t id) {
 // Initialize an admitted bitmap
 static inline
 void init_batch_state(struct batch_state *state, bool oversubscribed,
-                      uint16_t inter_rack_capacity) {
+                      uint16_t inter_rack_capacity, uint16_t num_nodes) {
     assert(state != NULL);
+    assert(num_nodes <= MAX_NODES);
 
     state->oversubscribed = oversubscribed;
     state->inter_rack_capacity = inter_rack_capacity;
 
     int i;
-    for (i = 0; i < MAX_NODES; i++) {
-        state->src_endnodes[i] = 0xFFFFFFFFFFFFFFFFULL;
-        state->dst_endnodes[i] = 0xFFFFFFFFFFFFFFFFULL;
-        state->src_rack_bitmaps[i] = 0xFFFFFFFFFFFFFFFFULL;
-        state->dst_rack_bitmaps[i] = 0xFFFFFFFFFFFFFFFFULL;
-    }
+    if (oversubscribed) {
+        for (i = 0; i < num_nodes; i++) {
+            state->src_endnodes[i] = 0xFFFFFFFFFFFFFFFFULL;
+            state->dst_endnodes[i] = 0xFFFFFFFFFFFFFFFFULL;
+            state->src_rack_bitmaps[i] = 0xFFFFFFFFFFFFFFFFULL;
+            state->dst_rack_bitmaps[i] = 0xFFFFFFFFFFFFFFFFULL;
+        }
 
-   for (i = 0; i < MAX_RACKS * BATCH_SIZE; i++) {
-        state->src_rack_counts[i] = 0;
-        state->dst_rack_counts[i] = 0;
+        for (i = 0; i < MAX_RACKS * BATCH_SIZE; i++) {
+            state->src_rack_counts[i] = 0;
+            state->dst_rack_counts[i] = 0;
+        }
+    }
+    else {
+        for (i = 0; i < num_nodes; i++) {
+            state->src_endnodes[i] = 0xFFFFFFFFFFFFFFFFULL;
+            state->dst_endnodes[i] = 0xFFFFFFFFFFFFFFFFULL;
+        }
     }
 }
 
-// Returns the first available timeslot for src and dst, or NON_AVAILABLE
+// Returns the first available timeslot for src and dst, or NONE_AVAILABLE
 static inline
 uint8_t get_first_timeslot(struct batch_state *state, uint16_t src, uint16_t dst) {
     assert(state != NULL);
@@ -269,12 +279,13 @@ uint8_t get_first_timeslot(struct batch_state *state, uint16_t src, uint16_t dst
     assert(dst < MAX_NODES);
 
     uint64_t endnode_bitmap = state->src_endnodes[src] & state->dst_endnodes[dst];
-    uint64_t rack_bitmap = state->src_rack_bitmaps[get_rack_from_id(src)] &
-        state->dst_rack_bitmaps[get_rack_from_id(dst)];
-    
+      
     uint64_t bitmap = endnode_bitmap;
-    if (state->oversubscribed)
+    if (state->oversubscribed) {
+        uint64_t rack_bitmap = state->src_rack_bitmaps[get_rack_from_id(src)] &
+            state->dst_rack_bitmaps[get_rack_from_id(dst)];
         bitmap = endnode_bitmap & rack_bitmap;
+    }
  
     if (bitmap == 0ULL)
         return NONE_AVAILABLE;
@@ -315,12 +326,13 @@ void set_timeslot_occupied(struct batch_state *state, uint16_t src,
 // Initialize all timeslots and demands to zero
 static inline
 void init_admissible_status(struct admissible_status *status, bool oversubscribed,
-                            uint16_t inter_rack_capacity) {
+                            uint16_t inter_rack_capacity, uint16_t num_nodes) {
     assert(status != NULL);
 
     status->current_timeslot = NUM_BINS;  // simplifies logic in request_timeslots
     status->oversubscribed = oversubscribed;
     status->inter_rack_capacity = inter_rack_capacity;
+    status->num_nodes = num_nodes;
 
     uint32_t i;
     for (i = 0; i < MAX_NODES * MAX_NODES; i++)
@@ -422,11 +434,12 @@ void destroy_backlog_queue(struct backlog_queue *queue) {
 
 static inline
 struct admissible_status *create_admissible_status(bool oversubscribed,
-                                                   uint16_t inter_rack_capacity) {
+                                                   uint16_t inter_rack_capacity,
+                                                   uint16_t num_nodes) {
     struct admissible_status *status = malloc(sizeof(struct admissible_status));
     assert(status != NULL);
 
-    init_admissible_status(status, oversubscribed, inter_rack_capacity);
+    init_admissible_status(status, oversubscribed, inter_rack_capacity, num_nodes);
     status->admitted_bins = malloc(sizeof(struct bin) * BATCH_SIZE);
     assert(status->admitted_bins != NULL);
 

@@ -13,8 +13,8 @@
 #include "admissible_structures.h"
 #include "../linux-test/common.h"  // For timing
 
-#define NUM_FRACTIONS 10
-#define NUM_SIZES 9
+#define NUM_FRACTIONS 11
+#define NUM_SIZES 7
 #define PROCESSOR_SPEED 2.8
 
 // Info about incoming requests
@@ -208,8 +208,8 @@ int main(void) {
 
     // Each experiment tries out a different combination of target network utilization
     // and number of nodes
-    double fractions [NUM_FRACTIONS] = {0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9, 0.95};
-    uint32_t sizes [NUM_SIZES] = {1024, 512, 256, 128, 64, 32, 16, 8, 4};
+    double fractions [NUM_FRACTIONS] = {0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9, 0.95, 0.99};
+    uint32_t sizes [NUM_SIZES] = {1024, 512, 256, 128, 64, 32, 16};
 
     // Data structures
     struct bin *new_requests = create_bin();
@@ -218,17 +218,12 @@ int main(void) {
     struct backlog_queue *queue_1 = create_backlog_queue();
     struct admitted_traffic *admitted = create_admitted_traffic();
 
-    printf("target_utilization, ");
-    uint16_t i, j;
-    for (j = 0; j < NUM_SIZES; j++) {
-        printf("%d nodes, ", sizes[j]);
-    }
-    printf("\n");
+    printf("target_utilization, nodes, time\n");
 
+    uint16_t i, j;
     for (i = 0; i < NUM_FRACTIONS; i++) {
 
         double fraction = fractions[i];
-        printf("%f, ", fraction);
 
         for (j = 0; j < NUM_SIZES; j++) {
             uint32_t num_nodes = sizes[j];
@@ -268,9 +263,8 @@ int main(void) {
 
             // Print stats - percent of network capacity utilized and computation time
             // per admitted timeslot (in microseconds) for different numbers of nodes
-            printf("%f, ", time_per_experiment);
+            printf("%f, %d, %f\n", fraction, num_nodes, time_per_experiment);
         }
-        printf("\n");
     }
 
     free(queue_0);

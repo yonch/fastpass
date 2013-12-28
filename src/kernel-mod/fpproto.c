@@ -414,6 +414,7 @@ void fpproto_handle_rx_packet(struct fpproto_conn *conn, u8 *pkt, u32 len,
 		if (reset_payload_handler(conn, rst_tstamp) != 0)
 			/* reset was not applied, drop packet */
 			return;
+		curp += 8;
 		if (curp == data_end)
 			/* only RESET in this packet, we're done with it */
 			return;

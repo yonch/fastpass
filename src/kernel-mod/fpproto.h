@@ -6,7 +6,7 @@
 #define FPPROTO_H_
 
 #include "fp_statistics.h"
-#include "outwnd.h"
+#include "window.h"
 
 #define IPPROTO_FASTPASS 222
 
@@ -103,7 +103,8 @@ struct fpproto_conn {
 	u32						consecutive_bad_pkts;
 
 	/* outwnd */
-	struct fpproto_outwnd	outwnd;
+	struct fp_window		outwnd;
+	struct fpproto_pktdesc	*unacked_pkts[(1 << FASTPASS_WND_LOG)];
 
 	u64						earliest_unacked;
 

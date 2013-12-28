@@ -59,6 +59,18 @@ static inline u64 wnd_edge(struct fp_window *wnd)
 	return wnd->head - FASTPASS_WND_LEN + 1;
 }
 
+/* returns true if seqno is strictly before the window */
+static inline bool wnd_seq_before(struct fp_window *wnd, u64 seqno)
+{
+	return time_before64(seqno, wnd_edge(wnd));
+}
+
+/* returns true if seqno is strictly after the window */
+static inline bool wnd_seq_after(struct fp_window *wnd, u64 seqno)
+{
+	return time_after64(seqno, wnd_head(wnd));
+}
+
 /**
  * Assumes seqno is in the correct range, returns whether the bin is unacked.
  */

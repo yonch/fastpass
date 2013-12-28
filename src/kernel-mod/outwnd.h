@@ -18,7 +18,7 @@ static inline u32 outwnd_pos(u64 tslot)
 /**
  * Assumes seqno is in the correct range, returns whether the bin is unacked.
  */
-static bool outwnd_is_unacked(struct fastpass_sock *fp, u64 seqno)
+static inline bool outwnd_is_unacked(struct fpproto_conn *fp, u64 seqno)
 {
 	return !!test_bit(outwnd_pos(seqno), fp->bin_mask);
 }
@@ -26,7 +26,7 @@ static bool outwnd_is_unacked(struct fastpass_sock *fp, u64 seqno)
 /**
  * Adds the packet descriptor as the next_seq
  */
-static void outwnd_add(struct fastpass_sock *fp, struct fpproto_pktdesc *pd)
+static inline void outwnd_add(struct fpproto_conn *fp, struct fpproto_pktdesc *pd)
 {
 	u32 circular_index = outwnd_pos(fp->next_seqno);
 
@@ -47,7 +47,7 @@ static void outwnd_add(struct fastpass_sock *fp, struct fpproto_pktdesc *pd)
  *
  * Assumes the seqno is in the correct range.
  */
-static struct fpproto_pktdesc * outwnd_pop(struct fastpass_sock *fp, u64 seqno)
+static inline struct fpproto_pktdesc * outwnd_pop(struct fpproto_conn *fp, u64 seqno)
 {
 	u32 circular_index = outwnd_pos(seqno);
 	struct fpproto_pktdesc *res = fp->bins[circular_index];
@@ -66,7 +66,7 @@ static struct fpproto_pktdesc * outwnd_pop(struct fastpass_sock *fp, u64 seqno)
  *    first unacked packet *at* or *before* @seqno if such exists within the
  *    window, or -1 if it doesn't.
  */
-static s32 outwnd_at_or_before(struct fastpass_sock *fp, u64 seqno)
+static inline s32 outwnd_at_or_before(struct fpproto_conn *fp, u64 seqno)
 {
 	u32 head_index;
 	u32 seqno_index;
@@ -102,7 +102,7 @@ static s32 outwnd_at_or_before(struct fastpass_sock *fp, u64 seqno)
  *    earliest seqno is not before @hint.
  * Assumes such a packet exists, and that hint is within the outwnd.
  */
-static u64 outwnd_earliest_unacked_hint(struct fastpass_sock *fp, u64 hint)
+static inline u64 outwnd_earliest_unacked_hint(struct fpproto_conn *fp, u64 hint)
 {
 	u32 hint_pos = outwnd_pos(hint);
 	u32 found_offset;
@@ -128,14 +128,14 @@ static u64 outwnd_earliest_unacked_hint(struct fastpass_sock *fp, u64 hint)
  * Returns the sequence no of the earliest unacked packet.
  * Assumes such a packet exists!
  */
-static u64 outwnd_earliest_unacked(struct fastpass_sock *fp)
+static inline u64 outwnd_earliest_unacked(struct fpproto_conn *fp)
 {
 	return outwnd_earliest_unacked_hint(fp,
 			fp->next_seqno - FASTPASS_OUTWND_LEN);
 }
 
 #ifdef FASTPASS_PERFORM_RUNTIME_TESTS
-static void outwnd_test(struct fastpass_sock *fp) {
+static inline void outwnd_test(struct fpproto_conn *fp) {
 	u64 tslot;
 	s32 gap;
 	int i;
@@ -198,7 +198,7 @@ clear_next_unacked:
 }
 #endif
 
-static void outwnd_reset(struct fastpass_sock* fp)
+static inline void outwnd_reset(struct fpproto_conn* fp)
 {
 	u64 tslot;
 	s32 gap;
@@ -212,7 +212,7 @@ static void outwnd_reset(struct fastpass_sock* fp)
 	}
 }
 
-static bool outwnd_empty(struct fastpass_sock* fp)
+static inline bool outwnd_empty(struct fpproto_conn* fp)
 {
 	return (fp->tx_num_unacked == 0);
 }
@@ -221,7 +221,7 @@ static bool outwnd_empty(struct fastpass_sock* fp)
  * Returns the timestamp of the descriptor with @seqno
  * Assumes @seqno is within the window and unacked
  */
-static u64 outwnd_timestamp(struct fastpass_sock* fp, u64 seqno)
+static inline u64 outwnd_timestamp(struct fpproto_conn* fp, u64 seqno)
 {
 	return fp->bins[outwnd_pos(seqno)]->sent_timestamp;
 }

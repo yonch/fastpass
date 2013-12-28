@@ -32,6 +32,7 @@
 
 #include "fastpass_proto.h"
 #include "fp_statistics.h"
+#include "platform.h"
 
 /*
  * FastPass client qdisc
@@ -1518,7 +1519,7 @@ static int fp_tc_dump_stats(struct Qdisc *sch, struct gnet_dump *d)
 		st.in_max_seqno			= conn->in_max_seqno;
 		st.in_sync				= conn->in_sync;
 		st.consecutive_bad_pkts	= (__u16)conn->consecutive_bad_pkts;
-		st.tx_num_unacked		= (__u16)conn->tx_num_unacked;
+		st.tx_num_unacked		= (__u16)outwnd_num_unacked(&conn->outwnd);
 		st.earliest_unacked		= conn->earliest_unacked;
 		st.inwnd				= conn->inwnd;
 	}

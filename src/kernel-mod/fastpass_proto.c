@@ -20,8 +20,7 @@
 #include "fastpass_proto.h"
 #include "outwnd.h"
 #include "debug.h"
-
-#undef FASTPASS_PERFORM_RUNTIME_TESTS
+#include "platform.h"
 
 struct inet_hashinfo fastpass_hashinfo;
 EXPORT_SYMBOL_GPL(fastpass_hashinfo);

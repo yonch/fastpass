@@ -17,5 +17,10 @@ int cancel_timer(struct fpproto_conn *proto);
  */
 void set_timer(struct fpproto_conn *proto, u64 when);
 
+/* returns the current real time (the time that is used to determine timeslots) */
+static inline u64 fp_get_time_ns(void)
+{
+	return ktime_to_ns(ktime_get_real());
+}
 
 #endif /* PLATFORM_H_ */

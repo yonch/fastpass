@@ -46,14 +46,6 @@ void fpproto_set_qdisc(struct sock *sk, struct Qdisc *new_qdisc);
 
 void fpproto_send_packet(struct sock *sk, struct fpproto_pktdesc *pkt);
 
-/* returns the current real time (the time that is used to determine timeslots) */
-static inline u64 fp_get_time_ns(void)
-{
-	return ktime_to_ns(ktime_get_real());
-}
-
-
-
 static inline struct fastpass_hdr *fastpass_hdr(
 		const struct sk_buff *skb)
 {

@@ -6,19 +6,12 @@
 #define FPPROTO_H_
 
 #include "fp_statistics.h"
+#include "outwnd.h"
 
 #define IPPROTO_FASTPASS 222
 
 #define FASTPASS_TO_CONTROLLER_SEQNO_OFFSET		0
 #define FASTPASS_TO_ENDPOINT_SEQNO_OFFSET		(0xDEADBEEF)
-
-/**
- * The log of the size of outgoing packet window waiting for ACKs or timeout
- *    expiry. Setting this at < 6 is a bit wasteful since a full word has 64
- *    bits, and the algorithm works with word granularity
- */
-#define FASTPASS_OUTWND_LOG			8
-#define FASTPASS_OUTWND_LEN			(1 << FASTPASS_OUTWND_LOG)
 
 #define FASTPASS_BAD_PKT_RESET_THRESHOLD	10
 #define FASTPASS_RESET_WINDOW_NS	(1000*1000*1000)
@@ -110,9 +103,7 @@ struct fpproto_conn {
 	u32						consecutive_bad_pkts;
 
 	/* outwnd */
-	unsigned long			bin_mask[BITS_TO_LONGS(2 * FASTPASS_OUTWND_LEN)];
-	struct fpproto_pktdesc	*bins[FASTPASS_OUTWND_LEN];
-	u32						tx_num_unacked;
+	struct fpproto_outwnd	outwnd;
 
 	u64						earliest_unacked;
 

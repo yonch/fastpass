@@ -8,6 +8,8 @@
 #ifndef WINDOW_H_
 #define WINDOW_H_
 
+#include <linux/types.h>
+
 /**
  * The log of the size of outgoing packet window waiting for ACKs or timeout
  *    expiry. Setting this at < 6 is a bit wasteful since a full word has 64
@@ -38,6 +40,23 @@ static inline u32 summary_pos(struct fp_window *wnd, u32 pos) {
 static inline bool wnd_empty(struct fp_window *wnd)
 {
 	return (wnd->num_marked == 0);
+}
+
+static inline u32 wnd_num_marked(struct fp_window *wnd)
+{
+	return wnd->num_marked;
+}
+
+/* return the latest edge of the window (the head) */
+static inline u64 wnd_head(struct fp_window *wnd)
+{
+	return wnd->head;
+}
+
+/* returns the early edge of the window */
+static inline u64 wnd_edge(struct fp_window *wnd)
+{
+	return wnd->head - FASTPASS_WND_LEN + 1;
 }
 
 /**
@@ -219,11 +238,6 @@ static inline void wnd_advance(struct fp_window *wnd, u64 amount)
 	}
 	wnd->head += amount;
 	wnd->head_word = (wnd->head_word + word_shift) % FASTPASS_WND_WORDS;
-}
-
-static inline u64 wnd_head(struct fp_window *wnd)
-{
-	return wnd->head;
 }
 
 /**

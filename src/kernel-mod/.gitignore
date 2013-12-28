@@ -5,3 +5,4 @@ Module.symvers
 fastpass.ko
 fastpass.mod.c
 modules.order
+tests/window_test

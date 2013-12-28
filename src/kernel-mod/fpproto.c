@@ -37,7 +37,7 @@ static bool tstamp_in_window(u64 tstamp, u64 win_middle, u64 win_size) {
 /**
  * Receives a packet destined for the protocol. (part of inet socket API)
  */
-__sum16 fpproto_checksum(u8 *pkt, u32 len, __be32 saddr, __be32 daddr,
+__sum16 fastpass_checksum(u8 *pkt, u32 len, __be32 saddr, __be32 daddr,
 		u64 seqno)
 {
 	u32 seq_hash = jhash_1word((u32)seqno, seqno >> 32);
@@ -152,7 +152,7 @@ set_next_timer:
 /*
  * returns 0 if okay to continue processing, 1 to drop
  */
-static int fpproto_handle_reset(struct fpproto_conn *conn, u64 full_tstamp)
+static int reset_payload_handler(struct fpproto_conn *conn, u64 full_tstamp)
 {
 	u64 now = fp_get_time_ns();
 
@@ -195,7 +195,7 @@ static int fpproto_handle_reset(struct fpproto_conn *conn, u64 full_tstamp)
 	return 0;
 }
 
-void fpproto_handle_ack(struct fpproto_conn *fp, u16 ack_seq, u32 ack_runlen)
+void ack_payload_handler(struct fpproto_conn *fp, u16 ack_seq, u32 ack_runlen)
 {
 	u64 cur_seqno;
 	s32 next_unacked;
@@ -402,7 +402,7 @@ void fpproto_handle_rx_packet(struct fpproto_conn *conn, u8 *pkt, u32 len,
 			ntohs(hdr->seq), full_seqno, conn->in_max_seqno);
 
 	/* verify checksum */
-	checksum = fpproto_checksum(pkt, len, saddr, daddr, full_seqno);
+	checksum = fastpass_checksum(pkt, len, saddr, daddr, full_seqno);
 	if (unlikely(checksum != 0)) {
 		got_bad_packet(conn);
 		goto bad_checksum; /* will drop packet */
@@ -411,7 +411,7 @@ void fpproto_handle_rx_packet(struct fpproto_conn *conn, u8 *pkt, u32 len,
 	}
 
 	if (unlikely(payload_type == FASTPASS_PTYPE_RESET)) {
-		if (fpproto_handle_reset(conn, rst_tstamp) != 0)
+		if (reset_payload_handler(conn, rst_tstamp) != 0)
 			/* reset was not applied, drop packet */
 			return;
 		if (curp == data_end)
@@ -464,7 +464,7 @@ handle_payload:
 		ack_runlen = ntohl(*(u32 *)curp);
 		ack_seq = ntohs(*(u16 *)(curp + 4));
 
-		fpproto_handle_ack(conn, ack_seq, ack_runlen);
+		ack_payload_handler(conn, ack_seq, ack_runlen);
 
 		curp += 6;
 		break;
@@ -615,7 +615,7 @@ int fpproto_encode_packet(struct fpproto_conn *conn,
 	}
 
 	/* checksum */
-	*(__be16 *)(pkt + 6) = fpproto_checksum(pkt, curp - pkt, saddr, daddr,
+	*(__be16 *)(pkt + 6) = fastpass_checksum(pkt, curp - pkt, saddr, daddr,
 			pd->seqno);
 
 	return curp - pkt;

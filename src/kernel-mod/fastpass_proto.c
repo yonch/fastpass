@@ -189,6 +189,8 @@ int fpproto_rcv(struct sk_buff *skb)
 		goto cleanup;
 	}
 
+	fpproto_handle_rx_packet(&fp->conn, skb->data, skb->len, inet->inet_saddr,
+			inet->inet_daddr);
 
 cleanup:
 	fpproto_unlock_qdisc(sch);

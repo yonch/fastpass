@@ -195,57 +195,39 @@ static int reset_payload_handler(struct fpproto_conn *conn, u64 full_tstamp)
 	return 0;
 }
 
-void ack_payload_handler(struct fpproto_conn *fp, u16 ack_seq, u32 ack_runlen)
+void ack_payload_handler(struct fpproto_conn *fp, u64 ack_seq, u64 ack_vec)
 {
 	u64 cur_seqno;
-	s32 next_unacked;
-	u64 end_seqno;
+	u32 offset;
 	int n_acked = 0;
 
 	fp->stat.ack_payloads++;
 
-	/* find full seqno, strictly before fp->next_seqno */
-	cur_seqno = fp->next_seqno - (1 << 16);
-	cur_seqno += (ack_seq - cur_seqno) & 0xFFFF;
-
 	/* is the seqno within the window? */
-	if (time_before64(cur_seqno, fp->next_seqno - FASTPASS_OUTWND_LEN))
+	if (time_before64(ack_seq, fp->next_seqno - FASTPASS_OUTWND_LEN))
 		goto ack_too_early;
 
-	/* if the ack_seq is unacknowledged, process the ack on it */
-	if (outwnd_is_unacked(fp, cur_seqno)) {
-		do_ack_seqno(fp, cur_seqno);
-		n_acked++;
-	}
-	end_seqno = cur_seqno - 1;
+	fastpass_pr_debug("handling ack_seq 0x%llX ack_vec 0x%016llX\n",
+				ack_seq, ack_vec);
 
-	/* start with the positive nibble */
-	ack_runlen <<= 4;
+	while(ack_vec) {
+		offset = __ffs(ack_vec);
+		cur_seqno = ack_seq - offset;
 
-do_next_positive:
-	cur_seqno = end_seqno;
-	end_seqno -= (ack_runlen >> 28);
-	ack_runlen <<= 4;
-do_next_unacked:
-	/* find next unacked */
-	next_unacked = outwnd_at_or_before(fp, cur_seqno);
-	if (next_unacked == -1)
-		goto done;
-	cur_seqno -= next_unacked;
+		/* if out of window, we're done */
+		if (time_before64(cur_seqno, fp->next_seqno - FASTPASS_OUTWND_LEN))
+			goto done;
 
-	if (likely(time_after64(cur_seqno, end_seqno))) {
-		/* got ourselves an unacked seqno that should be acked */
-		do_ack_seqno(fp, cur_seqno);
-		n_acked++;
-		/* try to find another seqno that should be acked */
-		goto do_next_unacked;
+		/* if unacked, ack it */
+		if (outwnd_is_unacked(fp, cur_seqno)) {
+			/* got ourselves an unacked seqno that should be acked */
+			do_ack_seqno(fp, cur_seqno);
+			n_acked++;
+		}
+
+		ack_vec &= ~(1UL << offset);
 	}
-	/* finished handling this run. if more runs, handle them as well */
-	if (likely(ack_runlen != 0)) {
-		end_seqno -= (ack_runlen >> 28);
-		ack_runlen <<= 4;
-		goto do_next_positive; /* continue handling */
-	}
+
 done:
 	if (n_acked > 0) {
 		cancel_and_reset_retrans_timer(fp);
@@ -255,7 +237,7 @@ done:
 
 ack_too_early:
 	fastpass_pr_debug("too_early_ack: earliest %llu, got %llu\n",
-			fp->next_seqno - FASTPASS_OUTWND_LEN, cur_seqno);
+			fp->next_seqno - FASTPASS_OUTWND_LEN, ack_seq);
 	fp->stat.too_early_ack++;
 }
 
@@ -351,7 +333,7 @@ void fpproto_handle_rx_packet(struct fpproto_conn *conn, u8 *pkt, u32 len,
 		__be32 saddr, __be32 daddr)
 {
 	struct fastpass_hdr *hdr;
-	u64 full_seqno;
+	u64 in_seq, ack_seq;
 	u16 payload_type;
 	u64 rst_tstamp = 0;
 	__sum16 checksum;
@@ -361,8 +343,7 @@ void fpproto_handle_rx_packet(struct fpproto_conn *conn, u8 *pkt, u32 len,
 	int alloc_n_dst, alloc_n_tslots;
 	u16 alloc_dst[16];
 	u32 alloc_base_tslot;
-	u16 ack_seq;
-	u32 ack_runlen;
+	u64 ack_vec;
 
 	conn->stat.rx_pkts++;
 
@@ -375,10 +356,15 @@ void fpproto_handle_rx_packet(struct fpproto_conn *conn, u8 *pkt, u32 len,
 	payload_type = *curp >> 4;
 
 	/* get full 64-bit sequence number for the pseudo-header */
+#ifdef FASTPASS_CONTROLLER
+	if (unlikely(payload_type == FASTPASS_PTYPE_RSTREQ)) {
+#else
 	if (unlikely(payload_type == FASTPASS_PTYPE_RESET)) {
+#endif
 		/* DERIVE SEQNO FROM RESET TIMESTAMP */
 		u64 now = fp_get_time_ns();
 		u64 partial_tstamp;
+		u64 base_seqno;
 
 		if (unlikely(curp + 8 > data_end))
 			goto incomplete_reset_payload;
@@ -391,18 +377,29 @@ void fpproto_handle_rx_packet(struct fpproto_conn *conn, u8 *pkt, u32 len,
 		rst_tstamp = now - (1ULL << 55);
 		rst_tstamp += (partial_tstamp - rst_tstamp) & ((1ULL << 56) - 1);
 
-		full_seqno = base_seqno_from_timestamp(rst_tstamp) +
-					FASTPASS_TO_ENDPOINT_SEQNO_OFFSET;
+		base_seqno = base_seqno_from_timestamp(rst_tstamp);
+
+#ifdef FASTPASS_CONTROLLER
+		in_seq = base_seqno + FASTPASS_TO_CONTROLLER_SEQNO_OFFSET;
+		ack_seq = base_seqno + FASTPASS_TO_ENDPOINT_SEQNO_OFFSET - 1;
+#else
+		in_seq = base_seqno + FASTPASS_TO_ENDPOINT_SEQNO_OFFSET;
+		ack_seq = base_seqno + FASTPASS_TO_CONTROLLER_SEQNO_OFFSET - 1;
+#endif
 	} else {
-		/* GET SEQNO FROM PREVIOUS SEQNO */
-		full_seqno = conn->in_max_seqno - (1 << 14);
+		/* get seqno from stored state */
+		in_seq = conn->in_max_seqno - (1 << 14);
+		ack_seq = conn->next_seqno - (1 << 16);
 	}
-	full_seqno += (ntohs(hdr->seq) - full_seqno) & 0xFFFF;
-	fastpass_pr_debug("packet with seqno 0x%04X (full 0x%llX, prev_max 0x%llX)\n",
-			ntohs(hdr->seq), full_seqno, conn->in_max_seqno);
+	in_seq += (ntohs(hdr->seq) - in_seq) & 0xFFFF;
+	ack_seq += (ntohs(hdr->ack_seq) - ack_seq) & 0xFFFF;
+	fastpass_pr_debug("packet with in_seq 0x%04X (full 0x%llX, prev_max 0x%llX)"
+			"ack_seq 0x%04X (full 0x%llX, max_sent 0x%llX)\n",
+			ntohs(hdr->seq), in_seq, conn->in_max_seqno,
+			ntohs(hdr->ack_seq), ack_seq, conn->next_seqno - 1);
 
 	/* verify checksum */
-	checksum = fastpass_checksum(pkt, len, saddr, daddr, full_seqno);
+	checksum = fastpass_checksum(pkt, len, saddr, daddr, in_seq);
 	if (unlikely(checksum != 0)) {
 		got_bad_packet(conn);
 		goto bad_checksum; /* will drop packet */
@@ -421,8 +418,15 @@ void fpproto_handle_rx_packet(struct fpproto_conn *conn, u8 *pkt, u32 len,
 	}
 
 	/* update inwnd */
-	if (update_inwnd(conn, full_seqno) != 0)
+	if (update_inwnd(conn, in_seq) != 0)
 		return; /* drop packet to keep at-most-once semantics */
+
+	/* handle acks */
+	ack_vec = ntohs(hdr->ack_vec);
+	ack_vec = (s64)((s16)ack_vec); /* sign extend */
+	ack_vec = (ack_vec << 1) | 1UL; /* ack the ack_seqno */
+	ack_payload_handler(conn, ack_seq, ack_vec);
+
 
 
 handle_payload:
@@ -462,10 +466,10 @@ handle_payload:
 		if (curp + 6 > data_end)
 			goto incomplete_ack_payload;
 
-		ack_runlen = ntohl(*(u32 *)curp);
-		ack_seq = ntohs(*(u16 *)(curp + 4));
-
-		ack_payload_handler(conn, ack_seq, ack_runlen);
+		ack_vec = ntohl(*(u32 *)curp) & ((1UL << 28) - 1);
+		ack_vec <<= 32;
+		ack_vec |= (u64)ntohs(*(u16 *)(curp + 4)) << 16;
+		ack_payload_handler(conn, ack_seq, ack_vec);
 
 		curp += 6;
 		break;

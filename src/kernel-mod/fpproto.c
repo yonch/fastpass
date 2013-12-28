@@ -38,9 +38,10 @@ static bool tstamp_in_window(u64 tstamp, u64 win_middle, u64 win_size) {
  * Receives a packet destined for the protocol. (part of inet socket API)
  */
 __sum16 fastpass_checksum(u8 *pkt, u32 len, __be32 saddr, __be32 daddr,
-		u64 seqno)
+		u64 seqno, u64 ack_seq)
 {
-	u32 seq_hash = jhash_1word((u32)seqno, seqno >> 32);
+	u32 seq_hash = jhash_3words((u32)seqno, seqno >> 32, (u32)ack_seq,
+			ack_seq >> 32);
 	__wsum csum = csum_partial(pkt, len, seq_hash);
 	return csum_tcpudp_magic(saddr, daddr, len, IPPROTO_FASTPASS, csum);
 }
@@ -399,7 +400,7 @@ void fpproto_handle_rx_packet(struct fpproto_conn *conn, u8 *pkt, u32 len,
 			ntohs(hdr->ack_seq), ack_seq, conn->next_seqno - 1);
 
 	/* verify checksum */
-	checksum = fastpass_checksum(pkt, len, saddr, daddr, in_seq);
+	checksum = fastpass_checksum(pkt, len, saddr, daddr, in_seq, ack_seq);
 	if (unlikely(checksum != 0)) {
 		got_bad_packet(conn);
 		goto bad_checksum; /* will drop packet */
@@ -561,7 +562,7 @@ void fpproto_commit_packet(struct fpproto_conn *conn, struct fpproto_pktdesc *pd
 	pd->seqno = conn->next_seqno;
 	pd->send_reset = !conn->in_sync;
 	pd->reset_timestamp = conn->last_reset_time;
-	pd->ack_seq = (u16)conn->in_max_seqno;
+	pd->ack_seq = conn->in_max_seqno;
 	pd->ack_vec = ((conn->inwnd >> 1) & 0x7FFF);
 	pd->ack_vec |= ((conn->inwnd & (~0UL << 16)) == (~0UL << 16)) << 15;
 
@@ -621,7 +622,7 @@ int fpproto_encode_packet(struct fpproto_conn *conn,
 
 	/* checksum */
 	*(__be16 *)(pkt + 6) = fastpass_checksum(pkt, curp - pkt, saddr, daddr,
-			pd->seqno);
+			pd->seqno, pd->ack_seq);
 
 	return curp - pkt;
 }

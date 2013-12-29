@@ -67,10 +67,10 @@ struct batch_state {
     uint16_t dst_rack_counts [MAX_RACKS * BATCH_SIZE];
 };
 
-// Demand/allocation info for a given src/dst pair
+// Demand/backlog info for a given src/dst pair
 struct flow_status {
     uint16_t demand;
-    uint16_t allocation;
+    uint16_t backlog;
 };
 
 // Tracks status for admissible traffic (last send time and demand for all flows, etc.)
@@ -339,7 +339,7 @@ void init_admissible_status(struct admissible_status *status, bool oversubscribe
         status->timeslots[i] = 0;
     for (i = 0; i < MAX_NODES * MAX_NODES; i++) {
         status->flows[i].demand = 0;
-        status->flows[i].allocation = 0;
+        status->flows[i].backlog = 0;
     }
 }
 
@@ -355,15 +355,15 @@ void reset_flow(struct admissible_status *status, uint16_t src, uint16_t dst) {
     assert(status != NULL);
 
     struct flow_status *flow = &status->flows[get_status_index(src, dst)];
-    if (flow->demand == flow->allocation) {
+    if (flow->backlog == 0) {
         // No pending backog, reset both to zero
         flow->demand = 0;
-        flow->allocation = 0;
+        flow->backlog = 0;
     }
     else {
         // Pending backlog - ensure only one packet will be allocated
         flow->demand = 0;
-        flow->allocation = -1;
+        flow->backlog = 1;
     }
 }
 

@@ -29,9 +29,12 @@ void request_timeslots(struct bin *new_requests, struct admissible_status *statu
     if (new_demand > prev) {
         // Just add this request at the end of the bin
         // Obtain the last_sent_timeslot and sort into bins later
-        if (status->flows[index].demand == status->flows[index].allocation)
+        if (status->flows[index].backlog == 0)
             enqueue_bin(new_requests, src, dst);
 
+        uint16_t backlog_increase = (uint16_t) new_demand -
+            status->flows[index].demand;
+        status->flows[index].backlog += backlog_increase;
         status->flows[index].demand = (uint16_t) new_demand;
         // Note: race condition involving the 3 preceding lines of code
         // Need to check backlog and set demand atomically, or else do this
@@ -95,8 +98,8 @@ void try_allocation(struct bin *current_bin, struct batch_state *batch_state,
         insert_admitted_edge(&traffic_out[batch_timeslot], src, dst);
         uint32_t index = get_status_index(src, dst);
         status->timeslots[index] = status->current_timeslot + batch_timeslot;
-        status->flows[index].allocation += 1;
-        if (status->flows[index].demand - status->flows[index].allocation > 0)
+        status->flows[index].backlog -= 1;
+        if (status->flows[index].backlog > 0)
             enqueue_bin(&admitted_backlog[batch_timeslot], src, dst);
     }
 

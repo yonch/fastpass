@@ -143,6 +143,12 @@ struct fp_sched_data {
 
 static struct kmem_cache *fp_flow_cachep __read_mostly;
 
+static inline struct fpproto_conn *fpproto_conn(struct fp_sched_data *q)
+{
+	struct fastpass_sock *fp = (struct fastpass_sock *)q->ctrl_sock->sk;
+	return &fp->conn;
+}
+
 /* translates IP address to short FastPass ID */
 u16 ip_to_id(__be32 ipaddr) {
 	return (u16)(ntohl(ipaddr) & ((1 << 8) - 1));
@@ -203,8 +209,9 @@ void set_request_timer(struct fp_sched_data* q, u64 when)
 			      HRTIMER_MODE_ABS);
 }
 
-void trigger_request(struct Qdisc *sch, u64 when)
+void trigger_request(void *param, u64 when)
 {
+	struct Qdisc *sch = (struct Qdisc *)param;
 	struct fp_sched_data *q = qdisc_priv(sch);
 	if (q->time_next_req == NO_NEXT_REQUEST)
 		set_request_timer(q, when);
@@ -715,8 +722,9 @@ void set_watchdog(struct Qdisc* sch) {
 /**
  * Performs a reset and garbage collection of flows
  */
-static void handle_reset(struct Qdisc *sch)
+static void handle_reset(void *param)
 {
+	struct Qdisc *sch = (struct Qdisc *)param;
 	struct fp_sched_data *q = qdisc_priv(sch);
 
 	struct rb_node *cur, *next;
@@ -780,9 +788,10 @@ static void handle_reset(struct Qdisc *sch)
 /**
  * Handles an ALLOC payload
  */
-static void handle_alloc(struct Qdisc *sch, u32 base_tslot, u16 *dst,
-		int n_dst, u8 *tslots, int n_tslots) 
+static void handle_alloc(void *param, u32 base_tslot, u16 *dst,
+		int n_dst, u8 *tslots, int n_tslots)
 {
+	struct Qdisc *sch = (struct Qdisc *)param;
 	struct fp_sched_data *q = qdisc_priv(sch);
 	int i;
 	u8 spec;
@@ -855,8 +864,9 @@ static void handle_alloc(struct Qdisc *sch, u32 base_tslot, u16 *dst,
 	}
 }
 
-static void handle_ack(struct Qdisc *sch, struct fpproto_pktdesc *pd)
+static void handle_ack(void *param, struct fpproto_pktdesc *pd)
 {
+	struct Qdisc *sch = (struct Qdisc *)param;
 	struct fp_sched_data *q = qdisc_priv(sch);
 	int i;
 	struct fp_flow *f;
@@ -879,8 +889,9 @@ static void handle_ack(struct Qdisc *sch, struct fpproto_pktdesc *pd)
 	fpproto_pktdesc_free(pd);
 }
 
-static void handle_neg_ack(struct Qdisc *sch, struct fpproto_pktdesc *pd)
+static void handle_neg_ack(void *param, struct fpproto_pktdesc *pd)
 {
+	struct Qdisc *sch = (struct Qdisc *)param;
 	struct fp_sched_data *q = qdisc_priv(sch);
 	int i;
 	struct fp_flow *f;
@@ -937,7 +948,7 @@ static void send_request(struct Qdisc *sch, u64 now)
 			"start: unreq_flows=%u, unreq_tslots=%llu, now=%llu, scheduled=%llu, diff=%lld, next_seq=%08llX\n",
 			q->n_unreq_flows, q->demand_tslots - q->requested_tslots, now,
 			q->time_next_req, (s64 )now - (s64 )q->time_next_req,
-			fastpass_sk(q->ctrl_sock->sk)->next_seqno);
+			fpproto_conn(q)->next_seqno);
 
 	WARN(q->req_t + q->req_cost > now,
 			"send_request called too early req_t=%llu, req_cost=%u, now=%llu (diff=%lld)\n",
@@ -957,7 +968,7 @@ static void send_request(struct Qdisc *sch, u64 now)
 	 * this might NACK a packet, but the request timer will not be set because
 	 *   already flow queue is not empty
 	 */
-	fpproto_prepare_to_send(q->ctrl_sock->sk);
+	fpproto_prepare_to_send(fpproto_conn(q));
 
 	pkt->n_areq = 0;
 	while ((pkt->n_areq < FASTPASS_PKT_MAX_AREQ) && !flowqueue_is_empty(q)) {
@@ -986,7 +997,7 @@ static void send_request(struct Qdisc *sch, u64 now)
 
 	q->stat.requests++;
 
-	fpproto_commit_packet(q->ctrl_sock->sk, pkt, now);
+	fpproto_commit_packet(fpproto_conn(q), pkt, now);
 
 out:
 	req_timer_sending_request(q, now);
@@ -1067,7 +1078,6 @@ static int reconnect_ctrl_socket(struct Qdisc *sch)
 {
 	struct fp_sched_data *q = qdisc_priv(sch);
 	struct sock *sk;
-	struct fastpass_sock *fp;
 	int rc;
 	struct sockaddr_in sock_addr = {
 			.sin_family = AF_INET,
@@ -1090,25 +1100,17 @@ static int reconnect_ctrl_socket(struct Qdisc *sch)
 	}
 
 	sk = q->ctrl_sock->sk;
-	fp = fastpass_sk(sk);
 
-	/* set socket priority */
-	sk->sk_priority = TC_PRIO_CONTROL;
-
-	/* skb allocation must be atomic (done under the qdisc lock) */
-	sk->sk_allocation = GFP_ATOMIC;
+	BUG_ON(sk->sk_priority != TC_PRIO_CONTROL);
+	BUG_ON(sk->sk_allocation != GFP_ATOMIC);
 
 	/* give socket a reference to this qdisc for watchdog */
 	fpproto_set_qdisc(sk, sch);
 
-	/* set protocol ops */
-	fp->ops = &fastpass_sch_proto_ops;
-
-	/* set reset window */
-	fp->rst_win_ns = (u64)q->reset_window_us * NSEC_PER_USEC;
-
-	/* set send timeout */
-	fp->send_timeout_us = q->send_timeout_us;
+	/* initialize the fastpass protocol */
+	fpproto_init_conn(fpproto_conn(q), &fastpass_sch_proto_ops, (void *)sch,
+			(u64)q->reset_window_us * NSEC_PER_USEC,
+			q->send_timeout_us);
 
 	/* connect */
 	sock_addr.sin_addr.s_addr = q->ctrl_addr_netorder;
@@ -1330,9 +1332,7 @@ static int fp_tc_change(struct Qdisc *sch, struct nlattr *opt) {
 
 	if (tb[TCA_FASTPASS_RST_WIN_USEC]) {
 		q->reset_window_us = nla_get_u32(tb[TCA_FASTPASS_RST_WIN_USEC]);
-		if (q->ctrl_sock)
-			fastpass_sk(q->ctrl_sock->sk)->rst_win_ns =
-					(u64)q->reset_window_us * NSEC_PER_USEC;
+		should_reconnect = true;
 	}
 
 	/* TODO: when changing send_timeout, also change inside ctrl socket */
@@ -1502,23 +1502,25 @@ static int fp_tc_dump_stats(struct Qdisc *sch, struct gnet_dump *d)
 
 	memset(&st.sched_stats[0], 0, TC_FASTPASS_SCHED_STAT_MAX_BYTES);
 	memset(&st.socket_stats[0], 0, TC_FASTPASS_SOCKET_STAT_MAX_BYTES);
+	memset(&st.proto_stats[0], 0, TC_FASTPASS_PROTO_STAT_MAX_BYTES);
 
 	memcpy(&st.sched_stats[0], &q->stat, sizeof(q->stat));
 
 	/* gather socket statistics */
 	if (q->ctrl_sock) {
-		struct sock *sk = q->ctrl_sock->sk;
-		struct fastpass_sock *fp = fastpass_sk(sk);
+		struct fastpass_sock *fp = (struct fastpass_sock *)q->ctrl_sock->sk;
+		struct fpproto_conn *conn = fpproto_conn(q);
 		memcpy(&st.socket_stats[0], &fp->stat, sizeof(fp->stat));
+		memcpy(&st.proto_stats[0], &conn->stat, sizeof(conn->stat));
 
-		st.last_reset_time		= fp->last_reset_time;
-		st.out_max_seqno		= fp->next_seqno - 1;
-		st.in_max_seqno			= fp->in_max_seqno;
-		st.in_sync				= fp->in_sync;
-		st.consecutive_bad_pkts	= (__u16)fp->consecutive_bad_pkts;
-		st.tx_num_unacked		= (__u16)fp->tx_num_unacked;
-		st.earliest_unacked		= fp->earliest_unacked;
-		st.inwnd				= fp->inwnd;
+		st.last_reset_time		= conn->last_reset_time;
+		st.out_max_seqno		= conn->next_seqno - 1;
+		st.in_max_seqno			= conn->in_max_seqno;
+		st.in_sync				= conn->in_sync;
+		st.consecutive_bad_pkts	= (__u16)conn->consecutive_bad_pkts;
+		st.tx_num_unacked		= (__u16)conn->tx_num_unacked;
+		st.earliest_unacked		= conn->earliest_unacked;
+		st.inwnd				= conn->inwnd;
 	}
 	return gnet_stats_copy_app(d, &st, sizeof(st));
 }

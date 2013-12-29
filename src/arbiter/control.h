@@ -13,7 +13,7 @@
 #define EXPT_RUN_MASK (LAUNCH_CONTROLLER_EXPT)
 
 #define N_CONTROLLER_PORTS		1
-#define N_ALLOC_CORES			1
+#define N_ALLOC_CORES			0
 #define N_COMM_CORES			1
 #define N_LOG_CORES				0
 

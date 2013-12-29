@@ -18,18 +18,13 @@
  *
  * Takes ownership of mbuf memory - either sends it or frees it.
  * @param portid: the port out of which to send the packet
- * @param tslot: current allocation time slot index
  */
 static inline void
-comm_rx(struct rte_mbuf *m, uint8_t portid, uint32_t tslot)
+comm_rx(struct rte_mbuf *m, uint8_t portid)
 {
 	struct ether_hdr *eth_hdr;
 	struct ipv4_hdr *ipv4_hdr;
-	struct rte_mbuf *reply_m; /**< Reply packet */
 	uint32_t req_src;
-	struct fast_grant_pkt grant_pkt;
-	uint32_t grant_n_valid_bytes;
-	struct allocation flow_alloc;
 
 	eth_hdr = rte_pktmbuf_mtod(m, struct ether_hdr *);
 	ipv4_hdr = (struct ipv4_hdr *)(rte_pktmbuf_mtod(m, unsigned char *)
@@ -56,14 +51,10 @@ comm_rx(struct rte_mbuf *m, uint8_t portid, uint32_t tslot)
 void exec_comm_core(struct comm_core_cmd * cmd)
 {
 	struct rte_mbuf *pkts_burst[MAX_PKT_BURST];
-	uint64_t tslot_len = cmd->tslot_len;
 	int i, j, nb_rx;
 	uint8_t portid, queueid;
 	uint64_t rx_time;
 	struct lcore_conf *qconf;
-	uint32_t cur_tslot = cmd->tslot_offset;
-	uint64_t cur_tslot_time;
-	int res;
 	struct comm_log c_log;
 
 	comm_log_init(&c_log);
@@ -111,15 +102,15 @@ void exec_comm_core(struct comm_core_cmd * cmd)
 			for (j = 0; j < (nb_rx - PREFETCH_OFFSET); j++) {
 				rte_prefetch0(rte_pktmbuf_mtod(pkts_burst[
 						j + PREFETCH_OFFSET], void *));
-				comm_rx(pkts_burst[j], portid, cur_tslot);
+				comm_rx(pkts_burst[j], portid);
 			}
 
 			/* handle remaining prefetched packets */
 			for (; j < nb_rx; j++) {
-				comm_rx(pkts_burst[j], portid, cur_tslot);
+				comm_rx(pkts_burst[j], portid);
 			}
 
-			comm_log_processed_batch(&c_log, nb_rx);
+			comm_log_processed_batch(&c_log, nb_rx, rx_time);
 		}
 
 		/* TODO: Process allocated timeslots and send allocation packets */

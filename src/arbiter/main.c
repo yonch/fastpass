@@ -79,10 +79,6 @@
 #include "main.h"
 #include "port_alloc.h"
 
-#include "fast_packet.h"
-#include "log.h"
-#include "generate.h"
-#include "make_packet.h"
 #include "control.h"
 
 //#define MAIN_C_VERBOSE

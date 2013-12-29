@@ -1,3 +1,3 @@
 #!/bin/bash
 
-build/fast -c 7 -n 3 --no-hpet -- -p 3
+sudo build/fast -c 1 -n 3 --no-hpet -- -p 1

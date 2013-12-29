@@ -229,6 +229,8 @@ void ack_payload_handler(struct fpproto_conn *conn, u64 ack_seq, u64 ack_vec)
 	u64 cur_seqno;
 	u32 offset;
 	int n_acked = 0;
+	u64 unacked_mask;
+	u64 todo_mask;
 
 	conn->stat.ack_payloads++;
 
@@ -236,28 +238,26 @@ void ack_payload_handler(struct fpproto_conn *conn, u64 ack_seq, u64 ack_vec)
 	if (wnd_seq_before(&conn->outwnd, ack_seq))
 		goto ack_too_early;
 
-	fastpass_pr_debug("handling ack_seq 0x%llX ack_vec 0x%016llX\n",
-				ack_seq, ack_vec);
+	unacked_mask = wnd_get_mask(&conn->outwnd, ack_seq);
 
-	while(ack_vec) {
-		offset = __ffs(ack_vec);
-		cur_seqno = ack_seq - offset;
+	fastpass_pr_debug("handling ack_seq 0x%llX ack_vec 0x%016llX unacked 0x%016llX\n",
+				ack_seq, ack_vec, unacked_mask);
 
-		/* if out of window, we're done */
-		if (wnd_seq_before(&conn->outwnd, cur_seqno))
-			goto done;
+	todo_mask = ack_vec & unacked_mask;
 
-		/* if unacked, ack it */
-		if (wnd_is_marked(&conn->outwnd, cur_seqno)) {
-			/* got ourselves an unacked seqno that should be acked */
-			do_ack_seqno(conn, cur_seqno);
-			n_acked++;
-		}
+	while(todo_mask) {
+		offset = __ffs(todo_mask);
+		cur_seqno = ack_seq - 63 + offset;
 
-		ack_vec &= ~(1UL << offset);
+		BUG_ON(wnd_seq_before(&conn->outwnd, cur_seqno));
+		BUG_ON(!wnd_is_marked(&conn->outwnd, cur_seqno));
+
+		do_ack_seqno(conn, cur_seqno);
+		n_acked++;
+
+		todo_mask &= ~(1UL << offset);
 	}
 
-done:
 	if (n_acked > 0) {
 		cancel_and_reset_retrans_timer(conn);
 		conn->stat.informative_ack_payloads++;
@@ -326,15 +326,15 @@ int update_inwnd(struct fpproto_conn *conn, u64 seqno)
 	if (unlikely(time_after_eq64(seqno, head + 64))) {
 		conn->stat.inwnd_jumped++;
 		conn->in_max_seqno = seqno;
-		conn->inwnd = 1UL;
+		conn->inwnd = 1UL << 63;
 		return 0; /* accept */
 	}
 
 	/* seqno in [head+1, head+63] ? */
 	if (likely(time_after64(seqno, head))) {
 		/* advance no more than 63 */
-		conn->inwnd <<= (seqno - head);
-		conn->inwnd |= 1UL;
+		conn->inwnd >>= (seqno - head);
+		conn->inwnd |= 1UL << 63;
 		conn->in_max_seqno = seqno;
 		return 0; /* accept */
 	}
@@ -347,13 +347,13 @@ int update_inwnd(struct fpproto_conn *conn, u64 seqno)
 	}
 
 	/* seqno in [head-63, head] */
-	if (conn->inwnd & (1UL << (head - seqno))) {
+	if (conn->inwnd & (1UL << (63 - (head - seqno)))) {
 		/* already marked as received */
 		conn->stat.rx_dup_pkt++;
 		return 1; /* drop */
 	}
 
-	conn->inwnd |= (1UL << (head - seqno));
+	conn->inwnd |= (1UL << (63 - (head - seqno)));
 	conn->stat.rx_out_of_order++;
 	return 0; /* accept */
 }
@@ -373,6 +373,7 @@ void fpproto_handle_rx_packet(struct fpproto_conn *conn, u8 *pkt, u32 len,
 	u16 alloc_dst[16];
 	u32 alloc_base_tslot;
 	u64 ack_vec;
+	u16 ack_vec16;
 
 	conn->stat.rx_pkts++;
 
@@ -451,9 +452,9 @@ void fpproto_handle_rx_packet(struct fpproto_conn *conn, u8 *pkt, u32 len,
 		return; /* drop packet to keep at-most-once semantics */
 
 	/* handle acks */
-	ack_vec = ntohs(hdr->ack_vec);
-	ack_vec = (s64)((s16)ack_vec); /* sign extend */
-	ack_vec = (ack_vec << 1) | 1UL; /* ack the ack_seqno */
+	ack_vec16 = ntohs(hdr->ack_vec);
+	ack_vec = ((1UL << 48) - (ack_vec16 >> 15)) & ~(1UL << 48);
+	ack_vec |= ((u64)(ack_vec16 & 0x7FFF) << 48) | (1UL << 63); /* ack the ack_seqno */
 	ack_payload_handler(conn, ack_seq, ack_vec);
 
 
@@ -496,8 +497,8 @@ handle_payload:
 			goto incomplete_ack_payload;
 
 		ack_vec = ntohl(*(u32 *)curp) & ((1UL << 28) - 1);
-		ack_vec <<= 32;
-		ack_vec |= (u64)ntohs(*(u16 *)(curp + 4)) << 16;
+		ack_vec <<= 20;
+		ack_vec |= (u64)ntohs(*(u16 *)(curp + 4)) << 4;
 		ack_payload_handler(conn, ack_seq, ack_vec);
 
 		curp += 6;
@@ -510,9 +511,12 @@ handle_payload:
 	if (curp < data_end)
 		goto handle_payload;
 
+	return;
+
 unknown_payload_type:
 	conn->stat.rx_unknown_payload++;
-	fastpass_pr_debug("got unknown payload type %d\n", payload_type);
+	fastpass_pr_debug("got unknown payload type %d at offset %lld\n",
+			payload_type, (s64)(curp - pkt));
 	return;
 
 incomplete_reset_payload:
@@ -591,8 +595,8 @@ void fpproto_commit_packet(struct fpproto_conn *conn, struct fpproto_pktdesc *pd
 	pd->send_reset = !conn->in_sync;
 	pd->reset_timestamp = conn->last_reset_time;
 	pd->ack_seq = conn->in_max_seqno;
-	pd->ack_vec = ((conn->inwnd >> 1) & 0x7FFF);
-	pd->ack_vec |= ((conn->inwnd & (~0UL << 16)) == (~0UL << 16)) << 15;
+	pd->ack_vec = ((conn->inwnd >> 48) & 0x7FFF);
+	pd->ack_vec |= ((conn->inwnd & (~0UL >> 16)) == (~0UL >> 16)) << 15;
 
 	/* add packet to outwnd, will advance fp->next_seqno */
 	outwnd_add(conn, pd);

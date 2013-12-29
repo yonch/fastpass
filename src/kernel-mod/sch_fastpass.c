@@ -479,6 +479,9 @@ void flow_inc_alloc(struct fp_sched_data* q, struct fp_flow* f)
 	f->alloc_tslots++;
 	q->alloc_tslots++;
 
+	if (unlikely(f->acked_tslots < f->alloc_tslots))
+		f->acked_tslots = f->alloc_tslots;
+
 	if (unlikely((!flow_in_flowqueue(f))
 			&& (f->requested_tslots != f->demand_tslots)
 			&& flow_is_below_watermark(f)))

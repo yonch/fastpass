@@ -5,9 +5,7 @@ include $(RTE_SDK)/mk/rte.vars.mk
 # binary name
 APP = fast
 
-SRCS-y := main.c generate.c node.c control.c traffic_gen.c cpu_benchmark.c \
-	controller.c rx_grant.c\
-	../allocator/fast_path_allocator.c ../allocator/network_topology.c
+SRCS-y := main.c control.c comm_core.c
 
 CFLAGS += -O3 
 CFLAGS += $(WERROR_FLAGS)

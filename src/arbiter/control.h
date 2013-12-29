@@ -7,17 +7,15 @@
 
 #include <stdint.h>
 
-struct expt_cmd;
+/* bits 1-3 occupied by other experiments */
+#define LAUNCH_CONTROLLER_EXPT 0x8
 
-//#define N_CONTROLLER_PORTS (n_enabled_port / 2)
-#define N_CONTROLLER_PORTS 1
+#define EXPT_RUN_MASK (LAUNCH_CONTROLLER_EXPT)
 
-#define CPU_BENCHMARK_EXPT 0x1
-#define NET_BENCHMARK_EXPT 0x2
-#define END_TO_END_EXPT 0x4
-
-#define EXPT_RUN_MASK (CPU_BENCHMARK_EXPT)
-
+#define N_CONTROLLER_PORTS		1
+#define N_ALLOC_CORES			1
+#define N_COMM_CORES			1
+#define N_LOG_CORES				0
 
 /**
  * Allocate queues to lcores
@@ -27,7 +25,7 @@ int control_do_queue_allocation(void);
 /**
  * Performs experiments
  */
-void control_do_experiments(void);
+void launch_controller_cores(void);
 
 
 #endif /* CONTROL_H_ */

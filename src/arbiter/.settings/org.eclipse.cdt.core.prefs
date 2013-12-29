@@ -1,0 +1,9 @@
+eclipse.preferences.version=1
+environment/project/cdt.managedbuild.toolchain.gnu.base.2034167457/RTE_SDK/delimiter=\:
+environment/project/cdt.managedbuild.toolchain.gnu.base.2034167457/RTE_SDK/operation=append
+environment/project/cdt.managedbuild.toolchain.gnu.base.2034167457/RTE_SDK/value=/home/yonch/src/DPDK
+environment/project/cdt.managedbuild.toolchain.gnu.base.2034167457/RTE_TARGET/delimiter=\:
+environment/project/cdt.managedbuild.toolchain.gnu.base.2034167457/RTE_TARGET/operation=append
+environment/project/cdt.managedbuild.toolchain.gnu.base.2034167457/RTE_TARGET/value=x86_64-default-linuxapp-gcc
+environment/project/cdt.managedbuild.toolchain.gnu.base.2034167457/append=true
+environment/project/cdt.managedbuild.toolchain.gnu.base.2034167457/appendContributed=true

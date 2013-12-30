@@ -14,6 +14,25 @@
 
 #define MAX(a,b) (((a) > (b)) ? (a) : (b))
 
+// Methods to be replaced with inter-core communication
+static inline
+void enqueue_to_Q_head(struct bin *new_requests, uint16_t src, uint16_t dst) {
+    assert(new_requests != NULL);
+
+    enqueue_bin(new_requests, src, dst);
+}
+
+static inline
+struct backlog_edge *dequeue_from_Q_head(struct bin *new_requests) {
+    assert(new_requests != NULL);
+
+    struct backlog_edge *current = peek_head_bin(new_requests);
+    dequeue_bin(new_requests);
+
+    return current;
+}
+
+
 // Request num_slots additional timeslots from src to dst
 void request_timeslots(struct bin *new_requests, struct admissible_status *status,
                        uint16_t src, uint16_t dst, uint16_t demand_tslots) {
@@ -28,17 +47,18 @@ void request_timeslots(struct bin *new_requests, struct admissible_status *statu
 
     if (new_demand > prev) {
         // Just add this request at the end of the bin
-        // Obtain the last_sent_timeslot and sort into bins later
-        if (status->flows[index].backlog == 0)
-            enqueue_bin(new_requests, src, dst);
 
+        // Calculate backlog increase and update demand
         uint16_t backlog_increase = (uint16_t) new_demand -
             status->flows[index].demand;
-        status->flows[index].backlog += backlog_increase;
         status->flows[index].demand = (uint16_t) new_demand;
-        // Note: race condition involving the 3 preceding lines of code
-        // Need to check backlog and set demand atomically, or else do this
-        // check after we've finished the previous batch allocation
+
+        // BEGIN ATOMIC
+        if (status->flows[index].backlog == 0)
+            enqueue_to_Q_head(new_requests, src, dst);
+
+        status->flows[index].backlog += backlog_increase;
+        // END ATOMIC
     }
 }
 
@@ -53,7 +73,7 @@ void prepare_new_requests(struct bin *new_requests,
 
     // Add new requests to the appropriate bins in queue_in
     while (!is_empty_bin(new_requests)) {
-        struct backlog_edge *current = peek_head_bin(new_requests);
+        struct backlog_edge *current = dequeue_from_Q_head(new_requests);
 
         uint32_t index = get_status_index(current->src, current->dst);
         uint64_t last_send_time = status->timeslots[index];
@@ -63,16 +83,14 @@ void prepare_new_requests(struct bin *new_requests,
             bin_index = 0;
         
         enqueue_bin(&queue_in->bins[bin_index], current->src, current->dst);
-        dequeue_bin(new_requests);
-        // Note: this does not preserve fair ordering between flows that arrive in
-        // the same timeslot and are older than the last bin
     }
 }
 
 // Try to allocate
 void try_allocation(struct bin *current_bin, struct batch_state *batch_state,
-                    struct bin *bin_out, struct admitted_traffic *traffic_out,
-                    struct bin *admitted_backlog, struct admissible_status *status) {
+                    struct bin *bin_out, struct bin *last_bin_out,
+                    struct admitted_traffic *traffic_out, struct bin *admitted_backlog,
+                    struct admissible_status *status) {
     assert(current_bin != NULL);
     assert(batch_state != NULL);
     assert(bin_out != NULL);
@@ -98,9 +116,16 @@ void try_allocation(struct bin *current_bin, struct batch_state *batch_state,
         insert_admitted_edge(&traffic_out[batch_timeslot], src, dst);
         uint32_t index = get_status_index(src, dst);
         status->timeslots[index] = status->current_timeslot + batch_timeslot;
+
+        // BEGIN ATOMIC
         status->flows[index].backlog -= 1;
-        if (status->flows[index].backlog > 0)
-            enqueue_bin(&admitted_backlog[batch_timeslot], src, dst);
+        if (status->flows[index].backlog > 0) {
+            if (batch_timeslot == BATCH_SIZE - 1)
+                enqueue_bin(last_bin_out, src, dst);
+            else
+                enqueue_bin(&admitted_backlog[batch_timeslot], src, dst);
+        }
+        // END ATOMIC
     }
 
     dequeue_bin(current_bin);
@@ -132,7 +157,7 @@ void get_admissible_traffic(struct backlog_queue *queue_in,
     // TODO: could use smaller bins here
     struct bin *admitted_backlog = status->admitted_bins;
     uint8_t i;
-    for (i = 0; i < BATCH_SIZE; i++)
+    for (i = 0; i < BATCH_SIZE - 1; i++)
         init_bin(&admitted_backlog[i]);
 
     // Process all bins in queue_in
@@ -140,10 +165,11 @@ void get_admissible_traffic(struct backlog_queue *queue_in,
     for (bin = 0; bin < NUM_BINS; bin++) {
         struct bin *current_bin = &queue_in->bins[bin];
         struct bin *bin_out = &queue_out->bins[MAX(0, bin - BATCH_SIZE)];
+        struct bin *last_bin = &queue_out->bins[NUM_BINS - 1];
 
         while (!is_empty_bin(current_bin))
-            try_allocation(current_bin, &batch_state, bin_out, traffic_out,
-                           admitted_backlog, status);
+            try_allocation(current_bin, &batch_state, bin_out, last_bin,
+                           traffic_out, admitted_backlog, status);
     }
 
     // TODO: combine these two loops?
@@ -152,22 +178,14 @@ void get_admissible_traffic(struct backlog_queue *queue_in,
     uint8_t batch;
     for (batch = 1; batch < BATCH_SIZE; batch++) {
         struct bin *current_bin = &admitted_backlog[batch - 1];
-        struct bin *bin_out = &queue_out->bins[NUM_BINS - BATCH_SIZE + batch];
+        struct bin *bin_out = &queue_out->bins[NUM_BINS - BATCH_SIZE + batch - 1];
+        struct bin *last_bin = &queue_out->bins[NUM_BINS - 1];
 
         while (!is_empty_bin(current_bin))
-            try_allocation(current_bin, &batch_state, bin_out, traffic_out,
-                           admitted_backlog, status);
+            try_allocation(current_bin, &batch_state, bin_out, last_bin,
+                           traffic_out, admitted_backlog, status);
     }
 
-    // Add backlogs for last admitted traffic to end of queue
-    // TODO: can you accomplish this by modifying try_allocation above?
-    struct bin *last_admitted = &admitted_backlog[BATCH_SIZE - 1];
-    while (!is_empty_bin(last_admitted)) {
-        struct backlog_edge *edge = peek_head_bin(last_admitted);
-        enqueue_bin(&queue_out->bins[NUM_BINS - 1], edge->src, edge->dst);
-        dequeue_bin(last_admitted);
-    }
-    
     // Update current timeslot
     status->current_timeslot += BATCH_SIZE;
 }

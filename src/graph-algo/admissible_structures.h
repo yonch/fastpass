@@ -193,7 +193,7 @@ void print_backlog(struct backlog_queue *queue) {
         printf("\t%d\t%d\n", edge->src, edge->dst);
 }
 
-// Prints the number of flows per src, dst, and bin
+// Prints the number of src/dst pairs per bin
 static inline
 void print_backlog_counts(struct backlog_queue *queue) {
     assert(queue != NULL);
@@ -355,6 +355,8 @@ void reset_flow(struct admissible_status *status, uint16_t src, uint16_t dst) {
     assert(status != NULL);
 
     struct flow_status *flow = &status->flows[get_status_index(src, dst)];
+
+    // BEGIN ATOMIC
     if (flow->backlog == 0) {
         // No pending backog, reset both to zero
         flow->demand = 0;
@@ -365,6 +367,7 @@ void reset_flow(struct admissible_status *status, uint16_t src, uint16_t dst) {
         flow->demand = 0;
         flow->backlog = 1;
     }
+    // END ATOMIC
 }
 
 // Helper methods for testing in python
@@ -440,7 +443,7 @@ struct admissible_status *create_admissible_status(bool oversubscribed,
     assert(status != NULL);
 
     init_admissible_status(status, oversubscribed, inter_rack_capacity, num_nodes);
-    status->admitted_bins = malloc(sizeof(struct bin) * BATCH_SIZE);
+    status->admitted_bins = malloc(sizeof(struct bin) * (BATCH_SIZE - 1));
     assert(status->admitted_bins != NULL);
 
     return status;

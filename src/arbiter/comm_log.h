@@ -8,6 +8,8 @@
 #ifndef COMM_LOG_H_
 #define COMM_LOG_H_
 
+#include <rte_log.h>
+
 /**
  * logged information for a core
  */

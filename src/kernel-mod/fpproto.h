@@ -135,8 +135,6 @@ struct fpproto_conn {
 
 };
 
-
-
 /* initializes conn */
 void fpproto_init_conn(struct fpproto_conn *conn, struct fpproto_ops *ops,
 		void *ops_param, u64 rst_win_ns, u64 send_timeout_us);
@@ -156,9 +154,6 @@ void fpproto_handle_rx_packet(struct fpproto_conn *conn, u8 *data, u32 len,
 void fpproto_prepare_to_send(struct fpproto_conn *conn);
 void fpproto_commit_packet(struct fpproto_conn *conn,
 		struct fpproto_pktdesc *pkt, u64 timestamp);
-
-struct fpproto_pktdesc *fpproto_pktdesc_alloc(void);
-void fpproto_pktdesc_free(struct fpproto_pktdesc *pd);
 
 
 /**

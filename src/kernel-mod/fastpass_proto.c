@@ -34,7 +34,7 @@ MODULE_PARM_DESC(fastpass_debug, "Enable debug messages");
 EXPORT_SYMBOL_GPL(fastpass_debug);
 #endif
 
-static struct kmem_cache *fpproto_pktdesc_cachep __read_mostly;
+struct kmem_cache *fpproto_pktdesc_cachep __read_mostly;
 
 static inline struct fastpass_sock *fastpass_sk(struct sock *sk)
 {
@@ -87,39 +87,6 @@ void fpproto_set_qdisc(struct sock *sk, struct Qdisc *new_qdisc)
 	struct fastpass_sock *fp = fastpass_sk(sk);
 	rcu_assign_pointer(fp->qdisc, new_qdisc);
 }
-
-struct fpproto_pktdesc *fpproto_pktdesc_alloc(void)
-{
-	struct fpproto_pktdesc *pd;
-	pd = kmem_cache_zalloc(fpproto_pktdesc_cachep, GFP_ATOMIC | __GFP_NOWARN);
-	return pd;
-}
-
-void fpproto_pktdesc_free(struct fpproto_pktdesc *pd)
-{
-	kmem_cache_free(fpproto_pktdesc_cachep, pd);
-}
-
-
-int cancel_timer(struct fpproto_conn *proto)
-{
-	struct fastpass_sock *fp = container_of(proto, struct fastpass_sock, conn);
-
-	if (unlikely(hrtimer_try_to_cancel(&fp->retrans_timer) == -1)) {
-		fastpass_pr_debug("could not cancel timer. tasklet will reset timer\n");
-		return -1;
-	}
-
-	return 0;
-}
-
-void set_timer(struct fpproto_conn *proto, u64 when)
-{
-	struct fastpass_sock *fp = container_of(proto, struct fastpass_sock, conn);
-
-	hrtimer_start(&fp->retrans_timer, ns_to_ktime(when), HRTIMER_MODE_ABS);
-}
-
 
 static enum hrtimer_restart retrans_timer_func(struct hrtimer *timer)
 {

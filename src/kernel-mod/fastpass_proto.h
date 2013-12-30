@@ -20,6 +20,7 @@
 
 #define MAX_TOTAL_FASTPASS_HEADERS MAX_HEADER
 
+extern struct kmem_cache *fpproto_pktdesc_cachep __read_mostly;
 
 
 /**

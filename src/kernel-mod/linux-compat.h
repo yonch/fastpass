@@ -72,6 +72,10 @@ typedef int s32;
 typedef unsigned short u16;
 typedef unsigned char u8;
 
+enum {
+	false	= 0,
+	true	= 1
+};
 
 #define unlikely
 #define likely
@@ -96,6 +100,10 @@ typedef unsigned char u8;
 	 typecheck(__u64, b) && \
 	 ((__s64)((a) - (b)) >= 0))
 #define time_before_eq64(a,b)	time_after_eq64(b,a)
+
+#define time_in_range64(a, b, c) \
+	(time_after_eq64(a, b) && \
+	 time_before_eq64(a, c))
 
 /* need __fls */
 #define __fls(x) (BITS_PER_LONG - 1 - __builtin_clzl(x))
@@ -127,6 +135,50 @@ static inline u32 jhash_3words(u32 a, u32 b, u32 c, u32 initval)
 static inline u32 jhash_1word(u32 a, u32 initval)
 {
 	return jhash_3words(a, 0, 0, initval);
+}
+
+/* based on rte_hash_crc from DPDK's rte_hash_crc.h, but does checksum */
+static inline
+uint32_t csum_partial(const void *data, uint32_t data_len, uint32_t init_val)
+{
+	unsigned i;
+	uint32_t temp = 0;
+	u64 sum = init_val;
+	const uint32_t *p32 = (const uint32_t *)data;
+
+	for (i = 0; i < data_len / 4; i++) {
+		sum += *p32++;
+	}
+
+	switch (3 - (data_len & 0x03)) {
+	case 0:
+		temp |= *((const uint8_t *)p32 + 2) << 16;
+		/* Fallthrough */
+	case 1:
+		temp |= *((const uint8_t *)p32 + 1) << 8;
+		/* Fallthrough */
+	case 2:
+		temp |= *((const uint8_t *)p32);
+		sum += temp;
+	default:
+		break;
+	}
+
+	sum = (u32)sum + (sum >> 32); /* could have overflow on bit 32 */
+	return (u32)sum + (u32)(sum >> 32);    /* add the overflow */
+}
+
+static inline uint16_t csum_tcpudp_magic(uint32_t saddr, uint32_t daddr,
+		uint16_t len, uint16_t proto, uint32_t sum32)
+{
+	uint64_t sum64 = sum32;
+	sum64 += saddr + daddr + ((len + proto) << 8);
+
+	/* now fold */
+	sum64 = (u32)sum64 + (sum64 >> 32); /* could have overflow on bit 32 */
+	sum32 = sum64 + (sum64 >> 32);    /* add the overflow */
+	sum32 = (u16)sum32 + (sum32 >> 16); /* could have overflow on bit 16 */
+	return ~((u16)sum32 + (u16)(sum32 >> 16)); /* add the overflow */
 }
 
 #endif /* LINUX_COMPAT_H_ */

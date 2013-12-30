@@ -369,7 +369,7 @@ void reset_flow(struct admissible_status *status, uint16_t src, uint16_t dst) {
 
 // Helper methods for testing in python
 static inline
-struct admitted_traffic *create_admitted_traffic() {
+struct admitted_traffic *create_admitted_traffic(void) {
     struct admitted_traffic *admitted = malloc(sizeof(struct admitted_traffic) *
                                                BATCH_SIZE);
     assert(admitted != NULL);
@@ -397,7 +397,7 @@ struct admitted_traffic *get_admitted_struct(struct admitted_traffic *admitted,
 }
 
 static inline
-struct bin *create_bin() {
+struct bin *create_bin(void) {
     size_t size = sizeof(struct bin) +
         (MAX_NODES * MAX_NODES - BIN_SIZE) * sizeof(struct backlog_edge);
     struct bin *bin = malloc(size);
@@ -416,7 +416,7 @@ void destroy_bin(struct bin *bin) {
 }
 
 static inline
-struct backlog_queue *create_backlog_queue() {
+struct backlog_queue *create_backlog_queue(void) {
     struct backlog_queue *queue = malloc(sizeof(struct backlog_queue));
     assert(queue != NULL);
 

@@ -298,16 +298,13 @@ void fpproto_send_packet(struct sock *sk, struct fpproto_pktdesc *pd)
 	struct fastpass_sock *fp = fastpass_sk(sk);
 	struct inet_sock *inet = inet_sk(sk);
 	const int max_header = sk->sk_prot->max_header;
-	const int 	max_payload_len = 8 /* header */
-							+ 8 /* RESET */
-							+ 2 + 4 * FASTPASS_PKT_MAX_AREQ /* A-REQ */;
 	int payload_len;
 	struct sk_buff *skb = NULL;
 	int err;
 	u8 *data;
 
 	/* allocate request skb */
-	skb = sock_alloc_send_skb(sk, max_payload_len + max_header, 1, &err);
+	skb = sock_alloc_send_skb(sk, FASTPASS_MAX_PAYLOAD + max_header, 1, &err);
 	if (!skb)
 		goto alloc_err;
 
@@ -318,7 +315,7 @@ void fpproto_send_packet(struct sock *sk, struct fpproto_pktdesc *pd)
 
 	/* encode the packet from the descriptor */
 	data = &skb->data[0];
-	payload_len = fpproto_encode_packet(&fp->conn, pd, data, max_payload_len,
+	payload_len = fpproto_encode_packet(&fp->conn, pd, data, FASTPASS_MAX_PAYLOAD,
 			inet->inet_saddr, inet->inet_daddr);
 	/* adjust the size of the skb based on encoded size */
 	skb_put(skb, payload_len);

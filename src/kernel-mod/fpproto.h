@@ -23,7 +23,27 @@
 #define FASTPASS_BAD_PKT_RESET_THRESHOLD	10
 #define FASTPASS_RESET_WINDOW_NS	(1000*1000*1000)
 
-#define FASTPASS_PKT_MAX_AREQ		10
+#define FASTPASS_PKT_HDR_LEN			8
+#define FASTPASS_PKT_RESET_LEN			8
+
+#ifdef FASTPASS_CONTROLLER
+/* CONTROLLER */
+#define FASTPASS_PKT_MAX_AREQ			0
+#define FASTPASS_PKT_AREQ_LEN			0
+#define FASTPASS_PKT_MAX_ALLOC_TSLOTS	64
+#define FASTPASS_PKT_ALLOC_LEN			(2 + 2 * 15 + FASTPASS_PKT_MAX_ALLOC_TSLOTS)
+#else
+/* END NODE */
+#define FASTPASS_PKT_MAX_AREQ			10
+#define FASTPASS_PKT_AREQ_LEN			(2 + 4 * FASTPASS_PKT_MAX_AREQ)
+#define FASTPASS_PKT_MAX_ALLOC_TSLOTS	0
+#define FASTPASS_PKT_ALLOC_LEN			0
+#endif
+
+#define FASTPASS_MAX_PAYLOAD		(FASTPASS_PKT_HDR_LEN + \
+									FASTPASS_PKT_RESET_LEN + \
+									FASTPASS_PKT_AREQ_LEN + \
+									FASTPASS_PKT_ALLOC_LEN)
 
 #define FASTPASS_PTYPE_RSTREQ		0x0
 #define FASTPASS_PTYPE_RESET 		0x1
@@ -51,6 +71,13 @@ struct fpproto_pktdesc {
 #ifdef FASTPASS_ENDPOINT
 	u16							n_areq;
 	struct fpproto_areq_desc	areq[FASTPASS_PKT_MAX_AREQ];
+#endif
+
+#ifdef FASTPASS_CONTROLLER
+	u16							n_dsts;
+	u16							dsts[15];
+	u16							alloc_tslot;
+	u8							tslot_desc[FASTPASS_PKT_MAX_ALLOC_TSLOTS];
 #endif
 
 	u64							sent_timestamp;

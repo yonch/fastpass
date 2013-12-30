@@ -34,7 +34,7 @@ struct fastpass_areq {
 /**
  * Computes the base sequence number from a reset timestamp
  */
-u64 base_seqno_from_timestamp(u64 reset_time)
+static u64 base_seqno_from_timestamp(u64 reset_time)
 {
 	u32 time_hash = jhash_1word((u32) reset_time, reset_time >> 32);
 	return reset_time + time_hash + ((u64) time_hash << 32);
@@ -48,7 +48,7 @@ static bool tstamp_in_window(u64 tstamp, u64 win_middle, u64 win_size) {
 /**
  * Receives a packet destined for the protocol. (part of inet socket API)
  */
-__sum16 fastpass_checksum(u8 *pkt, u32 len, __be32 saddr, __be32 daddr,
+static __sum16 fastpass_checksum(u8 *pkt, u32 len, __be32 saddr, __be32 daddr,
 		u64 seqno, u64 ack_seq)
 {
 	u32 seq_hash = jhash_3words((u32)seqno, seqno >> 32, (u32)ack_seq,
@@ -57,7 +57,7 @@ __sum16 fastpass_checksum(u8 *pkt, u32 len, __be32 saddr, __be32 daddr,
 	return csum_tcpudp_magic(saddr, daddr, len, IPPROTO_FASTPASS, csum);
 }
 
-void cancel_and_reset_retrans_timer(struct fpproto_conn *conn)
+static void cancel_and_reset_retrans_timer(struct fpproto_conn *conn)
 {
 	u64 timeout;
 	u64 seqno;
@@ -81,7 +81,7 @@ void cancel_and_reset_retrans_timer(struct fpproto_conn *conn)
 	fastpass_pr_debug("setting timer to %llu for seq#=0x%llX\n", timeout, seqno);
 }
 
-void do_ack_seqno(struct fpproto_conn *conn, u64 seqno)
+static void do_ack_seqno(struct fpproto_conn *conn, u64 seqno)
 {
 	struct fpproto_pktdesc *pd;
 
@@ -99,7 +99,7 @@ void do_ack_seqno(struct fpproto_conn *conn, u64 seqno)
 		fpproto_pktdesc_free(pd);
 }
 
-void do_neg_ack_seqno(struct fpproto_conn *conn, u64 seq)
+static void do_neg_ack_seqno(struct fpproto_conn *conn, u64 seq)
 {
 	struct fpproto_pktdesc *pd = outwnd_pop(conn, seq);
 	fastpass_pr_debug("Unacked tx seq 0x%llX\n", seq);
@@ -226,7 +226,7 @@ static int reset_payload_handler(struct fpproto_conn *conn, u64 full_tstamp)
 	return 0;
 }
 
-void ack_payload_handler(struct fpproto_conn *conn, u64 ack_seq, u64 ack_vec)
+static void ack_payload_handler(struct fpproto_conn *conn, u64 ack_seq, u64 ack_vec)
 {
 	u64 cur_seqno;
 	u32 offset;
@@ -272,12 +272,12 @@ ack_too_early:
 	conn->stat.too_early_ack++;
 }
 
-void got_good_packet(struct fpproto_conn *conn)
+static void got_good_packet(struct fpproto_conn *conn)
 {
 	conn->consecutive_bad_pkts = 0;
 }
 
-void got_bad_packet(struct fpproto_conn *conn)
+static void got_bad_packet(struct fpproto_conn *conn)
 {
 	u64 now = fp_get_time_ns();
 
@@ -320,7 +320,7 @@ out:
  * @return 0 if update is successful
  * 		   1 if caller should drop the packet with seqno
  */
-int update_inwnd(struct fpproto_conn *conn, u64 seqno)
+static int update_inwnd(struct fpproto_conn *conn, u64 seqno)
 {
 	u64 head = conn->in_max_seqno;
 

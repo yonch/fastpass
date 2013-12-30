@@ -11,6 +11,50 @@
 #include "make_packet.h"
 #include "arp.h"
 #include "node.h"
+#include "../kernel-mod/linux-compat.h"
+#include "../kernel-mod/fpproto.h"
+#include "../graph-algo/admissible_structures.h"
+
+static struct fp_window triggered_nodes;
+
+struct end_node_conn {
+	struct fpproto_conn conn;
+
+};
+static struct fpproto_conn endnode_conns[MAX_NODES];
+
+static void handle_reset(void *param)
+{
+	(void)param;
+	COMM_DEBUG("got reset\n");
+}
+
+static void trigger_request(void *param, u64 when)
+{
+	struct fpproto_conn *conn = (struct fpproto_conn *)param;
+	u32 index = conn - endnode_conns;
+	(void)param; (void)when;
+	if (!wnd_is_marked(&triggered_nodes, index))
+		wnd_mark(&triggered_nodes, index);
+	COMM_DEBUG("trigger_request index=%u\n", index);
+}
+
+struct fpproto_ops proto_ops = {
+	.handle_reset	= &handle_reset,
+	//.handle_ack		= &handle_ack,
+	//.handle_neg_ack	= &handle_neg_ack,
+	.trigger_request= &trigger_request,
+};
+
+void comm_init_shared_structs(void)
+{
+	u32 i;
+	for (i = 0; i < MAX_NODES; i++)
+		fpproto_init_conn(&endnode_conns[i], &proto_ops,&endnode_conns[i],
+				FASTPASS_RESET_WINDOW_NS, CONTROLLER_SEND_TIMEOUT_NS);
+
+	wnd_reset(triggered_nodes, 255);
+}
 
 /**
  * \brief Performs an allocation for a single request packet, sends
@@ -24,13 +68,14 @@ comm_rx(struct rte_mbuf *m, uint8_t portid)
 {
 	struct ether_hdr *eth_hdr;
 	struct ipv4_hdr *ipv4_hdr;
+	u8 *req_pkt;
 	uint32_t req_src;
 
 	eth_hdr = rte_pktmbuf_mtod(m, struct ether_hdr *);
 	ipv4_hdr = (struct ipv4_hdr *)(rte_pktmbuf_mtod(m, unsigned char *)
 			     + sizeof(struct ether_hdr));
-//	req_pkt = (struct fast_req_pkt *)(rte_pktmbuf_mtod(m, unsigned char *)
-//			     + sizeof(struct ether_hdr) + sizeof(struct ipv4_hdr));
+	req_pkt = (rte_pktmbuf_mtod(m, unsigned char *)
+			     + sizeof(struct ether_hdr) + sizeof(struct ipv4_hdr));
 
 	if (rte_be_to_cpu_16(eth_hdr->ether_type) == ETHER_TYPE_ARP) {
 		print_arp(m, portid);
@@ -43,6 +88,13 @@ comm_rx(struct rte_mbuf *m, uint8_t portid)
 	RTE_LOG(INFO, BENCHAPP, "at %lu controller got packet src=0x%"PRIx32
 			" dst=0x%"PRIx32"\n", rte_get_timer_cycles(), req_src,
 			ipv4_hdr->dst_addr);
+
+	if (req_src < MAX_NODES) {
+		RTE_LOG(INFO, BENCHAPP, "processing\n");
+		fpproto_handle_rx_packet(&endnode_conns[req_src], req_pkt,
+				rte_pktmbuf_data_len(m) - (sizeof(struct ether_hdr) + sizeof(struct ipv4_hdr)),
+				ipv4_hdr->src_addr, ipv4_hdr->dst_addr);
+	}
 
 	/* free the request packet */
 	rte_pktmbuf_free(m);

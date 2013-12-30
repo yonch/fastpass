@@ -60,6 +60,9 @@ void launch_controller_cores(void)
 	int i; (void)i;
 	struct comm_core_cmd ctrl_cmd;
 
+	/* initialize comm core global data */
+	comm_init_shared_structs();
+
 	// Calculate start and end times
 	start_time = rte_get_timer_cycles() + sec_to_hpet(0.2); /* start after last end */
 	end_time = start_time + sec_to_hpet(1000);

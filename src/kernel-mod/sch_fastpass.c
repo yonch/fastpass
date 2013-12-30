@@ -1484,6 +1484,16 @@ nla_put_failure:
 	return -1;
 }
 
+/* this will statically check if the space in the TC statistics buffer is sufficient */
+struct __fp_check_sizes {
+	char sched_statistics__that_should_fit_in_pkt_sched_dot_h__[
+	      TC_FASTPASS_SCHED_STAT_MAX_BYTES - sizeof(struct fp_sched_stat)];
+	char socket_statistics__that_should_fit_in_pkt_sched_dot_h__[
+	      TC_FASTPASS_SOCKET_STAT_MAX_BYTES - sizeof(struct fp_socket_stat)];
+	char proto_statistics__that_should_fit_in_pkt_sched_dot_h__[
+	      TC_FASTPASS_PROTO_STAT_MAX_BYTES - sizeof(struct fp_proto_stat)];
+};
+
 /* dumps statistics to netlink skb (part of qdisc API) */
 static int fp_tc_dump_stats(struct Qdisc *sch, struct gnet_dump *d)
 {

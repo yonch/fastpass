@@ -11,10 +11,13 @@
 #include <stdio.h>
 #include <string.h>
 #include <stdlib.h>
+#include <arpa/inet.h>
 
 #define CONFIG_64BIT
 
-void panic() {
+typedef _Bool			bool;
+
+static inline void panic(void) {
 	exit(-1);
 }
 
@@ -39,7 +42,7 @@ void panic() {
 #define BITS_TO_LONGS(nr)	DIV_ROUND_UP(nr, BITS_PER_BYTE * sizeof(long))
 
 /* include/asm-generic/bitops/non-atomic.h */
-static inline void __set_bit(int nr, volatile unsigned long *addr)
+static inline void __set_bit(int nr, unsigned long *addr)
 {
 	unsigned long mask = BIT_MASK(nr);
 	unsigned long *p = ((unsigned long *)addr) + BIT_WORD(nr);
@@ -47,7 +50,7 @@ static inline void __set_bit(int nr, volatile unsigned long *addr)
 	*p  |= mask;
 }
 
-static inline void __clear_bit(int nr, volatile unsigned long *addr)
+static inline void __clear_bit(int nr, unsigned long *addr)
 {
 	unsigned long mask = BIT_MASK(nr);
 	unsigned long *p = ((unsigned long *)addr) + BIT_WORD(nr);
@@ -66,6 +69,9 @@ typedef long long s64;
 typedef long long __s64;
 typedef unsigned int u32;
 typedef int s32;
+typedef unsigned short u16;
+typedef unsigned char u8;
+
 
 #define unlikely
 #define likely
@@ -95,5 +101,32 @@ typedef int s32;
 #define __fls(x) (BITS_PER_LONG - 1 - __builtin_clzl(x))
 #define __ffs(x) (__builtin_ffsl(x) - 1)
 
+/* from Jenkin's public domain lookup3.c at http://burtleburtle.net/bob/c/lookup3.c */
+#define rot(x,k) (((x)<<(k)) | ((x)>>(32-(k))))
+#define final(a,b,c) \
+{ \
+  c ^= b; c -= rot(b,14); \
+  a ^= c; a -= rot(c,11); \
+  b ^= a; b -= rot(a,25); \
+  c ^= b; c -= rot(b,16); \
+  a ^= c; a -= rot(c,4);  \
+  b ^= a; b -= rot(a,14); \
+  c ^= b; c -= rot(b,24); \
+}
+
+
+static inline u32 jhash_3words(u32 a, u32 b, u32 c, u32 initval)
+{
+	a += 0xDEADBEEF;
+	b += 0xDEADBEEF;
+	c += initval;
+	final(a,b,c);
+	return c;
+}
+
+static inline u32 jhash_1word(u32 a, u32 initval)
+{
+	return jhash_3words(a, 0, 0, initval);
+}
 
 #endif /* LINUX_COMPAT_H_ */

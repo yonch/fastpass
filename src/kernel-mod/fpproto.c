@@ -2,10 +2,12 @@
  * Platform independent FastPass protocol implementation
  */
 
-#include <linux/kernel.h>
-#include <linux/module.h>
+#ifdef __KERNEL__
 #include <linux/jhash.h>
 #include <net/ip.h>
+#else
+#include "linux-compat.h"
+#endif
 
 #include "debug.h"
 #include "fpproto.h"
@@ -694,6 +696,7 @@ int fpproto_encode_packet(struct fpproto_conn *conn,
 		curp += 8;
 	}
 
+#ifdef FASTPASS_ENDPOINT
 	/* A-REQ type short */
 	*(__be16 *)curp = htons((FASTPASS_PTYPE_AREQ << 12) |
 					  (pd->n_areq & 0x3F));
@@ -706,6 +709,9 @@ int fpproto_encode_packet(struct fpproto_conn *conn,
 		areq->count = htons((u16)pd->areq[i].tslots);
 		curp += 4;
 	}
+#else
+	(void) i; (void) areq; (void)conn; (void)max_len; /* TODO, fix this better */
+#endif
 
 	/* checksum */
 	*(__be16 *)(pkt + 6) = fastpass_checksum(pkt, curp - pkt, saddr, daddr,

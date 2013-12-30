@@ -4,6 +4,8 @@
 	<comment></comment>
 	<projects>
 		<project>dpdk-include</project>
+		<project>graph-algo</project>
+		<project>kernel-module</project>
 	</projects>
 	<buildSpec>
 		<buildCommand>

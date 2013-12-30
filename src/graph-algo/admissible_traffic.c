@@ -32,6 +32,20 @@ struct backlog_edge *dequeue_from_Q_head(struct bin *new_requests) {
     return current;
 }
 
+static inline
+void enqueue_to_Q_bins_out(struct bin *bin_out) {
+    assert(bin_out != NULL);
+
+    // do nothing for now
+}
+
+static inline
+struct bin *dequeue_from_Q_bins_in(struct backlog_queue *queue_in, uint16_t bin) {
+    assert(queue_in != NULL);
+
+    return &queue_in->bins[bin];
+}
+
 
 // Request num_slots additional timeslots from src to dst
 void request_timeslots(struct bin *new_requests, struct admissible_status *status,
@@ -160,30 +174,27 @@ void get_admissible_traffic(struct backlog_queue *queue_in,
     for (i = 0; i < BATCH_SIZE - 1; i++)
         init_bin(&admitted_backlog[i]);
 
-    // Process all bins in queue_in
+    // Process all bins from previous core, then all bins from
+    // residual backlog from traffic admitted in this batch
+    struct bin *last_bin = &queue_out->bins[NUM_BINS - 1];
+    struct bin *current_bin, *bin_out;
     uint16_t bin;
-    for (bin = 0; bin < NUM_BINS; bin++) {
-        struct bin *current_bin = &queue_in->bins[bin];
-        struct bin *bin_out = &queue_out->bins[MAX(0, bin - BATCH_SIZE)];
-        struct bin *last_bin = &queue_out->bins[NUM_BINS - 1];
+    for (bin = 0; bin < NUM_BINS + BATCH_SIZE - 1; bin++) {
+        // Process a bin from a previous core, or from admitted bins
+        if (bin < NUM_BINS)
+            current_bin = dequeue_from_Q_bins_in(queue_in, bin);
+        else
+            current_bin = &admitted_backlog[bin - NUM_BINS];
 
+        bin_out = &queue_out->bins[MAX(0, bin - BATCH_SIZE)];
+
+        // Process this bin
         while (!is_empty_bin(current_bin))
             try_allocation(current_bin, &batch_state, bin_out, last_bin,
                            traffic_out, admitted_backlog, status);
-    }
 
-    // TODO: combine these two loops?
-    // Process the rest of this batch
-    // (src/dst pairs that were already allocated at least once in this batch)
-    uint8_t batch;
-    for (batch = 1; batch < BATCH_SIZE; batch++) {
-        struct bin *current_bin = &admitted_backlog[batch - 1];
-        struct bin *bin_out = &queue_out->bins[NUM_BINS - BATCH_SIZE + batch - 1];
-        struct bin *last_bin = &queue_out->bins[NUM_BINS - 1];
-
-        while (!is_empty_bin(current_bin))
-            try_allocation(current_bin, &batch_state, bin_out, last_bin,
-                           traffic_out, admitted_backlog, status);
+        if (bin >= BATCH_SIZE)
+            enqueue_to_Q_bins_out(bin_out);
     }
 
     // Update current timeslot

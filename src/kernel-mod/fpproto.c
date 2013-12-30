@@ -358,6 +358,88 @@ int update_inwnd(struct fpproto_conn *conn, u64 seqno)
 	return 0; /* accept */
 }
 
+/**
+ * Processes ALLOC payload.
+ * On success, returns the payload length in bytes. On failure returns -1.
+ */
+static int process_alloc(struct fpproto_conn *conn, u8 *data, u8 *data_end)
+{
+	u16 payload_type;
+	int alloc_n_dst, alloc_n_tslots;
+	u16 alloc_dst[16];
+	u32 alloc_base_tslot;
+	u8 *curp = data;
+	int i;
+
+	if (curp + 2 > data_end)
+		goto incomplete_alloc_payload_one_byte;
+
+	payload_type = ntohs(*(u16 *)curp);
+	alloc_n_dst = (payload_type >> 8) & 0xF;
+	alloc_n_tslots = 2 * (payload_type & 0x3F);
+	curp += 2;
+
+	if (curp + 2 + 2 * alloc_n_dst + alloc_n_tslots > data_end)
+		goto incomplete_alloc_payload;
+
+	/* get base timeslot */
+	alloc_base_tslot = ntohs(*(u16 *)curp);
+	alloc_base_tslot <<= 4;
+	curp += 2;
+
+	/* convert destinations from network byte-order */
+	for (i = 0; i < alloc_n_dst; i++, curp += 2)
+		alloc_dst[i] = ntohs(*(u16 *)curp);
+
+	/* process the payload */
+	if (conn->ops->handle_alloc)
+		conn->ops->handle_alloc(conn->ops_param, alloc_base_tslot, alloc_dst, alloc_n_dst,
+			curp, alloc_n_tslots);
+
+	return curp - data;
+
+incomplete_alloc_payload_one_byte:
+	conn->stat.rx_incomplete_alloc++;
+	fastpass_pr_debug("ALLOC payload incomplete, only got one byte\n");
+	return -1;
+
+incomplete_alloc_payload:
+	conn->stat.rx_incomplete_alloc++;
+	fastpass_pr_debug("ALLOC payload incomplete: expected %d bytes, got %d\n",
+			2 + 2 * alloc_n_dst + alloc_n_tslots, (int)(data_end - curp));
+	return -1;
+}
+
+/**
+ * Processes A-REQ payload.
+ * On success, returns the payload length in bytes. On failure returns -1.
+ */
+static int process_areq(struct fpproto_conn *conn, u8 *data, u8 *data_end)
+{
+	u8 *curp = data;
+	u32 n_dst;
+	u16 payload_type;
+
+	if (curp + 2 > data_end) {
+		conn->stat.rx_incomplete_areq++;
+		return -1;
+	}
+
+	payload_type = ntohs(*(u16 *)curp);
+	n_dst = payload_type & 0x3F;
+	curp += 2;
+	if (curp + 4 * n_dst < data_end) {
+		conn->stat.rx_incomplete_areq++;
+		return -1;
+	}
+
+	if (conn->ops->handle_areq)
+		conn->ops->handle_areq(conn->ops_param, (u16 *)curp, n_dst);
+
+	curp += 4 * n_dst;
+	return curp - data;
+}
+
 void fpproto_handle_rx_packet(struct fpproto_conn *conn, u8 *pkt, u32 len,
 		__be32 saddr, __be32 daddr)
 {
@@ -366,12 +448,9 @@ void fpproto_handle_rx_packet(struct fpproto_conn *conn, u8 *pkt, u32 len,
 	u16 payload_type;
 	u64 rst_tstamp = 0;
 	__sum16 checksum;
-	int i;
+	int payload_length;
 	u8 *curp;
 	u8 *data_end;
-	int alloc_n_dst, alloc_n_tslots;
-	u16 alloc_dst[16];
-	u32 alloc_base_tslot;
 	u64 ack_vec;
 	u16 ack_vec16;
 
@@ -386,11 +465,7 @@ void fpproto_handle_rx_packet(struct fpproto_conn *conn, u8 *pkt, u32 len,
 	payload_type = *curp >> 4;
 
 	/* get full 64-bit sequence number for the pseudo-header */
-#ifdef FASTPASS_CONTROLLER
-	if (unlikely(payload_type == FASTPASS_PTYPE_RSTREQ)) {
-#else
 	if (unlikely(payload_type == FASTPASS_PTYPE_RESET)) {
-#endif
 		/* DERIVE SEQNO FROM RESET TIMESTAMP */
 		u64 now = fp_get_time_ns();
 		u64 partial_tstamp;
@@ -464,34 +539,6 @@ handle_payload:
 	payload_type = *curp >> 4;
 
 	switch (payload_type) {
-	case FASTPASS_PTYPE_ALLOC:
-		if (curp + 2 > data_end)
-			goto incomplete_alloc_payload_one_byte;
-
-		payload_type = ntohs(*(u16 *)curp);
-		alloc_n_dst = (payload_type >> 8) & 0xF;
-		alloc_n_tslots = 2 * (payload_type & 0x3F);
-		curp += 2;
-
-		if (curp + 2 + 2 * alloc_n_dst + alloc_n_tslots > data_end)
-			goto incomplete_alloc_payload;
-
-		/* get base timeslot */
-		alloc_base_tslot = ntohs(*(u16 *)curp);
-		alloc_base_tslot <<= 4;
-		curp += 2;
-
-		/* convert destinations from network byte-order */
-		for (i = 0; i < alloc_n_dst; i++, curp += 2)
-			alloc_dst[i] = ntohs(*(u16 *)curp);
-
-		/* process the payload */
-		if (conn->ops->handle_alloc)
-			conn->ops->handle_alloc(conn->ops_param, alloc_base_tslot, alloc_dst, alloc_n_dst,
-				curp, alloc_n_tslots);
-
-		curp += alloc_n_tslots;
-		break;
 	case FASTPASS_PTYPE_ACK:
 		if (curp + 6 > data_end)
 			goto incomplete_ack_payload;
@@ -503,6 +550,25 @@ handle_payload:
 
 		curp += 6;
 		break;
+
+	case FASTPASS_PTYPE_ALLOC:
+		payload_length = process_alloc(conn, curp, data_end);
+
+		if (unlikely(payload_length == -1))
+			return;
+
+		curp += payload_length;
+		break;
+
+	case FASTPASS_PTYPE_AREQ:
+		payload_length = process_areq(conn, curp, data_end);
+
+		if (unlikely(payload_length == -1))
+			return;
+
+		curp += payload_length;
+		break;
+
 	default:
 		goto unknown_payload_type;
 	}
@@ -523,17 +589,6 @@ incomplete_reset_payload:
 	conn->stat.rx_incomplete_reset++;
 	fastpass_pr_debug("RESET payload incomplete, expected 8 bytes, got %d\n",
 			(int)(data_end - curp));
-	return;
-
-incomplete_alloc_payload_one_byte:
-	conn->stat.rx_incomplete_alloc++;
-	fastpass_pr_debug("ALLOC payload incomplete, only got one byte\n");
-	return;
-
-incomplete_alloc_payload:
-	conn->stat.rx_incomplete_alloc++;
-	fastpass_pr_debug("ALLOC payload incomplete: expected %d bytes, got %d\n",
-			2 + 2 * alloc_n_dst + alloc_n_tslots, (int)(data_end - curp));
 	return;
 
 incomplete_ack_payload:

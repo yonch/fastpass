@@ -5,6 +5,13 @@
 #ifndef FPPROTO_H_
 #define FPPROTO_H_
 
+#if (defined(FASTPASS_CONTROLLER) && defined(FASTPASS_ENDPOINT))
+#error "Both FASTPASS_CONTROLLER and FASTPASS_ENDPOINT are defined"
+#endif
+#if !(defined(FASTPASS_CONTROLLER) || defined(FASTPASS_ENDPOINT))
+#error "Neither FASTPASS_CONTROLLER or FASTPASS_ENDPOINT is defined"
+#endif
+
 #include "fp_statistics.h"
 #include "window.h"
 
@@ -41,8 +48,10 @@ struct fpproto_areq_desc {
  * @sent_timestamp: a timestamp when the request was sent
  */
 struct fpproto_pktdesc {
+#ifdef FASTPASS_ENDPOINT
 	u16							n_areq;
 	struct fpproto_areq_desc	areq[FASTPASS_PKT_MAX_AREQ];
+#endif
 
 	u64							sent_timestamp;
 	u64							seqno;
@@ -57,9 +66,6 @@ struct fpproto_pktdesc {
  */
 struct fpproto_ops {
 	void 	(*handle_reset)(void *param);
-
-	void	(*handle_alloc)(void *param, u32 base_tslot,
-			u16 *dst, int n_dst, u8 *tslots, int n_tslots);
 
 	/**
 	 * Called when an ack is received for a sent packet.
@@ -79,6 +85,19 @@ struct fpproto_ops {
 	 */
 	void	(*trigger_request)(void *param, u64 when);
 
+	/**
+	 * Called for an ALLOC payload
+	 */
+	void	(*handle_alloc)(void *param, u32 base_tslot,
+			u16 *dst, int n_dst, u8 *tslots, int n_tslots);
+
+	/**
+	 * Called for every A-REQ payload
+	 * @dst_and_count: a 16-bit destination, then a 16-bit demand count, in
+	 *   network byte-order
+	 * @n: the number of dst+count pairs
+	 */
+	void	(*handle_areq)(void *param, u16 *dst_and_count, int n);
 };
 
 /**

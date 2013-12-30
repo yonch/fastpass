@@ -11,7 +11,13 @@
 #include <stdio.h>
 #include <string.h>
 #include <stdlib.h>
+#include <stdint.h>
+
+#ifdef _RTE_IP_H_
+#define ntohs(x) rte_be_to_cpu_16(x)
+#else
 #include <arpa/inet.h>
+#endif
 
 #define CONFIG_64BIT
 
@@ -77,8 +83,13 @@ enum {
 	true	= 1
 };
 
+#ifndef unlikely
 #define unlikely
+#endif
+
+#ifndef likely
 #define likely
+#endif
 
 /* typecheck.h */
 #define typecheck(type,x) \

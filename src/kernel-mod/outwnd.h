@@ -58,7 +58,7 @@ static inline void outwnd_test(struct fpproto_conn* conn) {
 
 	struct fp_window *ow = &conn->outwnd;
 
-	fastpass_pr_debug("testing outwnd\n");
+	fp_debug("testing outwnd\n");
 	wnd_reset(ow, BASE - 1);
 	for(tslot = BASE - FASTPASS_WND_LEN; tslot < BASE; tslot++) {
 		BUG_ON(wnd_at_or_before(ow, tslot) != -1);
@@ -97,7 +97,7 @@ static inline void outwnd_test(struct fpproto_conn* conn) {
 	BUG_ON(outwnd_pop(conn, BASE+1) != (void *)0xFF01L);
 	BUG_ON(wnd_earliest_marked(ow) != BASE+152);
 
-	fastpass_pr_debug("done testing outwnd, cleaning up\n");
+	fp_debug("done testing outwnd, cleaning up\n");
 
 	/* clean up */
 	tslot = wnd_head(ow);

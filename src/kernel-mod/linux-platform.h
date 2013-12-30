@@ -11,6 +11,10 @@
 #include "fpproto.h"
 #include "fastpass_proto.h"
 
+#define FASTPASS_PR_DEBUG(enable, fmt, a...)	do { if (enable)	     \
+							printk(KERN_DEBUG "%s: " fmt, __func__, ##a); \
+						} while(0)
+
 static inline u64 fp_get_time_ns(void)
 {
 	return ktime_to_ns(ktime_get_real());
@@ -37,7 +41,7 @@ int cancel_timer(struct fpproto_conn *proto)
 	struct fastpass_sock *fp = container_of(proto, struct fastpass_sock, conn);
 
 	if (unlikely(hrtimer_try_to_cancel(&fp->retrans_timer) == -1)) {
-		fastpass_pr_debug("could not cancel timer. tasklet will reset timer\n");
+		fp_debug("could not cancel timer. tasklet will reset timer\n");
 		return -1;
 	}
 

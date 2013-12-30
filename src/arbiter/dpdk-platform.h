@@ -6,6 +6,10 @@
 #include "../kernel-mod/linux-compat.h"
 #include "comm_log.h"
 
+#define FASTPASS_PR_DEBUG(enable, fmt, a...)	do { if (enable)	     \
+							COMM_DEBUG("%s: " fmt, __func__, ##a); \
+						} while(0)
+
 static inline u64 fp_get_time_ns(void)
 {
 	struct timespec tp;

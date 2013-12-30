@@ -18,9 +18,9 @@
 #include <net/pkt_sched.h>
 
 #include "fastpass_proto.h"
-#include "outwnd.h"
 #include "debug.h"
 #include "platform.h"
+#include "outwnd.h"
 
 struct inet_hashinfo fastpass_hashinfo;
 EXPORT_SYMBOL_GPL(fastpass_hashinfo);
@@ -116,7 +116,7 @@ static void retrans_tasklet(unsigned long int param)
 	return;
 
 qdisc_destroyed:
-	fastpass_pr_debug("qdisc seems to have been destroyed\n");
+	fp_debug("qdisc seems to have been destroyed\n");
 	return;
 }
 
@@ -136,14 +136,14 @@ int fpproto_rcv(struct sk_buff *skb)
 	inet = inet_sk(sk);
 
 	if (sk == NULL) {
-		fastpass_pr_debug("got packet on non-connected socket\n");
+		fp_debug("got packet on non-connected socket\n");
 		kfree_skb(skb);
 		return NET_RX_SUCCESS;
 	}
 
 	sch = fpproto_lock_qdisc(sk);
 	if (unlikely(sch == NULL)) {
-		fastpass_pr_debug("qdisc seems to have been destroyed\n");
+		fp_debug("qdisc seems to have been destroyed\n");
 		kfree_skb(skb);
 		return NET_RX_SUCCESS;
 	}
@@ -242,7 +242,7 @@ out:
 /* close the socket */
 static void fpproto_close(struct sock *sk, long timeout)
 {
-	fastpass_pr_debug("visited\n");
+	fp_debug("visited\n");
 
 	sk_common_release(sk);
 }
@@ -252,7 +252,7 @@ static int fpproto_disconnect(struct sock *sk, int flags)
 {
 	struct inet_sock *inet = inet_sk(sk);
 
-	fastpass_pr_debug("visited\n");
+	fp_debug("visited\n");
 
 	sk->sk_state = TCP_CLOSE;
 	inet->inet_daddr = 0;
@@ -275,7 +275,7 @@ static void fpproto_destroy_sock(struct sock *sk)
 {
 	struct fastpass_sock *fp = fastpass_sk(sk);
 
-	fastpass_pr_debug("visited\n");
+	fp_debug("visited\n");
 
 	/* might not be necessary, doing for safety */
 	fpproto_set_qdisc(sk, NULL);
@@ -320,7 +320,7 @@ void fpproto_send_packet(struct sock *sk, struct fpproto_pktdesc *pd)
 	/* adjust the size of the skb based on encoded size */
 	skb_put(skb, payload_len);
 
-	fastpass_pr_debug("sending packet\n");
+	fp_debug("sending packet\n");
 
 	bh_lock_sock(sk);
 
@@ -329,7 +329,7 @@ void fpproto_send_packet(struct sock *sk, struct fpproto_pktdesc *pd)
 	err = net_xmit_eval(err);
 	if (unlikely(err != 0)) {
 		fp->stat.xmit_errors++;
-		fastpass_pr_debug("got error %d from ip_queue_xmit\n", err);
+		fp_debug("got error %d from ip_queue_xmit\n", err);
 	}
 
 	bh_unlock_sock(sk);
@@ -337,8 +337,8 @@ void fpproto_send_packet(struct sock *sk, struct fpproto_pktdesc *pd)
 
 alloc_err:
 	fp->stat.skb_alloc_error++;
-	fastpass_pr_debug("could not alloc skb of size %d\n",
-			max_payload_len + max_header);
+	fp_debug("could not alloc skb of size %d\n",
+			FASTPASS_MAX_PAYLOAD + max_header);
 	/* no need to unlock */
 }
 
@@ -346,7 +346,7 @@ static int fpproto_sk_init(struct sock *sk)
 {
 	struct fastpass_sock *fp = fastpass_sk(sk);
 
-	fastpass_pr_debug("visited\n");
+	fp_debug("visited\n");
 
 	/* bind all sockets to port 1, to avoid inet_autobind */
 	inet_sk(sk)->inet_num = ntohs(FASTPASS_DEFAULT_PORT_NETORDER);
@@ -397,17 +397,17 @@ static int fpproto_backlog_rcv(struct sock *sk, struct sk_buff *skb)
 
 static inline void fpproto_hash(struct sock *sk)
 {
-	fastpass_pr_debug("visited\n");
+	fp_debug("visited\n");
 	inet_hash(sk);
 }
 static void fpproto_unhash(struct sock *sk)
 {
-	fastpass_pr_debug("visited\n");
+	fp_debug("visited\n");
 	inet_unhash(sk);
 }
 static void fpproto_rehash(struct sock *sk)
 {
-	fastpass_pr_debug("before %X\n", sk->sk_hash);
+	fp_debug("before %X\n", sk->sk_hash);
 	sk->sk_prot->unhash(sk);
 
 	sk->sk_state = TCP_ESTABLISHED;
@@ -415,7 +415,7 @@ static void fpproto_rehash(struct sock *sk)
 	inet_sk(sk)->inet_daddr = inet_sk(sk)->cork.fl.u.ip4.daddr;
 	sk->sk_prot->hash(sk);
 
-	fastpass_pr_debug("after %X\n", sk->sk_hash);
+	fp_debug("after %X\n", sk->sk_hash);
 }
 static int fpproto_bind(struct sock *sk, struct sockaddr *uaddr,
 		int addr_len)

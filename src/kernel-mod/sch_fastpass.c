@@ -227,7 +227,7 @@ void req_timer_flowqueue_enqueue(struct fp_sched_data* q)
 	/* if enqueued first flow in q->unreq_flows, set request timer */
 	if (q->time_next_req == NO_NEXT_REQUEST) {
 		set_request_timer(q, fp_get_time_ns());
-		fastpass_pr_debug("set request timer to %llu\n", q->time_next_req);
+		fp_debug("set request timer to %llu\n", q->time_next_req);
 	}
 }
 
@@ -433,7 +433,7 @@ cannot_classify:
 	if (unlikely(skb->protocol != htons(ETH_P_ARP))) {
 		q->stat.classify_errors++;
 		if (fastpass_debug) {
-			fastpass_pr_debug("cannot classify packet with protocol %u:\n", skb->protocol);
+			fp_debug("cannot classify packet with protocol %u:\n", skb->protocol);
 			print_hex_dump(KERN_DEBUG, "cannot classify: ", DUMP_PREFIX_OFFSET,
 					16, 1, skb->data, min_t(size_t, skb->len, 64), false);
 		}
@@ -470,7 +470,7 @@ static bool flow_is_below_watermark(struct fp_flow* f)
 void flow_inc_alloc(struct fp_sched_data* q, struct fp_flow* f)
 {
 	if (unlikely(f->alloc_tslots == f->demand_tslots)) {
-		fastpass_pr_debug("got an allocation over demand, flow 0x%04llX, demand %llu\n",
+		fp_debug("got an allocation over demand, flow 0x%04llX, demand %llu\n",
 				f->src_dst_key, f->demand_tslots);
 		q->stat.unwanted_alloc++;
 		return;
@@ -574,7 +574,7 @@ static int fpq_enqueue(struct sk_buff *skb, struct Qdisc *sch)
 
 	/* queue skb to flow, update statistics */
 	flow_enqueue_skb(sch, f, skb);
-	fastpass_pr_debug("enqueued packet of len %d to flow 0x%llX, qlen=%d\n",
+	fp_debug("enqueued packet of len %d to flow 0x%llX, qlen=%d\n",
 			qdisc_pkt_len(skb), f->src_dst_key, f->qlen);
 
 	/* internal queue flows without scheduling */
@@ -601,7 +601,7 @@ static void move_timeslot_from_flow(struct Qdisc *sch, struct psched_ratecfg *ra
 		u32 skb_len = qdisc_pkt_len(flow_queue_peek(src));
 		u64 skb_ns = psched_l2t_ns(rate, skb_len);
 
-		fastpass_pr_debug("credit=%llu, pkt_len=%u, cost=%llu\n",
+		fp_debug("credit=%llu, pkt_len=%u, cost=%llu\n",
 				credit, skb_len, skb_ns);
 		credit -= (s64) skb_ns;
 		if (credit < 0)
@@ -612,7 +612,7 @@ static void move_timeslot_from_flow(struct Qdisc *sch, struct psched_ratecfg *ra
 		count++;
 	}
 
-	fastpass_pr_debug("@%llu moved %u out of %u packets from %llu (0x%04llx)\n",
+	fp_debug("@%llu moved %u out of %u packets from %llu (0x%04llx)\n",
 			q->horizon.timeslot, count, src->qlen + count, src->src_dst_key,
 			src->src_dst_key);
 }
@@ -672,7 +672,7 @@ begin:
 		/* move to the new slot */
 		q->tslot_start_time += tslot_advance * q->tslot_len;
 		horizon_advance(&q->horizon, tslot_advance);
-		fastpass_pr_debug("moved by %llu timeslots to empty timeslot %llu\n",
+		fp_debug("moved by %llu timeslots to empty timeslot %llu\n",
 				tslot_advance, q->horizon.timeslot);
 
 		return;
@@ -685,7 +685,7 @@ begin:
 	/* did we encounter a scheduled slot that is in the past */
 	if (unlikely(time_after_eq64(now, q->tslot_start_time + q->tslot_len))) {
 		q->stat.missed_timeslots++;
-		fastpass_pr_debug("missed timeslot %llu by %llu ns, rescheduling\n",
+		fp_debug("missed timeslot %llu by %llu ns, rescheduling\n",
 				q->horizon.timeslot, now - (q->tslot_start_time + q->tslot_len));
 		handle_out_of_bounds_allocation(q, horizon_current_key(q));
 		horizon_unmark_current(&q->horizon);
@@ -714,11 +714,11 @@ void set_watchdog(struct Qdisc* sch) {
 	next_slot = horizon_next_nonempty(&q->horizon);
 	if (unlikely(next_slot < 0)) {
 		qdisc_throttled(sch);
-		fastpass_pr_debug("horizon empty. throttling qdisc\n");
+		fp_debug("horizon empty. throttling qdisc\n");
 	} else {
 		qdisc_watchdog_schedule_ns(&q->watchdog,
 				q->tslot_start_time + next_slot * q->tslot_len);
-		fastpass_pr_debug("scheduled %d tslots in future, at %llu\n",
+		fp_debug("scheduled %d tslots in future, at %llu\n",
 				next_slot, q->tslot_start_time + next_slot * q->tslot_len);
 	}
 }
@@ -764,7 +764,7 @@ static void handle_reset(void *param)
 				BUG_ON(f->state != FLOW_UNQUEUED);
 				/* erase from old tree */
 				rb_erase(cur, root);
-				fastpass_pr_debug("gc flow 0x%04llX, used %llu timeslots\n",
+				fp_debug("gc flow 0x%04llX, used %llu timeslots\n",
 						f->src_dst_key, f->demand_tslots);
 				q->stat.gc_flows++;
 				continue;
@@ -779,7 +779,7 @@ static void handle_reset(void *param)
 			q->flows++;
 			q->demand_tslots += f->demand_tslots;
 
-			fastpass_pr_debug("rebased flow 0x%04llX, new demand %llu timeslots\n",
+			fp_debug("rebased flow 0x%04llX, new demand %llu timeslots\n",
 					f->src_dst_key, f->demand_tslots);
 
 			/* add flow to request queue if it's not already there */
@@ -807,7 +807,7 @@ static void handle_alloc(void *param, u32 base_tslot, u16 *dst,
 	full_tslot = q->horizon.timeslot - (1ULL << 18); /* 1/4 back, 3/4 front */
 	full_tslot += ((u32)base_tslot - (u32)full_tslot) & 0xFFFFF; /* 20 bits */
 
-	fastpass_pr_debug("got ALLOC for timeslot %d (full %llu, current %llu), %d destinations, %d timeslots, mask 0x%016llX\n",
+	fp_debug("got ALLOC for timeslot %d (full %llu, current %llu), %d destinations, %d timeslots, mask 0x%016llX\n",
 			base_tslot, full_tslot, q->horizon.timeslot, n_dst, n_tslots, q->horizon.mask);
 
 	for (i = 0; i < n_tslots; i++) {
@@ -818,7 +818,7 @@ static void handle_alloc(void *param, u32 base_tslot, u16 *dst,
 			/* Skip instruction */
 			base_tslot += 16 * (1 + (spec & 0xF));
 			full_tslot += 16 * (1 + (spec & 0xF));
-			fastpass_pr_debug("ALLOC skip to timeslot %d full %llu (no allocation)\n",
+			fp_debug("ALLOC skip to timeslot %d full %llu (no allocation)\n",
 					base_tslot, full_tslot);
 			continue;
 		}
@@ -832,35 +832,35 @@ static void handle_alloc(void *param, u32 base_tslot, u16 *dst,
 
 		base_tslot += 1 + (spec & 0xF);
 		full_tslot += 1 + (spec & 0xF);
-		fastpass_pr_debug("Timeslot %d (full %llu) to destination 0x%04x (%d)\n",
+		fp_debug("Timeslot %d (full %llu) to destination 0x%04x (%d)\n",
 				base_tslot, full_tslot, dst[dst_ind - 1], dst[dst_ind - 1]);
 
 		if (unlikely(full_tslot <= q->horizon.timeslot)) {
 			/* this allocation is too late */
 			q->stat.alloc_too_late++;
 			handle_out_of_bounds_allocation(q, dst[dst_ind - 1]);
-			fastpass_pr_debug("-X- already gone, will reschedule\n");
+			fp_debug("-X- already gone, will reschedule\n");
 		} else if (unlikely(full_tslot >= q->horizon.timeslot + FASTPASS_HORIZON)) {
 			q->stat.alloc_premature++;
 			handle_out_of_bounds_allocation(q, dst[dst_ind - 1]);
-			fastpass_pr_debug("-X- too futuristic, will reschedule\n");
+			fp_debug("-X- too futuristic, will reschedule\n");
 		} else {
 			/* okay, allocate */
 			horizon_set(q, full_tslot, dst[dst_ind - 1]);
 		}
 	}
 
-	fastpass_pr_debug("mask after: 0x%016llX, is marked=%d\n",
+	fp_debug("mask after: 0x%016llX, is marked=%d\n",
 			q->horizon.mask, horizon_cur_is_marked(&q->horizon));
 
 	/* schedule transmission or set watchdog */
 	if (unlikely(q->internal.qlen != 0)) {
-		fastpass_pr_debug("queue is non-empty, will let dequeue reset watchdog\n");
+		fp_debug("queue is non-empty, will let dequeue reset watchdog\n");
 		return; /* don't want to sabotage current queue */
 	}
 
 	if (q->horizon.mask & 1ULL) {
-		fastpass_pr_debug("current timeslot is allocated, unthrottling qdisc\n");
+		fp_debug("current timeslot is allocated, unthrottling qdisc\n");
 		qdisc_unthrottled(sch);
 		__netif_schedule(qdisc_root(sch));
 	} else {
@@ -886,7 +886,7 @@ static void handle_ack(void *param, struct fpproto_pktdesc *pd)
 			delta = new_acked - f->acked_tslots;
 			q->acked_tslots += delta;
 			f->acked_tslots = new_acked;
-			fastpass_pr_debug("acked request of %llu additional slots, flow 0x%04llX, total %llu slots\n",
+			fp_debug("acked request of %llu additional slots, flow 0x%04llX, total %llu slots\n",
 					delta, f->src_dst_key, new_acked);
 		}
 	}
@@ -908,21 +908,21 @@ static void handle_neg_ack(void *param, struct fpproto_pktdesc *pd)
 		req_tslots = pd->areq[i].tslots;
 		/* don't need to resend if got ack >= req_tslots */
 		if (req_tslots <= f->acked_tslots) {
-			fastpass_pr_debug("nack for request of %llu for flow 0x%04llX, but already acked %llu\n",
+			fp_debug("nack for request of %llu for flow 0x%04llX, but already acked %llu\n",
 							req_tslots, f->src_dst_key, f->acked_tslots);
 			continue;
 		}
 
 		/* don't need to re-add if already in queue */
 		if (unlikely(f->state == FLOW_RETRANSMIT_QUEUE)) {
-			fastpass_pr_debug("nack for flow 0x%04llX, already queued for retransmission\n",
+			fp_debug("nack for flow 0x%04llX, already queued for retransmission\n",
 					f->src_dst_key);
 			continue;
 		}
 
 		/* add to retransmit queue */
 		flowqueue_enqueue_retransmit(q, f);
-		fastpass_pr_debug("nack for request of %llu for flow 0x%04llX (%llu acked), added to retransmit queue\n",
+		fp_debug("nack for request of %llu for flow 0x%04llX (%llu acked), added to retransmit queue\n",
 						req_tslots, f->src_dst_key, f->acked_tslots);
 	}
 	fpproto_pktdesc_free(pd);
@@ -948,7 +948,7 @@ static void send_request(struct Qdisc *sch, u64 now)
 		return;
 	}
 
-	fastpass_pr_debug(
+	fp_debug(
 			"start: unreq_flows=%u, unreq_tslots=%llu, now=%llu, scheduled=%llu, diff=%lld, next_seq=%08llX\n",
 			q->n_unreq_flows, q->demand_tslots - q->requested_tslots, now,
 			q->time_next_req, (s64 )now - (s64 )q->time_next_req,
@@ -959,7 +959,7 @@ static void send_request(struct Qdisc *sch, u64 now)
 			q->req_t, q->req_cost, now, (s64)now - (s64)(q->req_t + q->req_cost));
 	if(flowqueue_is_empty(q)) {
 		q->stat.request_with_empty_flowqueue++;
-		fastpass_pr_debug("was called with no flows pending (could be due to bad packets?)\n");
+		fp_debug("was called with no flows pending (could be due to bad packets?)\n");
 	}
 	BUG_ON(!q->ctrl_sock);
 
@@ -982,7 +982,7 @@ static void send_request(struct Qdisc *sch, u64 now)
 				f->alloc_tslots + FASTPASS_REQUEST_WINDOW_SIZE - 1);
 		if(new_requested <= f->acked_tslots) {
 			q->stat.queued_flow_already_acked++;
-			fastpass_pr_debug("flow 0x%04llX was in queue, but already fully acked\n",
+			fp_debug("flow 0x%04llX was in queue, but already fully acked\n",
 					f->src_dst_key);
 			continue;
 		}
@@ -996,7 +996,7 @@ static void send_request(struct Qdisc *sch, u64 now)
 		pkt->n_areq++;
 	}
 
-	fastpass_pr_debug("end: unreq_flows=%u, unreq_tslots=%llu\n",
+	fp_debug("end: unreq_flows=%u, unreq_tslots=%llu\n",
 			q->n_unreq_flows, q->demand_tslots - q->requested_tslots);
 
 	q->stat.requests++;
@@ -1015,7 +1015,7 @@ out:
 
 alloc_err:
 	q->stat.req_alloc_errors++;
-	fastpass_pr_debug("request allocation failed\n");
+	fp_debug("request allocation failed\n");
 	goto out;
 }
 

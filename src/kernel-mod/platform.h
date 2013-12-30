@@ -12,6 +12,12 @@
 #endif
 
 /** FUNCTIONS IN PLATFORM.H **/
+/**
+ * #define FASTPASS_PR_DEBUG(enable, fmt, a...)
+ *
+ * Outputs debug string
+ */
+
 /*
  * int cancel_timer(struct fpproto_conn *proto);
  *

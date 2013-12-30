@@ -15,6 +15,8 @@
 #include "../kernel-mod/fpproto.h"
 #include "../graph-algo/admissible_structures.h"
 
+bool fastpass_debug;
+
 static struct fp_window triggered_nodes;
 
 struct end_node_conn {
@@ -49,11 +51,14 @@ struct fpproto_ops proto_ops = {
 void comm_init_shared_structs(void)
 {
 	u32 i;
+
+	fastpass_debug = true;
+
 	for (i = 0; i < MAX_NODES; i++)
 		fpproto_init_conn(&endnode_conns[i], &proto_ops,&endnode_conns[i],
 				FASTPASS_RESET_WINDOW_NS, CONTROLLER_SEND_TIMEOUT_NS);
 
-	wnd_reset(triggered_nodes, 255);
+	wnd_reset(&triggered_nodes, 255);
 }
 
 /**

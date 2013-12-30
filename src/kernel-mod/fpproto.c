@@ -65,7 +65,7 @@ static void cancel_and_reset_retrans_timer(struct fpproto_conn *conn)
 	cancel_timer(conn);
 
 	if (wnd_empty(&conn->outwnd)) {
-		fastpass_pr_debug("all packets acked, no need to set timer\n");
+		fp_debug("all packets acked, no need to set timer\n");
 		return;
 	}
 
@@ -78,7 +78,7 @@ static void cancel_and_reset_retrans_timer(struct fpproto_conn *conn)
 	conn->earliest_unacked = seqno;
 	set_timer(conn, timeout);
 	conn->stat.reprogrammed_timer++;
-	fastpass_pr_debug("setting timer to %llu for seq#=0x%llX\n", timeout, seqno);
+	fp_debug("setting timer to %llu for seq#=0x%llX\n", timeout, seqno);
 }
 
 static void do_ack_seqno(struct fpproto_conn *conn, u64 seqno)
@@ -88,7 +88,7 @@ static void do_ack_seqno(struct fpproto_conn *conn, u64 seqno)
 	BUG_ON(wnd_seq_after(&conn->outwnd, seqno));
 	BUG_ON(wnd_seq_before(&conn->outwnd,seqno));
 
-	fastpass_pr_debug("ACK seqno 0x%08llX\n", seqno);
+	fp_debug("ACK seqno 0x%08llX\n", seqno);
 	conn->stat.acked_packets++;
 	BUG_ON(!wnd_is_marked(&conn->outwnd, seqno));
 	pd = outwnd_pop(conn, seqno);
@@ -102,7 +102,7 @@ static void do_ack_seqno(struct fpproto_conn *conn, u64 seqno)
 static void do_neg_ack_seqno(struct fpproto_conn *conn, u64 seq)
 {
 	struct fpproto_pktdesc *pd = outwnd_pop(conn, seq);
-	fastpass_pr_debug("Unacked tx seq 0x%llX\n", seq);
+	fp_debug("Unacked tx seq 0x%llX\n", seq);
 	if (conn->ops->handle_neg_ack)
 		conn->ops->handle_neg_ack(conn->ops_param, pd);		/* will free pd */
 	else
@@ -170,14 +170,14 @@ void fpproto_handle_timeout(struct fpproto_conn *conn, u64 now)
 		conn->stat.timeout_pkts++;
 		do_neg_ack_seqno(conn, seqno);
 	}
-	fastpass_pr_debug("outwnd empty, not setting timer\n");
+	fp_debug("outwnd empty, not setting timer\n");
 	return;
 
 set_next_timer:
 	/* seqno is the earliest unacked seqno, and timeout is its timeout */
 	conn->earliest_unacked = seqno;
 	set_timer(conn, timeout);
-	fastpass_pr_debug("setting timer to %llu for seq#=0x%llX\n", timeout, seqno);
+	fp_debug("setting timer to %llu for seq#=0x%llX\n", timeout, seqno);
 }
 
 /*
@@ -188,23 +188,23 @@ static int reset_payload_handler(struct fpproto_conn *conn, u64 full_tstamp)
 	u64 now = fp_get_time_ns();
 
 	conn->stat.reset_payloads++;
-	fastpass_pr_debug("got RESET, last is 0x%llX, full 0x%llX, now 0x%llX\n",
+	fp_debug("got RESET, last is 0x%llX, full 0x%llX, now 0x%llX\n",
 			conn->last_reset_time, full_tstamp, now);
 
 	if (full_tstamp == conn->last_reset_time) {
 		if (!conn->in_sync) {
 			conn->in_sync = 1;
-			fastpass_pr_debug("Now in sync\n");
+			fp_debug("Now in sync\n");
 		} else {
 			conn->stat.redundant_reset++;
-			fastpass_pr_debug("received redundant reset\n");
+			fp_debug("received redundant reset\n");
 		}
 		return 0;
 	}
 
 	/* reject resets outside the time window */
 	if (unlikely(!tstamp_in_window(full_tstamp, now, conn->rst_win_ns))) {
-		fastpass_pr_debug("Reset was out of reset window (diff=%lld)\n",
+		fp_debug("Reset was out of reset window (diff=%lld)\n",
 				(s64)full_tstamp - (s64)now);
 		conn->stat.reset_out_of_window++;
 		return 1;
@@ -213,7 +213,7 @@ static int reset_payload_handler(struct fpproto_conn *conn, u64 full_tstamp)
 	/* if we already processed a newer reset within the window */
 	if (unlikely(tstamp_in_window(conn->last_reset_time, now, conn->rst_win_ns)
 			&& time_before64(full_tstamp, conn->last_reset_time))) {
-		fastpass_pr_debug("Already processed reset within window which is %lluns more recent\n",
+		fp_debug("Already processed reset within window which is %lluns more recent\n",
 						conn->last_reset_time - full_tstamp);
 		conn->stat.outdated_reset++;
 		return 1;
@@ -242,7 +242,7 @@ static void ack_payload_handler(struct fpproto_conn *conn, u64 ack_seq, u64 ack_
 
 	unacked_mask = wnd_get_mask(&conn->outwnd, ack_seq);
 
-	fastpass_pr_debug("handling ack_seq 0x%llX ack_vec 0x%016llX unacked 0x%016llX\n",
+	fp_debug("handling ack_seq 0x%llX ack_vec 0x%016llX unacked 0x%016llX\n",
 				ack_seq, ack_vec, unacked_mask);
 
 	todo_mask = ack_vec & unacked_mask;
@@ -267,7 +267,7 @@ static void ack_payload_handler(struct fpproto_conn *conn, u64 ack_seq, u64 ack_
 	return;
 
 ack_too_early:
-	fastpass_pr_debug("too_early_ack: earliest %llu, got %llu\n",
+	fp_debug("too_early_ack: earliest %llu, got %llu\n",
 			wnd_edge(&conn->outwnd), ack_seq);
 	conn->stat.too_early_ack++;
 }
@@ -282,7 +282,7 @@ static void got_bad_packet(struct fpproto_conn *conn)
 	u64 now = fp_get_time_ns();
 
 	conn->consecutive_bad_pkts++;
-	fastpass_pr_debug("#%u consecutive bad packets\n", conn->consecutive_bad_pkts);
+	fp_debug("#%u consecutive bad packets\n", conn->consecutive_bad_pkts);
 
 	if (conn->consecutive_bad_pkts < FASTPASS_BAD_PKT_RESET_THRESHOLD)
 		goto out;
@@ -299,7 +299,7 @@ static void got_bad_packet(struct fpproto_conn *conn)
 			now + FASTPASS_RESET_WINDOW_NS)) {
 		/* will not trigger a new one */
 		conn->stat.no_reset_because_recent++;
-		fastpass_pr_debug("had a recent reset (last %llu, now %llu). not issuing a new one.\n",
+		fp_debug("had a recent reset (last %llu, now %llu). not issuing a new one.\n",
 				conn->last_reset_time, now);
 	} else {
 		/* Will send a RSTREQ */
@@ -402,12 +402,12 @@ static int process_alloc(struct fpproto_conn *conn, u8 *data, u8 *data_end)
 
 incomplete_alloc_payload_one_byte:
 	conn->stat.rx_incomplete_alloc++;
-	fastpass_pr_debug("ALLOC payload incomplete, only got one byte\n");
+	fp_debug("ALLOC payload incomplete, only got one byte\n");
 	return -1;
 
 incomplete_alloc_payload:
 	conn->stat.rx_incomplete_alloc++;
-	fastpass_pr_debug("ALLOC payload incomplete: expected %d bytes, got %d\n",
+	fp_debug("ALLOC payload incomplete: expected %d bytes, got %d\n",
 			2 + 2 * alloc_n_dst + alloc_n_tslots, (int)(data_end - curp));
 	return -1;
 }
@@ -500,7 +500,7 @@ void fpproto_handle_rx_packet(struct fpproto_conn *conn, u8 *pkt, u32 len,
 	}
 	in_seq += (ntohs(hdr->seq) - in_seq) & 0xFFFF;
 	ack_seq += (ntohs(hdr->ack_seq) - ack_seq) & 0xFFFF;
-	fastpass_pr_debug("packet with in_seq 0x%04X (full 0x%llX, prev_max 0x%llX)"
+	fp_debug("packet with in_seq 0x%04X (full 0x%llX, prev_max 0x%llX)"
 			"ack_seq 0x%04X (full 0x%llX, max_sent 0x%llX)\n",
 			ntohs(hdr->seq), in_seq, conn->in_max_seqno,
 			ntohs(hdr->ack_seq), ack_seq, conn->next_seqno - 1);
@@ -583,30 +583,30 @@ handle_payload:
 
 unknown_payload_type:
 	conn->stat.rx_unknown_payload++;
-	fastpass_pr_debug("got unknown payload type %d at offset %lld\n",
+	fp_debug("got unknown payload type %d at offset %lld\n",
 			payload_type, (s64)(curp - pkt));
 	return;
 
 incomplete_reset_payload:
 	conn->stat.rx_incomplete_reset++;
-	fastpass_pr_debug("RESET payload incomplete, expected 8 bytes, got %d\n",
+	fp_debug("RESET payload incomplete, expected 8 bytes, got %d\n",
 			(int)(data_end - curp));
 	return;
 
 incomplete_ack_payload:
 	conn->stat.rx_incomplete_ack++;
-	fastpass_pr_debug("ACK payload incomplete: expected 6 bytes, got %d\n",
+	fp_debug("ACK payload incomplete: expected 6 bytes, got %d\n",
 			(int)(data_end - curp));
 	return;
 
 bad_checksum:
 	conn->stat.rx_checksum_error++;
-	fastpass_pr_debug("checksum error. expected 0, got 0x%04X\n", checksum);
+	fp_debug("checksum error. expected 0, got 0x%04X\n", checksum);
 	return;
 
 packet_too_short:
 	conn->stat.rx_too_short++;
-	fastpass_pr_debug("packet less than minimal size (len=%d)\n", len);
+	fp_debug("packet less than minimal size (len=%d)\n", len);
 	return;
 }
 
@@ -663,7 +663,7 @@ void fpproto_commit_packet(struct fpproto_conn *conn, struct fpproto_pktdesc *pd
 		u64 timeout = pd->sent_timestamp + conn->send_timeout_us;
 		conn->earliest_unacked = pd->seqno;
 		set_timer(conn, timeout);
-		fastpass_pr_debug("first packet in outwnd. setting timer to %llu for seq#=0x%llX\n", timeout, pd->seqno);
+		fp_debug("first packet in outwnd. setting timer to %llu for seq#=0x%llX\n", timeout, pd->seqno);
 	}
 }
 

@@ -7,10 +7,11 @@ APP = fast
 
 SRCS-y := main.c control.c comm_core.c ../kernel-mod/fpproto.c
 
-CFLAGS += -O3 
+#CFLAGS += -O3 
 CFLAGS += $(WERROR_FLAGS)
-CFLAGS += -DFASTPASS_CONTROLLER
-#CFLAGS += -g -O1
+CFLAGS += -DFASTPASS_CONTROLLER 
+CFLAGS += -DCONFIG_IP_FASTPASS_DEBUG
+CFLAGS += -g -O1
 CFLAGS += -DNDEBUG
 
 include $(RTE_SDK)/mk/rte.extapp.mk

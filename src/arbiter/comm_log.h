@@ -20,7 +20,7 @@ struct comm_log {
 };
 
 #define RTE_LOGTYPE_COMM RTE_LOGTYPE_USER1
-#define COMM_DEBUG(...) RTE_LOG(DEBUG, COMM, __VA_ARGS__)
+#define COMM_DEBUG(a...) RTE_LOG(DEBUG, COMM, ##a)
 
 static inline void comm_log_init(struct comm_log *cl)
 {

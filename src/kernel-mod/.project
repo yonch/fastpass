@@ -3,6 +3,7 @@
 	<name>kernel-module</name>
 	<comment></comment>
 	<projects>
+		<project>dpdk-include</project>
 		<project>linux_kernel</project>
 		<project>linux-kernel</project>
 	</projects>

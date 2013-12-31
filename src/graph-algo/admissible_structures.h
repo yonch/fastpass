@@ -24,6 +24,7 @@
 #define MAX_TIME 66535
 #define BIN_SIZE MAX_NODES * MAX_NODES // TODO: try smaller values
 #define NUM_BINS 256
+#define NUM_CORES 1
 
 struct admitted_edge {
     uint16_t src;
@@ -67,10 +68,15 @@ struct batch_state {
     uint16_t dst_rack_counts [MAX_RACKS * BATCH_SIZE];
 };
 
-// Demand/allocation info for a given src/dst pair
+// Data structures associated with one allocation core
+struct core_status {
+    struct bin *working_bins; // pool of backlog bins
+};
+
+// Demand/backlog info for a given src/dst pair
 struct flow_status {
     uint16_t demand;
-    uint16_t allocation;
+    uint16_t backlog;
 };
 
 // Tracks status for admissible traffic (last send time and demand for all flows, etc.)
@@ -82,7 +88,8 @@ struct admissible_status {
     uint16_t num_nodes;
     uint64_t timeslots[MAX_NODES * MAX_NODES];
     struct flow_status flows[MAX_NODES * MAX_NODES];
-    struct bin *admitted_bins;  // pool of backlog bins
+    struct core_status cores[NUM_CORES];
+    struct bin *q_head;
 };
 
 
@@ -193,7 +200,7 @@ void print_backlog(struct backlog_queue *queue) {
         printf("\t%d\t%d\n", edge->src, edge->dst);
 }
 
-// Prints the number of flows per src, dst, and bin
+// Prints the number of src/dst pairs per bin
 static inline
 void print_backlog_counts(struct backlog_queue *queue) {
     assert(queue != NULL);
@@ -339,7 +346,7 @@ void init_admissible_status(struct admissible_status *status, bool oversubscribe
         status->timeslots[i] = 0;
     for (i = 0; i < MAX_NODES * MAX_NODES; i++) {
         status->flows[i].demand = 0;
-        status->flows[i].allocation = 0;
+        status->flows[i].backlog = 0;
     }
 }
 
@@ -355,16 +362,19 @@ void reset_flow(struct admissible_status *status, uint16_t src, uint16_t dst) {
     assert(status != NULL);
 
     struct flow_status *flow = &status->flows[get_status_index(src, dst)];
-    if (flow->demand == flow->allocation) {
+
+    // BEGIN ATOMIC
+    if (flow->backlog == 0) {
         // No pending backog, reset both to zero
         flow->demand = 0;
-        flow->allocation = 0;
+        flow->backlog = 0;
     }
     else {
         // Pending backlog - ensure only one packet will be allocated
         flow->demand = 0;
-        flow->allocation = -1;
+        flow->backlog = 1;
     }
+    // END ATOMIC
 }
 
 // Helper methods for testing in python
@@ -440,8 +450,16 @@ struct admissible_status *create_admissible_status(bool oversubscribed,
     assert(status != NULL);
 
     init_admissible_status(status, oversubscribed, inter_rack_capacity, num_nodes);
-    status->admitted_bins = malloc(sizeof(struct bin) * BATCH_SIZE);
-    assert(status->admitted_bins != NULL);
+    uint8_t i;
+    for (i = 0; i < NUM_CORES; i++) {
+        status->cores[i].working_bins = malloc(sizeof(struct bin) * (NUM_BINS + BATCH_SIZE - 1));
+        assert(status->cores[i].working_bins != NULL);
+    }
+
+    size_t q_head_size = sizeof(struct bin) +
+        (MAX_NODES * MAX_NODES - BIN_SIZE) * sizeof(struct backlog_edge);
+    status->q_head = malloc(q_head_size);
+    assert(status->q_head != NULL);
 
     return status;
 }
@@ -450,7 +468,11 @@ static inline
 void destroy_admissible_status(struct admissible_status *status) {
     assert(status != NULL);
 
-    free(status->admitted_bins);
+    uint8_t i;
+    for (i = 0; i < NUM_CORES; i++)
+        free(status->cores[i].working_bins);
+    free(status->q_head);
+
     free(status);
 }
 

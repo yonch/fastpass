@@ -159,7 +159,7 @@ uint32_t generate_requests_poisson(struct request_info *edges, uint32_t size,
 
 // Runs one experiment. Returns the number of packets admitted.
 uint32_t run_experiment(struct request_info *requests, uint32_t start_time, uint32_t end_time,
-                        uint32_t num_requests, struct bin *new_requests, struct admissible_status *status,
+                        uint32_t num_requests, struct admissible_status *status,
                         struct backlog_queue *queue_0, struct backlog_queue *queue_1,
                         struct admitted_traffic *admitted, struct request_info **next_request) {
     assert(requests != NULL);
@@ -169,10 +169,9 @@ uint32_t run_experiment(struct request_info *requests, uint32_t start_time, uint
     struct request_info *current_request = requests;
     for (b = (start_time >> BATCH_SHIFT); b < (end_time >> BATCH_SHIFT); b++) {
         // Issue all new requests for this batch
-        init_bin(new_requests);
         while ((current_request->timeslot >> BATCH_SHIFT) == (b % (65536 >> BATCH_SHIFT)) &&
                current_request < requests + num_requests) {
-            request_timeslots(new_requests, status, current_request->src,
+            request_timeslots(status, current_request->src,
                               current_request->dst, current_request->backlog);
             current_request++;
         }
@@ -188,8 +187,7 @@ uint32_t run_experiment(struct request_info *requests, uint32_t start_time, uint
         for (i = 0; i < BATCH_SIZE; i++)
             init_admitted_traffic(&admitted[i]);
         init_backlog_queue(queue_out);
-        get_admissible_traffic(queue_in, queue_out, new_requests,
-                               admitted, status);
+        get_admissible_traffic(queue_in, queue_out, admitted, status);
         for (i = 0; i < BATCH_SIZE; i++)
             num_admitted += admitted[i].size;
     }
@@ -212,7 +210,6 @@ int main(void) {
     uint32_t sizes [NUM_SIZES] = {1024, 512, 256, 128, 64, 32, 16};
 
     // Data structures
-    struct bin *new_requests = create_bin();
     struct admissible_status *status = create_admissible_status(false, 0, 0);
     struct backlog_queue *queue_0 = create_backlog_queue();
     struct backlog_queue *queue_1 = create_backlog_queue();
@@ -245,7 +242,7 @@ int main(void) {
             // Issue/process some requests. This is a warm-up period so that there are pending
             // requests once we start timing
             struct request_info *next_request;
-            run_experiment(requests, 0, warm_up_duration, num_requests, new_requests,
+            run_experiment(requests, 0, warm_up_duration, num_requests,
                            status, queue_0, queue_1, admitted, &next_request);
    
             // Start timining
@@ -254,7 +251,7 @@ int main(void) {
             // Run the experiment
             uint32_t num_admitted = run_experiment(next_request, warm_up_duration, duration,
                                                    num_requests - (next_request - requests),
-                                                   new_requests, status, queue_0, queue_1, admitted,
+                                                   status, queue_0, queue_1, admitted,
                                                    &next_request);        
             uint64_t end_time = current_time();
             double time_per_experiment = (end_time - start_time) / (PROCESSOR_SPEED * 1000 * (duration - warm_up_duration));
@@ -269,8 +266,8 @@ int main(void) {
 
     free(queue_0);
     free(queue_1);
-    free(new_requests);
-    free(status->admitted_bins);
+    for (i = 0; i < NUM_CORES; i++)
+        free(status->cores[i].working_bins);
     free(status);
     free(admitted);
 }

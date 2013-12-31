@@ -18,7 +18,7 @@ struct comm_core_cmd {
 /**
  * Initializes global data used by comm cores
  */
-void comm_init_global_structs(void);
+void comm_init_global_structs(uint64_t first_time_slot);
 
 /**
  * Initializes a single core to be a comm core

@@ -59,9 +59,12 @@ void launch_controller_cores(void)
 	static uint64_t end_time;
 	int i; (void)i;
 	struct comm_core_cmd ctrl_cmd;
+	uint64_t first_time_slot = 0;
+
+	/* TODO: decide what the first time slot to be output is */
 
 	/* initialize comm core global data */
-	comm_init_global_structs();
+	comm_init_global_structs(first_time_slot);
 
 	// Calculate start and end times
 	start_time = rte_get_timer_cycles() + sec_to_hpet(0.2); /* start after last end */

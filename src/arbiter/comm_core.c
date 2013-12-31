@@ -19,6 +19,7 @@
 #include "../graph-algo/admissible_structures.h"
 #include "dpdk-platform.h"
 #include "bigmap.h"
+#include "alloc_core.h"
 
 /* number of elements to keep in the pktdesc local core cache */
 #define PKTDESC_MEMPOOL_CACHE_SIZE		256
@@ -32,6 +33,8 @@
  * @dst_ether: the destination ethernet address for outgoing packets
  * @dst_ip: the destination IP for outgoing packets
  * @controller_ip: the controller IP outgoing packets should use
+ * @pending: a windowed bitmask of which timeslots have allocations not yet sent out
+ * @allocs: the destinations of the allocations
  */
 struct end_node_state {
 	struct fpproto_conn conn;
@@ -39,6 +42,13 @@ struct end_node_state {
 	struct ether_addr dst_ether;
 	uint32_t dst_ip;
 	uint32_t controller_ip;
+
+	/* pending allocations */
+	struct fp_window pending;
+	uint16_t allocs;
+
+	/* demands */
+	uint32_t demands[MAX_NODES];
 };
 
 /* whether we should output verbose debugging */
@@ -58,23 +68,27 @@ struct rte_mempool* pktdesc_pool[NB_SOCKETS];
 
 static void handle_reset(void *param);
 static void trigger_request(void *param, u64 when);
+static void handle_areq(void *param, u16 *dst_and_count, int n);
 
 struct fpproto_ops proto_ops = {
 	.handle_reset	= &handle_reset,
+	.handle_areq	= &handle_areq,
 	//.handle_ack		= &handle_ack,
 	//.handle_neg_ack	= &handle_neg_ack,
 	.trigger_request= &trigger_request,
 };
 
-void comm_init_global_structs(void)
+void comm_init_global_structs(uint64_t first_time_slot)
 {
 	u32 i;
 
 	fastpass_debug = true;
 
-	for (i = 0; i < MAX_NODES; i++)
+	for (i = 0; i < MAX_NODES; i++) {
 		fpproto_init_conn(&end_nodes[i].conn, &proto_ops,&end_nodes[i],
-				FASTPASS_RESET_WINDOW_NS, CONTROLLER_SEND_TIMEOUT_NS);
+						FASTPASS_RESET_WINDOW_NS, CONTROLLER_SEND_TIMEOUT_NS);
+		wnd_reset(&end_nodes[i].pending, first_time_slot - 1);
+	}
 
 	for (i = 0; i < N_COMM_CORES; i++)
 		comm_log_init(&comm_core_logs[i]);
@@ -109,6 +123,42 @@ void comm_init_core(uint16_t lcore_id)
 	}
 }
 
+static void handle_areq(void *param, u16 *dst_and_count, int n)
+{
+	int i;
+	struct end_node_state *en = (struct end_node_state *)param;
+	u16 dst, count;
+	u32 demand;
+	u32 orig_demand;
+	u32 node_id = en - end_nodes;
+	s32 demand_diff;
+	u32 num_increases = 0;
+
+	for (i = 0; i < n; i++) {
+		dst = rte_be_to_cpu_16(dst_and_count[2*i]);
+		count = rte_be_to_cpu_16(dst_and_count[2*i + 1]);
+		if (unlikely(dst > MAX_NODES)) {
+			comm_log_areq_invalid_dst(node_id, dst);
+			return;
+		}
+
+		orig_demand = en->demands[dst];
+		demand = orig_demand - (1UL << 15);
+		demand += (count - demand) & 0xFFFF;
+		demand_diff = (s32)demand - (s32)orig_demand;
+		if (demand_diff > 0) {
+			comm_log_demand_increased(node_id, dst, orig_demand, demand, demand_diff);
+			alloc_increase_demand(node_id, dst, demand_diff);
+			num_increases++;
+		} else {
+			comm_log_demand_remained(node_id, dst, orig_demand, demand);
+		}
+	}
+
+	if (num_increases > 0)
+		trigger_request(en, fp_get_time_ns());
+}
+
 static void handle_reset(void *param)
 {
 	struct end_node_state *en = (struct end_node_state *)param;
@@ -118,10 +168,12 @@ static void handle_reset(void *param)
 static void trigger_request(void *param, u64 when)
 {
 	struct end_node_state *en = (struct end_node_state *)param;
-	u32 index = en - end_nodes;
-	(void)param; (void)when;
-	bigmap_set(&triggered_nodes, index);
-	COMM_DEBUG("trigger_request index=%u\n", index);
+	(void)when;
+
+	u32 node_id = en - end_nodes;
+	bigmap_set(&triggered_nodes, node_id);
+
+	comm_log_triggered_send(node_id);
 }
 
 static inline struct rte_mbuf *
@@ -325,7 +377,10 @@ void exec_comm_core(struct comm_core_cmd * cmd)
 			comm_log_processed_batch(nb_rx, rx_time);
 		}
 
-		/* TODO: Process allocated timeslots and send allocation packets */
+		/* TODO: Process newly allocated timeslots */
+
+
+		/* send allocation packets */
 		for (i = 0; i < MAX_PKT_BURST; i++) {
 			uint32_t node_ind;
 			struct rte_mbuf *out_pkt;

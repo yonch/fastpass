@@ -503,13 +503,17 @@ void fpproto_handle_rx_packet(struct fpproto_conn *conn, u8 *pkt, u32 len,
 
 	conn->stat.rx_pkts++;
 
-	if (len < 9)
+	if (unlikely(len < 8))
 		goto packet_too_short;
+
 
 	hdr = (struct fastpass_hdr *)pkt;
 	curp = &pkt[8];
 	data_end = &pkt[len];
-	payload_type = *curp >> 4;
+	if (unlikely(len == 8))
+		payload_type = 0;
+	else
+		payload_type = *curp >> 4;
 
 	/* get full 64-bit sequence number for the pseudo-header */
 	if (unlikely(payload_type == FASTPASS_PTYPE_RESET)) {

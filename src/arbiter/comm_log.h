@@ -27,6 +27,10 @@ struct comm_log {
 	uint64_t tx_pkt;
 	uint64_t pktdesc_alloc_failed;
 	uint64_t rx_truncated_pkt;
+	uint64_t areq_invalid_dst;
+	uint64_t demand_increased;
+	uint64_t demand_remained;
+	uint64_t triggered_send;
 };
 
 extern struct comm_log comm_core_logs[N_COMM_CORES];
@@ -85,6 +89,31 @@ static inline void comm_log_rx_truncated_pkt(uint32_t ip_total_len,
 			src_ip, mbuf_len, ip_total_len);
 }
 
+static inline void comm_log_areq_invalid_dst(uint32_t requesting_node,
+		uint16_t dest) {
+	CL->areq_invalid_dst++;
+	COMM_DEBUG("received A-REQ from node %u for invalid dst %u\n",
+			requesting_node, dest);
+}
+
+static inline void comm_log_demand_increased(uint32_t node_id,
+		uint32_t dst, uint32_t orig_demand, uint32_t demand, int32_t demand_diff) {
+	CL->demand_increased++;
+	COMM_DEBUG("demand for flow src %u dst %u increased by %d (from %u to %u)\n",
+			node_id, dst, demand_diff, orig_demand, demand);
+}
+
+static inline void comm_log_demand_remained(uint32_t node_id, uint32_t dst,
+		uint32_t orig_demand, uint32_t demand) {
+	CL->demand_remained++;
+	COMM_DEBUG("for flow src %u dst %u got demand 0x%X lower than current 0x%X\n",
+			node_id, dst, demand, orig_demand);
+}
+
+static inline void comm_log_triggered_send(uint32_t node_id) {
+	CL->triggered_send++;
+	COMM_DEBUG("triggered send to node %u\n", node_id);
+}
 #undef CL
 
 #endif /* COMM_LOG_H_ */

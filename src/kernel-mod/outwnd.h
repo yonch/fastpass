@@ -53,12 +53,12 @@ struct fpproto_pktdesc *outwnd_peek(struct fpproto_conn* conn, u64 seqno)
 static inline void outwnd_test(struct fpproto_conn* conn) {
 	u64 tslot;
 	s32 gap;
-	int i;
-	const int BASE = 10007;
+	u32 i;
+	const u32 BASE = 10007;
 
 	struct fp_window *ow = &conn->outwnd;
 
-	fastpass_pr_debug("testing outwnd\n");
+	fp_debug("testing outwnd\n");
 	wnd_reset(ow, BASE - 1);
 	for(tslot = BASE - FASTPASS_WND_LEN; tslot < BASE; tslot++) {
 		BUG_ON(wnd_at_or_before(ow, tslot) != -1);
@@ -83,9 +83,9 @@ static inline void outwnd_test(struct fpproto_conn* conn) {
 	BUG_ON(wnd_at_or_before(ow, BASE+2) != 1);
 
 	for(tslot = BASE+3; tslot < BASE + 152; tslot++) {
-		BUG_ON(outwnd_pop(conn, tslot) != (void *)0xFF00L + tslot - BASE);
+		BUG_ON(outwnd_pop(conn, tslot) != (void *)(0xFF00L + tslot - BASE));
 		BUG_ON(wnd_is_marked(ow, tslot));
-		BUG_ON(wnd_at_or_before(ow, tslot) != tslot - BASE - 1);
+		BUG_ON(wnd_at_or_before(ow, tslot) != (int)(tslot - BASE - 1));
 		BUG_ON(wnd_at_or_before(ow, tslot+1) != 0);
 		BUG_ON(wnd_earliest_marked(ow) != BASE+1);
 	}
@@ -97,7 +97,7 @@ static inline void outwnd_test(struct fpproto_conn* conn) {
 	BUG_ON(outwnd_pop(conn, BASE+1) != (void *)0xFF01L);
 	BUG_ON(wnd_earliest_marked(ow) != BASE+152);
 
-	fastpass_pr_debug("done testing outwnd, cleaning up\n");
+	fp_debug("done testing outwnd, cleaning up\n");
 
 	/* clean up */
 	tslot = wnd_head(ow);
@@ -105,7 +105,7 @@ clear_next_unacked:
 	gap = wnd_at_or_before(ow, tslot);
 	if (gap >= 0) {
 		tslot -= gap;
-		BUG_ON(outwnd_pop(conn, tslot) != (void *)0xFF00L + tslot - BASE);
+		BUG_ON(outwnd_pop(conn, tslot) != (void *)(0xFF00L + tslot - BASE));
 		goto clear_next_unacked;
 	}
 

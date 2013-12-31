@@ -30,6 +30,8 @@
 								</option>
 								<option id="gnu.c.compiler.option.preprocessor.def.symbols.1045668007" name="Defined symbols (-D)" superClass="gnu.c.compiler.option.preprocessor.def.symbols" valueType="definedSymbols">
 									<listOptionValue builtIn="false" value="__KERNEL__=1"/>
+									<listOptionValue builtIn="false" value="FASTPASS_CONTROLLER"/>
+									<listOptionValue builtIn="false" value="FASTPASS_ENDPOINT"/>
 								</option>
 								<inputType id="cdt.managedbuild.tool.gnu.c.compiler.input.1986958756" superClass="cdt.managedbuild.tool.gnu.c.compiler.input"/>
 							</tool>

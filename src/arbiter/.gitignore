@@ -1,0 +1,7 @@
+build/
+allocator/
+*.pdf
+out*.txt
+results/
+kernel-mod/
+

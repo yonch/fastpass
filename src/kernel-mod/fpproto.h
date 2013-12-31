@@ -5,6 +5,13 @@
 #ifndef FPPROTO_H_
 #define FPPROTO_H_
 
+#if (defined(FASTPASS_CONTROLLER) && defined(FASTPASS_ENDPOINT))
+#error "Both FASTPASS_CONTROLLER and FASTPASS_ENDPOINT are defined"
+#endif
+#if !(defined(FASTPASS_CONTROLLER) || defined(FASTPASS_ENDPOINT))
+#error "Neither FASTPASS_CONTROLLER or FASTPASS_ENDPOINT is defined"
+#endif
+
 #include "fp_statistics.h"
 #include "window.h"
 
@@ -16,7 +23,27 @@
 #define FASTPASS_BAD_PKT_RESET_THRESHOLD	10
 #define FASTPASS_RESET_WINDOW_NS	(1000*1000*1000)
 
-#define FASTPASS_PKT_MAX_AREQ		10
+#define FASTPASS_PKT_HDR_LEN			8
+#define FASTPASS_PKT_RESET_LEN			8
+
+#ifdef FASTPASS_CONTROLLER
+/* CONTROLLER */
+#define FASTPASS_PKT_MAX_AREQ			0
+#define FASTPASS_PKT_AREQ_LEN			0
+#define FASTPASS_PKT_MAX_ALLOC_TSLOTS	64
+#define FASTPASS_PKT_ALLOC_LEN			(2 + 2 * 15 + FASTPASS_PKT_MAX_ALLOC_TSLOTS)
+#else
+/* END NODE */
+#define FASTPASS_PKT_MAX_AREQ			10
+#define FASTPASS_PKT_AREQ_LEN			(2 + 4 * FASTPASS_PKT_MAX_AREQ)
+#define FASTPASS_PKT_MAX_ALLOC_TSLOTS	0
+#define FASTPASS_PKT_ALLOC_LEN			0
+#endif
+
+#define FASTPASS_MAX_PAYLOAD		(FASTPASS_PKT_HDR_LEN + \
+									FASTPASS_PKT_RESET_LEN + \
+									FASTPASS_PKT_AREQ_LEN + \
+									FASTPASS_PKT_ALLOC_LEN)
 
 #define FASTPASS_PTYPE_RSTREQ		0x0
 #define FASTPASS_PTYPE_RESET 		0x1
@@ -41,8 +68,17 @@ struct fpproto_areq_desc {
  * @sent_timestamp: a timestamp when the request was sent
  */
 struct fpproto_pktdesc {
+#ifdef FASTPASS_ENDPOINT
 	u16							n_areq;
 	struct fpproto_areq_desc	areq[FASTPASS_PKT_MAX_AREQ];
+#endif
+
+#ifdef FASTPASS_CONTROLLER
+	u16							n_dsts;
+	u16							dsts[15];
+	u16							alloc_tslot;
+	u8							tslot_desc[FASTPASS_PKT_MAX_ALLOC_TSLOTS];
+#endif
 
 	u64							sent_timestamp;
 	u64							seqno;
@@ -57,9 +93,6 @@ struct fpproto_pktdesc {
  */
 struct fpproto_ops {
 	void 	(*handle_reset)(void *param);
-
-	void	(*handle_alloc)(void *param, u32 base_tslot,
-			u16 *dst, int n_dst, u8 *tslots, int n_tslots);
 
 	/**
 	 * Called when an ack is received for a sent packet.
@@ -79,6 +112,19 @@ struct fpproto_ops {
 	 */
 	void	(*trigger_request)(void *param, u64 when);
 
+	/**
+	 * Called for an ALLOC payload
+	 */
+	void	(*handle_alloc)(void *param, u32 base_tslot,
+			u16 *dst, int n_dst, u8 *tslots, int n_tslots);
+
+	/**
+	 * Called for every A-REQ payload
+	 * @dst_and_count: a 16-bit destination, then a 16-bit demand count, in
+	 *   network byte-order
+	 * @n: the number of dst+count pairs
+	 */
+	void	(*handle_areq)(void *param, u16 *dst_and_count, int n);
 };
 
 /**
@@ -116,8 +162,6 @@ struct fpproto_conn {
 
 };
 
-
-
 /* initializes conn */
 void fpproto_init_conn(struct fpproto_conn *conn, struct fpproto_ops *ops,
 		void *ops_param, u64 rst_win_ns, u64 send_timeout_us);
@@ -137,9 +181,6 @@ void fpproto_handle_rx_packet(struct fpproto_conn *conn, u8 *data, u32 len,
 void fpproto_prepare_to_send(struct fpproto_conn *conn);
 void fpproto_commit_packet(struct fpproto_conn *conn,
 		struct fpproto_pktdesc *pkt, u64 timestamp);
-
-struct fpproto_pktdesc *fpproto_pktdesc_alloc(void);
-void fpproto_pktdesc_free(struct fpproto_pktdesc *pd);
 
 
 /**

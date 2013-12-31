@@ -1,11 +1,11 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <projectDescription>
-	<name>kernel-module</name>
+	<name>controller</name>
 	<comment></comment>
 	<projects>
 		<project>dpdk-include</project>
-		<project>linux_kernel</project>
-		<project>linux-kernel</project>
+		<project>graph-algo</project>
+		<project>kernel-module</project>
 	</projects>
 	<buildSpec>
 		<buildCommand>

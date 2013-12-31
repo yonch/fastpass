@@ -5,8 +5,6 @@
  *      Author: yonch
  */
 
-typedef _Bool			bool;
-
 #include "../linux-compat.h"
 #include "../window.h"
 

@@ -18,9 +18,9 @@
 #include <net/pkt_sched.h>
 
 #include "fastpass_proto.h"
-#include "outwnd.h"
 #include "debug.h"
 #include "platform.h"
+#include "outwnd.h"
 
 struct inet_hashinfo fastpass_hashinfo;
 EXPORT_SYMBOL_GPL(fastpass_hashinfo);
@@ -34,7 +34,7 @@ MODULE_PARM_DESC(fastpass_debug, "Enable debug messages");
 EXPORT_SYMBOL_GPL(fastpass_debug);
 #endif
 
-static struct kmem_cache *fpproto_pktdesc_cachep __read_mostly;
+struct kmem_cache *fpproto_pktdesc_cachep __read_mostly;
 
 static inline struct fastpass_sock *fastpass_sk(struct sock *sk)
 {
@@ -88,39 +88,6 @@ void fpproto_set_qdisc(struct sock *sk, struct Qdisc *new_qdisc)
 	rcu_assign_pointer(fp->qdisc, new_qdisc);
 }
 
-struct fpproto_pktdesc *fpproto_pktdesc_alloc(void)
-{
-	struct fpproto_pktdesc *pd;
-	pd = kmem_cache_zalloc(fpproto_pktdesc_cachep, GFP_ATOMIC | __GFP_NOWARN);
-	return pd;
-}
-
-void fpproto_pktdesc_free(struct fpproto_pktdesc *pd)
-{
-	kmem_cache_free(fpproto_pktdesc_cachep, pd);
-}
-
-
-int cancel_timer(struct fpproto_conn *proto)
-{
-	struct fastpass_sock *fp = container_of(proto, struct fastpass_sock, conn);
-
-	if (unlikely(hrtimer_try_to_cancel(&fp->retrans_timer) == -1)) {
-		fastpass_pr_debug("could not cancel timer. tasklet will reset timer\n");
-		return -1;
-	}
-
-	return 0;
-}
-
-void set_timer(struct fpproto_conn *proto, u64 when)
-{
-	struct fastpass_sock *fp = container_of(proto, struct fastpass_sock, conn);
-
-	hrtimer_start(&fp->retrans_timer, ns_to_ktime(when), HRTIMER_MODE_ABS);
-}
-
-
 static enum hrtimer_restart retrans_timer_func(struct hrtimer *timer)
 {
 	struct fastpass_sock *fp =
@@ -149,7 +116,7 @@ static void retrans_tasklet(unsigned long int param)
 	return;
 
 qdisc_destroyed:
-	fastpass_pr_debug("qdisc seems to have been destroyed\n");
+	fp_debug("qdisc seems to have been destroyed\n");
 	return;
 }
 
@@ -169,14 +136,14 @@ int fpproto_rcv(struct sk_buff *skb)
 	inet = inet_sk(sk);
 
 	if (sk == NULL) {
-		fastpass_pr_debug("got packet on non-connected socket\n");
+		fp_debug("got packet on non-connected socket\n");
 		kfree_skb(skb);
 		return NET_RX_SUCCESS;
 	}
 
 	sch = fpproto_lock_qdisc(sk);
 	if (unlikely(sch == NULL)) {
-		fastpass_pr_debug("qdisc seems to have been destroyed\n");
+		fp_debug("qdisc seems to have been destroyed\n");
 		kfree_skb(skb);
 		return NET_RX_SUCCESS;
 	}
@@ -275,7 +242,7 @@ out:
 /* close the socket */
 static void fpproto_close(struct sock *sk, long timeout)
 {
-	fastpass_pr_debug("visited\n");
+	fp_debug("visited\n");
 
 	sk_common_release(sk);
 }
@@ -285,7 +252,7 @@ static int fpproto_disconnect(struct sock *sk, int flags)
 {
 	struct inet_sock *inet = inet_sk(sk);
 
-	fastpass_pr_debug("visited\n");
+	fp_debug("visited\n");
 
 	sk->sk_state = TCP_CLOSE;
 	inet->inet_daddr = 0;
@@ -308,7 +275,7 @@ static void fpproto_destroy_sock(struct sock *sk)
 {
 	struct fastpass_sock *fp = fastpass_sk(sk);
 
-	fastpass_pr_debug("visited\n");
+	fp_debug("visited\n");
 
 	/* might not be necessary, doing for safety */
 	fpproto_set_qdisc(sk, NULL);
@@ -331,16 +298,13 @@ void fpproto_send_packet(struct sock *sk, struct fpproto_pktdesc *pd)
 	struct fastpass_sock *fp = fastpass_sk(sk);
 	struct inet_sock *inet = inet_sk(sk);
 	const int max_header = sk->sk_prot->max_header;
-	const int 	max_payload_len = 8 /* header */
-							+ 8 /* RESET */
-							+ 2 + 4 * FASTPASS_PKT_MAX_AREQ /* A-REQ */;
 	int payload_len;
 	struct sk_buff *skb = NULL;
 	int err;
 	u8 *data;
 
 	/* allocate request skb */
-	skb = sock_alloc_send_skb(sk, max_payload_len + max_header, 1, &err);
+	skb = sock_alloc_send_skb(sk, FASTPASS_MAX_PAYLOAD + max_header, 1, &err);
 	if (!skb)
 		goto alloc_err;
 
@@ -351,12 +315,12 @@ void fpproto_send_packet(struct sock *sk, struct fpproto_pktdesc *pd)
 
 	/* encode the packet from the descriptor */
 	data = &skb->data[0];
-	payload_len = fpproto_encode_packet(&fp->conn, pd, data, max_payload_len,
+	payload_len = fpproto_encode_packet(&fp->conn, pd, data, FASTPASS_MAX_PAYLOAD,
 			inet->inet_saddr, inet->inet_daddr);
 	/* adjust the size of the skb based on encoded size */
 	skb_put(skb, payload_len);
 
-	fastpass_pr_debug("sending packet\n");
+	fp_debug("sending packet\n");
 
 	bh_lock_sock(sk);
 
@@ -365,7 +329,7 @@ void fpproto_send_packet(struct sock *sk, struct fpproto_pktdesc *pd)
 	err = net_xmit_eval(err);
 	if (unlikely(err != 0)) {
 		fp->stat.xmit_errors++;
-		fastpass_pr_debug("got error %d from ip_queue_xmit\n", err);
+		fp_debug("got error %d from ip_queue_xmit\n", err);
 	}
 
 	bh_unlock_sock(sk);
@@ -373,8 +337,8 @@ void fpproto_send_packet(struct sock *sk, struct fpproto_pktdesc *pd)
 
 alloc_err:
 	fp->stat.skb_alloc_error++;
-	fastpass_pr_debug("could not alloc skb of size %d\n",
-			max_payload_len + max_header);
+	fp_debug("could not alloc skb of size %d\n",
+			FASTPASS_MAX_PAYLOAD + max_header);
 	/* no need to unlock */
 }
 
@@ -382,7 +346,7 @@ static int fpproto_sk_init(struct sock *sk)
 {
 	struct fastpass_sock *fp = fastpass_sk(sk);
 
-	fastpass_pr_debug("visited\n");
+	fp_debug("visited\n");
 
 	/* bind all sockets to port 1, to avoid inet_autobind */
 	inet_sk(sk)->inet_num = ntohs(FASTPASS_DEFAULT_PORT_NETORDER);
@@ -433,17 +397,17 @@ static int fpproto_backlog_rcv(struct sock *sk, struct sk_buff *skb)
 
 static inline void fpproto_hash(struct sock *sk)
 {
-	fastpass_pr_debug("visited\n");
+	fp_debug("visited\n");
 	inet_hash(sk);
 }
 static void fpproto_unhash(struct sock *sk)
 {
-	fastpass_pr_debug("visited\n");
+	fp_debug("visited\n");
 	inet_unhash(sk);
 }
 static void fpproto_rehash(struct sock *sk)
 {
-	fastpass_pr_debug("before %X\n", sk->sk_hash);
+	fp_debug("before %X\n", sk->sk_hash);
 	sk->sk_prot->unhash(sk);
 
 	sk->sk_state = TCP_ESTABLISHED;
@@ -451,7 +415,7 @@ static void fpproto_rehash(struct sock *sk)
 	inet_sk(sk)->inet_daddr = inet_sk(sk)->cork.fl.u.ip4.daddr;
 	sk->sk_prot->hash(sk);
 
-	fastpass_pr_debug("after %X\n", sk->sk_hash);
+	fp_debug("after %X\n", sk->sk_hash);
 }
 static int fpproto_bind(struct sock *sk, struct sockaddr *uaddr,
 		int addr_len)

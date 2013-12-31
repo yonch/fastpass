@@ -2,10 +2,12 @@
  * Platform independent FastPass protocol implementation
  */
 
-#include <linux/kernel.h>
-#include <linux/module.h>
+#ifdef __KERNEL__
 #include <linux/jhash.h>
 #include <net/ip.h>
+#else
+#include "linux-compat.h"
+#endif
 
 #include "debug.h"
 #include "fpproto.h"
@@ -32,7 +34,7 @@ struct fastpass_areq {
 /**
  * Computes the base sequence number from a reset timestamp
  */
-u64 base_seqno_from_timestamp(u64 reset_time)
+static u64 base_seqno_from_timestamp(u64 reset_time)
 {
 	u32 time_hash = jhash_1word((u32) reset_time, reset_time >> 32);
 	return reset_time + time_hash + ((u64) time_hash << 32);
@@ -46,7 +48,7 @@ static bool tstamp_in_window(u64 tstamp, u64 win_middle, u64 win_size) {
 /**
  * Receives a packet destined for the protocol. (part of inet socket API)
  */
-__sum16 fastpass_checksum(u8 *pkt, u32 len, __be32 saddr, __be32 daddr,
+static __sum16 fastpass_checksum(u8 *pkt, u32 len, __be32 saddr, __be32 daddr,
 		u64 seqno, u64 ack_seq)
 {
 	u32 seq_hash = jhash_3words((u32)seqno, seqno >> 32, (u32)ack_seq,
@@ -55,7 +57,7 @@ __sum16 fastpass_checksum(u8 *pkt, u32 len, __be32 saddr, __be32 daddr,
 	return csum_tcpudp_magic(saddr, daddr, len, IPPROTO_FASTPASS, csum);
 }
 
-void cancel_and_reset_retrans_timer(struct fpproto_conn *conn)
+static void cancel_and_reset_retrans_timer(struct fpproto_conn *conn)
 {
 	u64 timeout;
 	u64 seqno;
@@ -63,7 +65,7 @@ void cancel_and_reset_retrans_timer(struct fpproto_conn *conn)
 	cancel_timer(conn);
 
 	if (wnd_empty(&conn->outwnd)) {
-		fastpass_pr_debug("all packets acked, no need to set timer\n");
+		fp_debug("all packets acked, no need to set timer\n");
 		return;
 	}
 
@@ -76,17 +78,17 @@ void cancel_and_reset_retrans_timer(struct fpproto_conn *conn)
 	conn->earliest_unacked = seqno;
 	set_timer(conn, timeout);
 	conn->stat.reprogrammed_timer++;
-	fastpass_pr_debug("setting timer to %llu for seq#=0x%llX\n", timeout, seqno);
+	fp_debug("setting timer to %llu for seq#=0x%llX\n", timeout, seqno);
 }
 
-void do_ack_seqno(struct fpproto_conn *conn, u64 seqno)
+static void do_ack_seqno(struct fpproto_conn *conn, u64 seqno)
 {
 	struct fpproto_pktdesc *pd;
 
 	BUG_ON(wnd_seq_after(&conn->outwnd, seqno));
 	BUG_ON(wnd_seq_before(&conn->outwnd,seqno));
 
-	fastpass_pr_debug("ACK seqno 0x%08llX\n", seqno);
+	fp_debug("ACK seqno 0x%08llX\n", seqno);
 	conn->stat.acked_packets++;
 	BUG_ON(!wnd_is_marked(&conn->outwnd, seqno));
 	pd = outwnd_pop(conn, seqno);
@@ -97,10 +99,10 @@ void do_ack_seqno(struct fpproto_conn *conn, u64 seqno)
 		fpproto_pktdesc_free(pd);
 }
 
-void do_neg_ack_seqno(struct fpproto_conn *conn, u64 seq)
+static void do_neg_ack_seqno(struct fpproto_conn *conn, u64 seq)
 {
 	struct fpproto_pktdesc *pd = outwnd_pop(conn, seq);
-	fastpass_pr_debug("Unacked tx seq 0x%llX\n", seq);
+	fp_debug("Unacked tx seq 0x%llX\n", seq);
 	if (conn->ops->handle_neg_ack)
 		conn->ops->handle_neg_ack(conn->ops_param, pd);		/* will free pd */
 	else
@@ -168,14 +170,14 @@ void fpproto_handle_timeout(struct fpproto_conn *conn, u64 now)
 		conn->stat.timeout_pkts++;
 		do_neg_ack_seqno(conn, seqno);
 	}
-	fastpass_pr_debug("outwnd empty, not setting timer\n");
+	fp_debug("outwnd empty, not setting timer\n");
 	return;
 
 set_next_timer:
 	/* seqno is the earliest unacked seqno, and timeout is its timeout */
 	conn->earliest_unacked = seqno;
 	set_timer(conn, timeout);
-	fastpass_pr_debug("setting timer to %llu for seq#=0x%llX\n", timeout, seqno);
+	fp_debug("setting timer to %llu for seq#=0x%llX\n", timeout, seqno);
 }
 
 /*
@@ -186,23 +188,23 @@ static int reset_payload_handler(struct fpproto_conn *conn, u64 full_tstamp)
 	u64 now = fp_get_time_ns();
 
 	conn->stat.reset_payloads++;
-	fastpass_pr_debug("got RESET, last is 0x%llX, full 0x%llX, now 0x%llX\n",
+	fp_debug("got RESET, last is 0x%llX, full 0x%llX, now 0x%llX\n",
 			conn->last_reset_time, full_tstamp, now);
 
 	if (full_tstamp == conn->last_reset_time) {
 		if (!conn->in_sync) {
 			conn->in_sync = 1;
-			fastpass_pr_debug("Now in sync\n");
+			fp_debug("Now in sync\n");
 		} else {
 			conn->stat.redundant_reset++;
-			fastpass_pr_debug("received redundant reset\n");
+			fp_debug("received redundant reset\n");
 		}
 		return 0;
 	}
 
 	/* reject resets outside the time window */
 	if (unlikely(!tstamp_in_window(full_tstamp, now, conn->rst_win_ns))) {
-		fastpass_pr_debug("Reset was out of reset window (diff=%lld)\n",
+		fp_debug("Reset was out of reset window (diff=%lld)\n",
 				(s64)full_tstamp - (s64)now);
 		conn->stat.reset_out_of_window++;
 		return 1;
@@ -211,7 +213,7 @@ static int reset_payload_handler(struct fpproto_conn *conn, u64 full_tstamp)
 	/* if we already processed a newer reset within the window */
 	if (unlikely(tstamp_in_window(conn->last_reset_time, now, conn->rst_win_ns)
 			&& time_before64(full_tstamp, conn->last_reset_time))) {
-		fastpass_pr_debug("Already processed reset within window which is %lluns more recent\n",
+		fp_debug("Already processed reset within window which is %lluns more recent\n",
 						conn->last_reset_time - full_tstamp);
 		conn->stat.outdated_reset++;
 		return 1;
@@ -224,7 +226,7 @@ static int reset_payload_handler(struct fpproto_conn *conn, u64 full_tstamp)
 	return 0;
 }
 
-void ack_payload_handler(struct fpproto_conn *conn, u64 ack_seq, u64 ack_vec)
+static void ack_payload_handler(struct fpproto_conn *conn, u64 ack_seq, u64 ack_vec)
 {
 	u64 cur_seqno;
 	u32 offset;
@@ -240,7 +242,7 @@ void ack_payload_handler(struct fpproto_conn *conn, u64 ack_seq, u64 ack_vec)
 
 	unacked_mask = wnd_get_mask(&conn->outwnd, ack_seq);
 
-	fastpass_pr_debug("handling ack_seq 0x%llX ack_vec 0x%016llX unacked 0x%016llX\n",
+	fp_debug("handling ack_seq 0x%llX ack_vec 0x%016llX unacked 0x%016llX\n",
 				ack_seq, ack_vec, unacked_mask);
 
 	todo_mask = ack_vec & unacked_mask;
@@ -265,22 +267,22 @@ void ack_payload_handler(struct fpproto_conn *conn, u64 ack_seq, u64 ack_vec)
 	return;
 
 ack_too_early:
-	fastpass_pr_debug("too_early_ack: earliest %llu, got %llu\n",
+	fp_debug("too_early_ack: earliest %llu, got %llu\n",
 			wnd_edge(&conn->outwnd), ack_seq);
 	conn->stat.too_early_ack++;
 }
 
-void got_good_packet(struct fpproto_conn *conn)
+static void got_good_packet(struct fpproto_conn *conn)
 {
 	conn->consecutive_bad_pkts = 0;
 }
 
-void got_bad_packet(struct fpproto_conn *conn)
+static void got_bad_packet(struct fpproto_conn *conn)
 {
 	u64 now = fp_get_time_ns();
 
 	conn->consecutive_bad_pkts++;
-	fastpass_pr_debug("#%u consecutive bad packets\n", conn->consecutive_bad_pkts);
+	fp_debug("#%u consecutive bad packets\n", conn->consecutive_bad_pkts);
 
 	if (conn->consecutive_bad_pkts < FASTPASS_BAD_PKT_RESET_THRESHOLD)
 		goto out;
@@ -297,7 +299,7 @@ void got_bad_packet(struct fpproto_conn *conn)
 			now + FASTPASS_RESET_WINDOW_NS)) {
 		/* will not trigger a new one */
 		conn->stat.no_reset_because_recent++;
-		fastpass_pr_debug("had a recent reset (last %llu, now %llu). not issuing a new one.\n",
+		fp_debug("had a recent reset (last %llu, now %llu). not issuing a new one.\n",
 				conn->last_reset_time, now);
 	} else {
 		/* Will send a RSTREQ */
@@ -318,7 +320,7 @@ out:
  * @return 0 if update is successful
  * 		   1 if caller should drop the packet with seqno
  */
-int update_inwnd(struct fpproto_conn *conn, u64 seqno)
+static int update_inwnd(struct fpproto_conn *conn, u64 seqno)
 {
 	u64 head = conn->in_max_seqno;
 
@@ -358,6 +360,88 @@ int update_inwnd(struct fpproto_conn *conn, u64 seqno)
 	return 0; /* accept */
 }
 
+/**
+ * Processes ALLOC payload.
+ * On success, returns the payload length in bytes. On failure returns -1.
+ */
+static int process_alloc(struct fpproto_conn *conn, u8 *data, u8 *data_end)
+{
+	u16 payload_type;
+	int alloc_n_dst, alloc_n_tslots;
+	u16 alloc_dst[16];
+	u32 alloc_base_tslot;
+	u8 *curp = data;
+	int i;
+
+	if (curp + 2 > data_end)
+		goto incomplete_alloc_payload_one_byte;
+
+	payload_type = ntohs(*(u16 *)curp);
+	alloc_n_dst = (payload_type >> 8) & 0xF;
+	alloc_n_tslots = 2 * (payload_type & 0x3F);
+	curp += 2;
+
+	if (curp + 2 + 2 * alloc_n_dst + alloc_n_tslots > data_end)
+		goto incomplete_alloc_payload;
+
+	/* get base timeslot */
+	alloc_base_tslot = ntohs(*(u16 *)curp);
+	alloc_base_tslot <<= 4;
+	curp += 2;
+
+	/* convert destinations from network byte-order */
+	for (i = 0; i < alloc_n_dst; i++, curp += 2)
+		alloc_dst[i] = ntohs(*(u16 *)curp);
+
+	/* process the payload */
+	if (conn->ops->handle_alloc)
+		conn->ops->handle_alloc(conn->ops_param, alloc_base_tslot, alloc_dst, alloc_n_dst,
+			curp, alloc_n_tslots);
+
+	return curp - data;
+
+incomplete_alloc_payload_one_byte:
+	conn->stat.rx_incomplete_alloc++;
+	fp_debug("ALLOC payload incomplete, only got one byte\n");
+	return -1;
+
+incomplete_alloc_payload:
+	conn->stat.rx_incomplete_alloc++;
+	fp_debug("ALLOC payload incomplete: expected %d bytes, got %d\n",
+			2 + 2 * alloc_n_dst + alloc_n_tslots, (int)(data_end - curp));
+	return -1;
+}
+
+/**
+ * Processes A-REQ payload.
+ * On success, returns the payload length in bytes. On failure returns -1.
+ */
+static int process_areq(struct fpproto_conn *conn, u8 *data, u8 *data_end)
+{
+	u8 *curp = data;
+	u32 n_dst;
+	u16 payload_type;
+
+	if (curp + 2 > data_end) {
+		conn->stat.rx_incomplete_areq++;
+		return -1;
+	}
+
+	payload_type = ntohs(*(u16 *)curp);
+	n_dst = payload_type & 0x3F;
+	curp += 2;
+	if (curp + 4 * n_dst < data_end) {
+		conn->stat.rx_incomplete_areq++;
+		return -1;
+	}
+
+	if (conn->ops->handle_areq)
+		conn->ops->handle_areq(conn->ops_param, (u16 *)curp, n_dst);
+
+	curp += 4 * n_dst;
+	return curp - data;
+}
+
 void fpproto_handle_rx_packet(struct fpproto_conn *conn, u8 *pkt, u32 len,
 		__be32 saddr, __be32 daddr)
 {
@@ -366,12 +450,9 @@ void fpproto_handle_rx_packet(struct fpproto_conn *conn, u8 *pkt, u32 len,
 	u16 payload_type;
 	u64 rst_tstamp = 0;
 	__sum16 checksum;
-	int i;
+	int payload_length;
 	u8 *curp;
 	u8 *data_end;
-	int alloc_n_dst, alloc_n_tslots;
-	u16 alloc_dst[16];
-	u32 alloc_base_tslot;
 	u64 ack_vec;
 	u16 ack_vec16;
 
@@ -386,11 +467,7 @@ void fpproto_handle_rx_packet(struct fpproto_conn *conn, u8 *pkt, u32 len,
 	payload_type = *curp >> 4;
 
 	/* get full 64-bit sequence number for the pseudo-header */
-#ifdef FASTPASS_CONTROLLER
-	if (unlikely(payload_type == FASTPASS_PTYPE_RSTREQ)) {
-#else
 	if (unlikely(payload_type == FASTPASS_PTYPE_RESET)) {
-#endif
 		/* DERIVE SEQNO FROM RESET TIMESTAMP */
 		u64 now = fp_get_time_ns();
 		u64 partial_tstamp;
@@ -423,7 +500,7 @@ void fpproto_handle_rx_packet(struct fpproto_conn *conn, u8 *pkt, u32 len,
 	}
 	in_seq += (ntohs(hdr->seq) - in_seq) & 0xFFFF;
 	ack_seq += (ntohs(hdr->ack_seq) - ack_seq) & 0xFFFF;
-	fastpass_pr_debug("packet with in_seq 0x%04X (full 0x%llX, prev_max 0x%llX)"
+	fp_debug("packet with in_seq 0x%04X (full 0x%llX, prev_max 0x%llX)"
 			"ack_seq 0x%04X (full 0x%llX, max_sent 0x%llX)\n",
 			ntohs(hdr->seq), in_seq, conn->in_max_seqno,
 			ntohs(hdr->ack_seq), ack_seq, conn->next_seqno - 1);
@@ -464,34 +541,6 @@ handle_payload:
 	payload_type = *curp >> 4;
 
 	switch (payload_type) {
-	case FASTPASS_PTYPE_ALLOC:
-		if (curp + 2 > data_end)
-			goto incomplete_alloc_payload_one_byte;
-
-		payload_type = ntohs(*(u16 *)curp);
-		alloc_n_dst = (payload_type >> 8) & 0xF;
-		alloc_n_tslots = 2 * (payload_type & 0x3F);
-		curp += 2;
-
-		if (curp + 2 + 2 * alloc_n_dst + alloc_n_tslots > data_end)
-			goto incomplete_alloc_payload;
-
-		/* get base timeslot */
-		alloc_base_tslot = ntohs(*(u16 *)curp);
-		alloc_base_tslot <<= 4;
-		curp += 2;
-
-		/* convert destinations from network byte-order */
-		for (i = 0; i < alloc_n_dst; i++, curp += 2)
-			alloc_dst[i] = ntohs(*(u16 *)curp);
-
-		/* process the payload */
-		if (conn->ops->handle_alloc)
-			conn->ops->handle_alloc(conn->ops_param, alloc_base_tslot, alloc_dst, alloc_n_dst,
-				curp, alloc_n_tslots);
-
-		curp += alloc_n_tslots;
-		break;
 	case FASTPASS_PTYPE_ACK:
 		if (curp + 6 > data_end)
 			goto incomplete_ack_payload;
@@ -503,6 +552,25 @@ handle_payload:
 
 		curp += 6;
 		break;
+
+	case FASTPASS_PTYPE_ALLOC:
+		payload_length = process_alloc(conn, curp, data_end);
+
+		if (unlikely(payload_length == -1))
+			return;
+
+		curp += payload_length;
+		break;
+
+	case FASTPASS_PTYPE_AREQ:
+		payload_length = process_areq(conn, curp, data_end);
+
+		if (unlikely(payload_length == -1))
+			return;
+
+		curp += payload_length;
+		break;
+
 	default:
 		goto unknown_payload_type;
 	}
@@ -515,41 +583,30 @@ handle_payload:
 
 unknown_payload_type:
 	conn->stat.rx_unknown_payload++;
-	fastpass_pr_debug("got unknown payload type %d at offset %lld\n",
+	fp_debug("got unknown payload type %d at offset %lld\n",
 			payload_type, (s64)(curp - pkt));
 	return;
 
 incomplete_reset_payload:
 	conn->stat.rx_incomplete_reset++;
-	fastpass_pr_debug("RESET payload incomplete, expected 8 bytes, got %d\n",
+	fp_debug("RESET payload incomplete, expected 8 bytes, got %d\n",
 			(int)(data_end - curp));
-	return;
-
-incomplete_alloc_payload_one_byte:
-	conn->stat.rx_incomplete_alloc++;
-	fastpass_pr_debug("ALLOC payload incomplete, only got one byte\n");
-	return;
-
-incomplete_alloc_payload:
-	conn->stat.rx_incomplete_alloc++;
-	fastpass_pr_debug("ALLOC payload incomplete: expected %d bytes, got %d\n",
-			2 + 2 * alloc_n_dst + alloc_n_tslots, (int)(data_end - curp));
 	return;
 
 incomplete_ack_payload:
 	conn->stat.rx_incomplete_ack++;
-	fastpass_pr_debug("ACK payload incomplete: expected 6 bytes, got %d\n",
+	fp_debug("ACK payload incomplete: expected 6 bytes, got %d\n",
 			(int)(data_end - curp));
 	return;
 
 bad_checksum:
 	conn->stat.rx_checksum_error++;
-	fastpass_pr_debug("checksum error. expected 0, got 0x%04X\n", checksum);
+	fp_debug("checksum error. expected 0, got 0x%04X\n", checksum);
 	return;
 
 packet_too_short:
 	conn->stat.rx_too_short++;
-	fastpass_pr_debug("packet less than minimal size (len=%d)\n", len);
+	fp_debug("packet less than minimal size (len=%d)\n", len);
 	return;
 }
 
@@ -606,7 +663,7 @@ void fpproto_commit_packet(struct fpproto_conn *conn, struct fpproto_pktdesc *pd
 		u64 timeout = pd->sent_timestamp + conn->send_timeout_us;
 		conn->earliest_unacked = pd->seqno;
 		set_timer(conn, timeout);
-		fastpass_pr_debug("first packet in outwnd. setting timer to %llu for seq#=0x%llX\n", timeout, pd->seqno);
+		fp_debug("first packet in outwnd. setting timer to %llu for seq#=0x%llX\n", timeout, pd->seqno);
 	}
 }
 
@@ -639,6 +696,7 @@ int fpproto_encode_packet(struct fpproto_conn *conn,
 		curp += 8;
 	}
 
+#ifdef FASTPASS_ENDPOINT
 	/* A-REQ type short */
 	*(__be16 *)curp = htons((FASTPASS_PTYPE_AREQ << 12) |
 					  (pd->n_areq & 0x3F));
@@ -651,6 +709,9 @@ int fpproto_encode_packet(struct fpproto_conn *conn,
 		areq->count = htons((u16)pd->areq[i].tslots);
 		curp += 4;
 	}
+#else
+	(void) i; (void) areq; (void)conn; (void)max_len; /* TODO, fix this better */
+#endif
 
 	/* checksum */
 	*(__be16 *)(pkt + 6) = fastpass_checksum(pkt, curp - pkt, saddr, daddr,

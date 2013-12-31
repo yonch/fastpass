@@ -18,6 +18,7 @@
 #include "../kernel-mod/fpproto.h"
 #include "../graph-algo/admissible_structures.h"
 #include "dpdk-platform.h"
+#include "bigmap.h"
 
 /* number of elements to keep in the pktdesc local core cache */
 #define PKTDESC_MEMPOOL_CACHE_SIZE		256
@@ -44,7 +45,7 @@ struct end_node_state {
 bool fastpass_debug;
 
 /* bitmap of which nodes have a packet pending */
-static struct fp_window triggered_nodes;
+struct bigmap triggered_nodes;
 
 /* logs */
 struct comm_log comm_core_logs[N_COMM_CORES];
@@ -78,7 +79,7 @@ void comm_init_global_structs(void)
 	for (i = 0; i < N_COMM_CORES; i++)
 		comm_log_init(&comm_core_logs[i]);
 
-	wnd_reset(&triggered_nodes, 255);
+	bigmap_init(&triggered_nodes);
 }
 
 /* based on init_mem in main.c */
@@ -119,8 +120,7 @@ static void trigger_request(void *param, u64 when)
 	struct end_node_state *en = (struct end_node_state *)param;
 	u32 index = en - end_nodes;
 	(void)param; (void)when;
-	if (!wnd_is_marked(&triggered_nodes, index))
-		wnd_mark(&triggered_nodes, index);
+	bigmap_set(&triggered_nodes, index);
 	COMM_DEBUG("trigger_request index=%u\n", index);
 }
 
@@ -333,10 +333,10 @@ void exec_comm_core(struct comm_core_cmd * cmd)
 			struct fpproto_pktdesc *pd;
 			u64 now;
 
-			if (wnd_empty(&triggered_nodes))
+			if (bigmap_empty(&triggered_nodes))
 				break;
 
-			node_ind = wnd_earliest_marked(&triggered_nodes);
+			node_ind = bigmap_find(&triggered_nodes);
 			en = &end_nodes[node_ind];
 
 
@@ -366,7 +366,7 @@ void exec_comm_core(struct comm_core_cmd * cmd)
 			comm_log_tx_pkt(node_ind, now);
 
 			/* clear the trigger */
-			wnd_clear(&triggered_nodes, node_ind);
+			bigmap_clear(&triggered_nodes, node_ind);
 		}
 
 		/* Flush queued packets */

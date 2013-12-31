@@ -26,6 +26,7 @@ struct comm_log {
 	uint64_t rx_ipv4_non_fastpss_pkts;
 	uint64_t tx_pkt;
 	uint64_t pktdesc_alloc_failed;
+	uint64_t rx_truncated_pkt;
 };
 
 extern struct comm_log comm_core_logs[N_COMM_CORES];
@@ -75,6 +76,13 @@ static inline void comm_log_tx_pkt(uint32_t node_id, uint64_t when) {
 static inline void comm_log_pktdesc_alloc_failed(uint32_t node_id) {
 	CL->pktdesc_alloc_failed++;
 	COMM_DEBUG("failed to allocate a pktdesc for node ID %u\n", node_id);
+}
+
+static inline void comm_log_rx_truncated_pkt(uint32_t ip_total_len,
+		uint32_t mbuf_len, uint32_t src_ip) {
+	CL->rx_truncated_pkt++;
+	COMM_DEBUG("packet from IP %08X is %u bytes, too short for its IP length %u\n",
+			src_ip, mbuf_len, ip_total_len);
 }
 
 #undef CL

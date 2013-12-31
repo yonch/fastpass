@@ -54,6 +54,8 @@ static __sum16 fastpass_checksum(u8 *pkt, u32 len, __be32 saddr, __be32 daddr,
 	u32 seq_hash = jhash_3words((u32)seqno, seqno >> 32, (u32)ack_seq,
 			ack_seq >> 32);
 	__wsum csum = csum_partial(pkt, len, seq_hash);
+	return csum_tcpudp_magic(0, 0, len, IPPROTO_FASTPASS, csum);
+	/* TODO: reinstate checksumming saddr and daddr */
 	return csum_tcpudp_magic(saddr, daddr, len, IPPROTO_FASTPASS, csum);
 }
 
@@ -135,8 +137,8 @@ static void do_proto_reset(struct fpproto_conn *conn, u64 reset_time,
 
 	/* set new sequence numbers */
 	conn->last_reset_time = reset_time;
-	wnd_reset(&conn->outwnd, base_seqno + FASTPASS_TO_CONTROLLER_SEQNO_OFFSET - 1);
-	conn->in_max_seqno = base_seqno + FASTPASS_TO_ENDPOINT_SEQNO_OFFSET - 1;
+	wnd_reset(&conn->outwnd, base_seqno + FASTPASS_EGRESS_SEQNO_OFFSET - 1);
+	conn->in_max_seqno = base_seqno + FASTPASS_INGRESS_SEQNO_OFFSET - 1;
 	conn->inwnd = ~0UL;
 	conn->consecutive_bad_pkts = 0;
 
@@ -182,17 +184,29 @@ set_next_timer:
 
 /*
  * returns 0 if okay to continue processing, 1 to drop
+ *
+ *                   					LAST RESET
+ *          					is recent    =   not recent
+ *          			   ====================================
+ *          	is recent  =      accept     =     accept     =
+ *  PAYLOAD                =     maximum     =     payload    =
+ *  TIMESTAMP              =-----------------=----------------=
+ *  			not recent =       do        =   produce new  =
+ *  			           =     nothing     =    timestamp   =
+ *  			           ====================================
  */
 static int reset_payload_handler(struct fpproto_conn *conn, u64 full_tstamp)
 {
 	u64 now = fp_get_time_ns();
+	bool last_is_recent;
+	bool payload_is_recent;
 
 	conn->stat.reset_payloads++;
 	fp_debug("got RESET, last is 0x%llX, full 0x%llX, now 0x%llX\n",
 			conn->last_reset_time, full_tstamp, now);
 
 	if (full_tstamp == conn->last_reset_time) {
-		if (!conn->in_sync) {
+		if (IS_ENDPOINT && !conn->in_sync) {
 			conn->in_sync = 1;
 			fp_debug("Now in sync\n");
 		} else {
@@ -202,25 +216,52 @@ static int reset_payload_handler(struct fpproto_conn *conn, u64 full_tstamp)
 		return 0;
 	}
 
-	/* reject resets outside the time window */
-	if (unlikely(!tstamp_in_window(full_tstamp, now, conn->rst_win_ns))) {
-		fp_debug("Reset was out of reset window (diff=%lld)\n",
-				(s64)full_tstamp - (s64)now);
-		conn->stat.reset_out_of_window++;
-		return 1;
+	/* got a different reset from what we have, so assume we're not in sync */
+	conn->in_sync = 0;
+
+	/* did we accept a reset recently? */
+	last_is_recent = tstamp_in_window(conn->last_reset_time, now, conn->rst_win_ns);
+	/* is the timestamp requested recent? */
+	payload_is_recent = tstamp_in_window(full_tstamp, now, conn->rst_win_ns);
+
+	if (last_is_recent) {
+		if (payload_is_recent) {
+			/* accept maximum */
+			fp_debug("both last_reset and payload timestamps are recent. will accept max.\n");
+			if (unlikely(time_before64(full_tstamp, conn->last_reset_time))) {
+				fp_debug("last_reset larger by %lluns. will not accept.\n",
+								conn->last_reset_time - full_tstamp);
+				conn->stat.reset_both_recent_last_reset_wins++;
+				return 1;
+			} else {
+				/* the payload is more recent. we will accept it */
+				fp_debug("payload larger by %lluns. will accept.\n",
+								full_tstamp - conn->last_reset_time);
+				conn->stat.reset_both_recent_payload_wins++;
+				goto accept;
+			}
+		} else {
+			fp_debug("last_reset recent, payload is old. will stick with last_reset.\n");
+			conn->stat.reset_last_recent_payload_old++;
+			return 1;
+		}
+	} else {
+		if (payload_is_recent) {
+			fp_debug("payload is recent, last_reset is old. will accept.\n");
+			conn->stat.reset_last_old_payload_recent++;
+			goto accept;
+		} else {
+			fp_debug("neither payload nor last_reset are recent. will choose a new timestamp.\n");
+			conn->stat.reset_both_old++;
+			do_proto_reset(conn, now, IS_ENDPOINT);
+			if (conn->ops->handle_reset)
+				conn->ops->handle_reset(conn->ops_param);
+			return 1;
+		}
 	}
 
-	/* if we already processed a newer reset within the window */
-	if (unlikely(tstamp_in_window(conn->last_reset_time, now, conn->rst_win_ns)
-			&& time_before64(full_tstamp, conn->last_reset_time))) {
-		fp_debug("Already processed reset within window which is %lluns more recent\n",
-						conn->last_reset_time - full_tstamp);
-		conn->stat.outdated_reset++;
-		return 1;
-	}
-
-	/* okay, accept the reset */
-	do_proto_reset(conn, full_tstamp, true);
+accept:
+	do_proto_reset(conn, full_tstamp, IS_ENDPOINT);
 	if (conn->ops->handle_reset)
 		conn->ops->handle_reset(conn->ops_param);
 	return 0;
@@ -280,6 +321,9 @@ static void got_good_packet(struct fpproto_conn *conn)
 static void got_bad_packet(struct fpproto_conn *conn)
 {
 	u64 now = fp_get_time_ns();
+
+	/* we better assume we're not in sync and send RESET payloads */
+	conn->in_sync = 0;
 
 	conn->consecutive_bad_pkts++;
 	fp_debug("#%u consecutive bad packets\n", conn->consecutive_bad_pkts);
@@ -455,6 +499,7 @@ void fpproto_handle_rx_packet(struct fpproto_conn *conn, u8 *pkt, u32 len,
 	u8 *data_end;
 	u64 ack_vec;
 	u16 ack_vec16;
+	__sum16 expected_checksum;
 
 	conn->stat.rx_pkts++;
 
@@ -486,13 +531,8 @@ void fpproto_handle_rx_packet(struct fpproto_conn *conn, u8 *pkt, u32 len,
 
 		base_seqno = base_seqno_from_timestamp(rst_tstamp);
 
-#ifdef FASTPASS_CONTROLLER
-		in_seq = base_seqno + FASTPASS_TO_CONTROLLER_SEQNO_OFFSET;
-		ack_seq = base_seqno + FASTPASS_TO_ENDPOINT_SEQNO_OFFSET - 1;
-#else
-		in_seq = base_seqno + FASTPASS_TO_ENDPOINT_SEQNO_OFFSET;
-		ack_seq = base_seqno + FASTPASS_TO_CONTROLLER_SEQNO_OFFSET - 1;
-#endif
+		in_seq = base_seqno + FASTPASS_INGRESS_SEQNO_OFFSET;
+		ack_seq = base_seqno + FASTPASS_EGRESS_SEQNO_OFFSET - 1;
 	} else {
 		/* get seqno from stored state */
 		in_seq = conn->in_max_seqno - (1 << 14);
@@ -501,13 +541,15 @@ void fpproto_handle_rx_packet(struct fpproto_conn *conn, u8 *pkt, u32 len,
 	in_seq += (ntohs(hdr->seq) - in_seq) & 0xFFFF;
 	ack_seq += (ntohs(hdr->ack_seq) - ack_seq) & 0xFFFF;
 	fp_debug("packet with in_seq 0x%04X (full 0x%llX, prev_max 0x%llX)"
-			"ack_seq 0x%04X (full 0x%llX, max_sent 0x%llX)\n",
+			" ack_seq 0x%04X (full 0x%llX, max_sent 0x%llX)\n",
 			ntohs(hdr->seq), in_seq, conn->in_max_seqno,
-			ntohs(hdr->ack_seq), ack_seq, conn->next_seqno - 1);
+			ntohs(hdr->ack_seq), ack_seq, wnd_head(&conn->outwnd));
 
 	/* verify checksum */
+	expected_checksum = hdr->checksum;
+	hdr->checksum = 0;
 	checksum = fastpass_checksum(pkt, len, saddr, daddr, in_seq, ack_seq);
-	if (unlikely(checksum != 0)) {
+	if (unlikely(checksum != expected_checksum)) {
 		got_bad_packet(conn);
 		goto bad_checksum; /* will drop packet */
 	} else {
@@ -515,13 +557,16 @@ void fpproto_handle_rx_packet(struct fpproto_conn *conn, u8 *pkt, u32 len,
 	}
 
 	if (unlikely(payload_type == FASTPASS_PTYPE_RESET)) {
+		/* a good-checksum RESET packet always triggers a controller response */
+		if (!IS_ENDPOINT && conn->ops->trigger_request)
+			conn->ops->trigger_request(conn->ops_param, fp_get_time_ns());
+
 		if (reset_payload_handler(conn, rst_tstamp) != 0)
 			/* reset was not applied, drop packet */
 			return;
 		curp += 8;
-		if (curp == data_end)
-			/* only RESET in this packet, we're done with it */
-			return;
+	} else {
+		conn->in_sync = 1;
 	}
 
 	/* update inwnd */
@@ -534,7 +579,9 @@ void fpproto_handle_rx_packet(struct fpproto_conn *conn, u8 *pkt, u32 len,
 	ack_vec |= ((u64)(ack_vec16 & 0x7FFF) << 48) | (1UL << 63); /* ack the ack_seqno */
 	ack_payload_handler(conn, ack_seq, ack_vec);
 
-
+	if (unlikely(curp == data_end))
+		/* no more payloads in this packet, we're done with it */
+		return;
 
 handle_payload:
 	/* at this point we know there is at least one byte remaining */
@@ -601,7 +648,8 @@ incomplete_ack_payload:
 
 bad_checksum:
 	conn->stat.rx_checksum_error++;
-	fp_debug("checksum error. expected 0, got 0x%04X\n", checksum);
+	fp_debug("checksum error. expected 0x%04X, got 0x%04X\n",
+			expected_checksum, checksum);
 	return;
 
 packet_too_short:
@@ -689,7 +737,7 @@ int fpproto_encode_packet(struct fpproto_conn *conn,
 	/* RESET */
 	if (pd->send_reset) {
 		u32 hi_word;
-		hi_word = (FASTPASS_PTYPE_RSTREQ << 28) |
+		hi_word = (FASTPASS_PTYPE_RESET << 28) |
 					((pd->reset_timestamp >> 32) & 0x00FFFFFF);
 		*(__be32 *)curp = htonl(hi_word);
 		*(__be32 *)(curp + 4) = htonl((u32)pd->reset_timestamp);
@@ -716,6 +764,9 @@ int fpproto_encode_packet(struct fpproto_conn *conn,
 	/* checksum */
 	*(__be16 *)(pkt + 6) = fastpass_checksum(pkt, curp - pkt, saddr, daddr,
 			pd->seqno, pd->ack_seq);
+
+	fp_debug("encoded pkt with seq 0x%llX ack_seq 0x%llX checksum 0x%04X len %ld\n",
+			pd->seqno, pd->ack_seq, *(__be16 *)(pkt + 6), curp - pkt);
 
 	return curp - pkt;
 }

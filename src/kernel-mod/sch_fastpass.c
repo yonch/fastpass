@@ -903,7 +903,10 @@ static void handle_neg_ack(void *param, struct fpproto_pktdesc *pd)
 
 	for (i = 0; i < pd->n_areq; i++) {
 		f = fpq_lookup(q, pd->areq[i].src_dst_key, false);
-		BUG_ON(f == NULL);
+		if (unlikely(f == NULL)) {
+			FASTPASS_CRIT("could not find flow - known destruction race\n");
+			break;
+		}
 
 		req_tslots = pd->areq[i].tslots;
 		/* don't need to resend if got ack >= req_tslots */

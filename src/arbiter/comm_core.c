@@ -110,8 +110,8 @@ void comm_init_core(uint16_t lcore_id)
 
 static void handle_reset(void *param)
 {
-	(void)param;
-	COMM_DEBUG("got reset\n");
+	struct end_node_state *en = (struct end_node_state *)param;
+	COMM_DEBUG("got reset in_sync=%d\n", en->conn.in_sync);
 }
 
 static void trigger_request(void *param, u64 when)
@@ -203,6 +203,7 @@ comm_rx(struct rte_mbuf *m, uint8_t portid)
 	uint32_t req_src;
 	struct end_node_state *en;
 	uint16_t ether_type;
+	uint16_t ip_total_len;
 
 	eth_hdr = rte_pktmbuf_mtod(m, struct ether_hdr *);
 	ipv4_hdr = (struct ipv4_hdr *)(rte_pktmbuf_mtod(m, unsigned char *)
@@ -228,6 +229,15 @@ comm_rx(struct rte_mbuf *m, uint8_t portid)
 		goto cleanup;
 	}
 
+	ip_total_len = rte_be_to_cpu_16(ipv4_hdr->total_length);
+
+	if (unlikely(sizeof(struct ether_hdr) + ip_total_len > rte_pktmbuf_data_len(m))) {
+		comm_log_rx_truncated_pkt(ip_total_len, rte_pktmbuf_data_len(m),
+				ipv4_hdr->src_addr);
+		goto cleanup;
+	}
+
+
 	req_src = node_from_node_ip(rte_be_to_cpu_32(ipv4_hdr->src_addr));
 	en = &end_nodes[req_src];
 
@@ -237,13 +247,14 @@ comm_rx(struct rte_mbuf *m, uint8_t portid)
 	en->controller_ip = ipv4_hdr->dst_addr;
 
 
-	RTE_LOG(INFO, BENCHAPP, "at %lu controller got packet src_ip=0x%"PRIx32
-			"src_node=%u dst=0x%"PRIx32"\n", rte_get_timer_cycles(),
-			ipv4_hdr->src_addr, req_src, ipv4_hdr->dst_addr);
+	COMM_DEBUG("at %lu controller got packet src_ip=0x%"PRIx32
+			" src_node=%u dst=0x%"PRIx32" ip_len=%u\n", rte_get_timer_cycles(),
+			ipv4_hdr->src_addr, req_src, ipv4_hdr->dst_addr, ip_total_len);
+
 
 	if (req_src < MAX_NODES) {
 		fpproto_handle_rx_packet(&end_nodes[req_src].conn, req_pkt,
-				rte_pktmbuf_data_len(m) - (sizeof(struct ether_hdr) + sizeof(struct ipv4_hdr)),
+				ip_total_len - 4 * (ipv4_hdr->version_ihl & 0xF),
 				ipv4_hdr->src_addr, ipv4_hdr->dst_addr);
 	}
 
@@ -339,16 +350,14 @@ void exec_comm_core(struct comm_core_cmd * cmd)
 				break;
 			}
 
-			/* make the packet */
-			out_pkt = make_packet(en, pd);
-			if (unlikely(out_pkt == NULL)) {
-				fpproto_pktdesc_free(pd);
-				break;
-			}
-
 			/* we want this packet's reliability to be tracked */
 			now = fp_get_time_ns();
 			fpproto_commit_packet(&en->conn, pd, now);
+
+			/* make the packet */
+			out_pkt = make_packet(en, pd);
+			if (unlikely(out_pkt == NULL))
+				break;
 
 			/* send on port */
 			send_packet_via_queue(out_pkt, en->dst_port);

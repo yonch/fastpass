@@ -121,65 +121,86 @@ enum {
 #define __ffs(x) (__builtin_ffsl(x) - 1)
 
 /* from Jenkin's public domain lookup3.c at http://burtleburtle.net/bob/c/lookup3.c */
-#define rot(x,k) (((x)<<(k)) | ((x)>>(32-(k))))
-#define final(a,b,c) \
+#define jhash_3words 		fp_jhash_3words
+#define jhash_1word			fp_jhash_1word
+#define csum_partial		fp_csum_partial
+#define csum_tcpudp_magic 	fp_csum_tcpudp_magic
+
+#define fp_rot(x,k) (((x)<<(k)) | ((x)>>(32-(k))))
+#define fp_jhash_final(a,b,c) \
 { \
-  c ^= b; c -= rot(b,14); \
-  a ^= c; a -= rot(c,11); \
-  b ^= a; b -= rot(a,25); \
-  c ^= b; c -= rot(b,16); \
-  a ^= c; a -= rot(c,4);  \
-  b ^= a; b -= rot(a,14); \
-  c ^= b; c -= rot(b,24); \
+  c ^= b; c -= fp_rot(b,14); \
+  a ^= c; a -= fp_rot(c,11); \
+  b ^= a; b -= fp_rot(a,25); \
+  c ^= b; c -= fp_rot(b,16); \
+  a ^= c; a -= fp_rot(c,4);  \
+  b ^= a; b -= fp_rot(a,14); \
+  c ^= b; c -= fp_rot(b,24); \
 }
 
-
-static inline u32 jhash_3words(u32 a, u32 b, u32 c, u32 initval)
+static inline u32 fp_jhash_3words(u32 a, u32 b, u32 c, u32 initval)
 {
 	a += 0xDEADBEEF;
 	b += 0xDEADBEEF;
 	c += initval;
-	final(a,b,c);
+	fp_jhash_final(a,b,c);
 	return c;
 }
 
-static inline u32 jhash_1word(u32 a, u32 initval)
+static inline u32 fp_jhash_1word(u32 a, u32 initval)
 {
 	return jhash_3words(a, 0, 0, initval);
 }
 
 /* based on rte_hash_crc from DPDK's rte_hash_crc.h, but does checksum */
 static inline
-uint32_t csum_partial(const void *data, uint32_t data_len, uint32_t init_val)
+uint32_t fp_csum_partial(const void *data, uint32_t data_len, uint32_t init_val)
 {
 	unsigned i;
-	uint32_t temp = 0;
 	u64 sum = init_val;
 	const uint32_t *p32 = (const uint32_t *)data;
+	bool flip = false;
+
+	if (unlikely(data_len < 4))
+		goto do_last;
+
+	flip = (u64)p32 & 0x1;
+	if (unlikely(flip)) {
+		sum += *((const uint8_t *)p32);
+		p32 = (const uint32_t *)((const uint8_t *)p32 + 1);
+	}
+
+	if ((u64)p32 & 0x2) {
+		sum += *((const uint16_t *)p32);
+		p32 = (const uint32_t *)((const uint16_t *)p32 + 1);
+	}
 
 	for (i = 0; i < data_len / 4; i++) {
 		sum += *p32++;
 	}
 
+do_last:
 	switch (3 - (data_len & 0x03)) {
 	case 0:
-		temp |= *((const uint8_t *)p32 + 2) << 16;
+		sum += *((const uint8_t *)p32 + 2) << 16;
 		/* Fallthrough */
 	case 1:
-		temp |= *((const uint8_t *)p32 + 1) << 8;
+		sum += *((const uint8_t *)p32 + 1) << 8;
 		/* Fallthrough */
 	case 2:
-		temp |= *((const uint8_t *)p32);
-		sum += temp;
+		sum += *((const uint8_t *)p32);
 	default:
 		break;
 	}
 
-	sum = (u32)sum + (sum >> 32); /* could have overflow on bit 32 */
+	if (unlikely(flip))
+		sum = (u32)(sum << 8) + (sum >> 24); /* could have overflow on bit 32 */
+	else
+		sum = (u32)sum + (sum >> 32); /* could have overflow on bit 32 */
 	return (u32)sum + (u32)(sum >> 32);    /* add the overflow */
 }
 
-static inline uint16_t csum_tcpudp_magic(uint32_t saddr, uint32_t daddr,
+static inline uint16_t fp_csum_tcpudp_magic(uint32_t saddr, uint32_t daddr,
 		uint16_t len, uint16_t proto, uint32_t sum32)
 {
 	uint64_t sum64 = sum32;

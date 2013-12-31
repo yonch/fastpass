@@ -16,18 +16,19 @@
 
 // Methods to be replaced with inter-core communication
 static inline
-void enqueue_to_Q_head(struct bin *new_requests, uint16_t src, uint16_t dst) {
-    assert(new_requests != NULL);
+void enqueue_to_Q_head(struct admissible_status *status, uint16_t src,
+                       uint16_t dst) {
+    assert(status != NULL);
 
-    enqueue_bin(new_requests, src, dst);
+    enqueue_bin(status->q_head, src, dst);
 }
 
 static inline
-struct backlog_edge *dequeue_from_Q_head(struct bin *new_requests) {
-    assert(new_requests != NULL);
+struct backlog_edge *dequeue_from_Q_head(struct admissible_status *status) {
+    assert(status != NULL);
 
-    struct backlog_edge *current = peek_head_bin(new_requests);
-    dequeue_bin(new_requests);
+    struct backlog_edge *current = peek_head_bin(status->q_head);
+    dequeue_bin(status->q_head);
 
     return current;
 }
@@ -57,9 +58,8 @@ void enqueue_to_my_Q_urgent(uint16_t src, uint16_t dst) {
 }
 
 // Request num_slots additional timeslots from src to dst
-void request_timeslots(struct bin *new_requests, struct admissible_status *status,
-                       uint16_t src, uint16_t dst, uint16_t demand_tslots) {
-    assert(new_requests != NULL);
+void request_timeslots(struct admissible_status *status, uint16_t src,
+                       uint16_t dst, uint16_t demand_tslots) {
     assert(status != NULL);
 
     // Get full quantity from 16-bit LSB
@@ -78,7 +78,7 @@ void request_timeslots(struct bin *new_requests, struct admissible_status *statu
 
         // BEGIN ATOMIC
         if (status->flows[index].backlog == 0)
-            enqueue_to_Q_head(new_requests, src, dst);
+            enqueue_to_Q_head(status, src, dst);
 
         status->flows[index].backlog += backlog_increase;
         // END ATOMIC
@@ -166,21 +166,22 @@ void try_allocation(struct backlog_edge *edge, struct batch_state *batch_state,
 
 // Sets the last send time for new requests based on the contents of status
 // and sorts them
-void process_new_requests(struct bin *new_requests,
-                          struct admissible_status *status,
+void process_new_requests(struct admissible_status *status,
                           struct bin *working_bins,
                           struct batch_state *batch_state,
                           struct admitted_traffic *traffic_out,
                           uint16_t current_bin) {
-    assert(new_requests != NULL);
     assert(status != NULL);
     assert(working_bins != NULL);
     assert(batch_state != NULL);
     assert(traffic_out != NULL);
 
+    // TODO: choose between q_head and q_urgent when many cores
+    struct bin *new_requests = status->q_head;
+
     // Add new requests to the appropriate working bin
     while (!is_empty_bin(new_requests)) {
-        struct backlog_edge *current = dequeue_from_Q_head(new_requests);
+        struct backlog_edge *current = dequeue_from_Q_head(status);
 
         uint32_t index = get_status_index(current->src, current->dst);
         uint64_t last_send_time = status->timeslots[index];
@@ -200,6 +201,9 @@ void process_new_requests(struct bin *new_requests,
             enqueue_bin(&working_bins[bin_index], current->src, current->dst);
         }
     }
+
+    // Re-initialize to empty because wrap-around is not currently handled
+    init_bin(new_requests);
 }
 
 // Populate traffic_out with the admissible traffic for one timeslot from queue_in
@@ -208,22 +212,21 @@ void process_new_requests(struct bin *new_requests,
 // traffic_out must be an array of BATCH_SIZE struct admitted_traffics
 void get_admissible_traffic(struct backlog_queue *queue_in,
                             struct backlog_queue *queue_out,
-                            struct bin *new_requests,
                             struct admitted_traffic *traffic_out,
                             struct admissible_status *status) {
     assert(queue_in != NULL);
     assert(queue_out != NULL);
-    assert(new_requests != NULL);
     assert(traffic_out != NULL);
     assert(status != NULL);
+
+    uint8_t core_id = 0;  // for now, just one core
 
     // Initialize state for this batch
     struct batch_state batch_state;
     init_batch_state(&batch_state, status->oversubscribed,
                      status->inter_rack_capacity, status->num_nodes);
 
-    struct bin *working_bins = &status->working_bins[0];
-    struct bin *admitted_backlog = &status->working_bins[NUM_BINS];
+    struct bin *working_bins = &status->cores[core_id].working_bins[0];
     uint16_t i;
     for (i = 0; i < NUM_BINS + BATCH_SIZE - 1; i++)
         init_bin(&working_bins[i]);
@@ -236,7 +239,7 @@ void get_admissible_traffic(struct backlog_queue *queue_in,
     uint8_t batch_timeslot;
     uint16_t bin;
     for (bin = 0; bin < NUM_BINS + BATCH_SIZE - 1; bin++) {
-        process_new_requests(new_requests, status, working_bins,
+        process_new_requests(status, working_bins,
                              &batch_state, traffic_out, bin);
 
         bin_out = &queue_out->bins[MAX(0, bin - BATCH_SIZE)];
@@ -249,7 +252,7 @@ void get_admissible_traffic(struct backlog_queue *queue_in,
             while (!is_empty_bin(current_bin)) {
                 edge = peek_head_bin(current_bin);
                 try_allocation(edge, &batch_state, bin_out,last_bin,
-                               traffic_out, admitted_backlog, status);
+                               traffic_out, &working_bins[NUM_BINS], status);
                 dequeue_bin(current_bin);
             }
         }
@@ -261,7 +264,7 @@ void get_admissible_traffic(struct backlog_queue *queue_in,
         while (!is_empty_bin(new_bin)) {
             edge = peek_head_bin(new_bin);
             try_allocation(edge, &batch_state, bin_out, last_bin,
-                           traffic_out, admitted_backlog, status);
+                           traffic_out, &working_bins[NUM_BINS], status);
             dequeue_bin(new_bin);
         }
 

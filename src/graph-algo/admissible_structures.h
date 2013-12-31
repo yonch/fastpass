@@ -24,6 +24,7 @@
 #define MAX_TIME 66535
 #define BIN_SIZE MAX_NODES * MAX_NODES // TODO: try smaller values
 #define NUM_BINS 256
+#define NUM_CORES 1
 
 struct admitted_edge {
     uint16_t src;
@@ -67,6 +68,11 @@ struct batch_state {
     uint16_t dst_rack_counts [MAX_RACKS * BATCH_SIZE];
 };
 
+// Data structures associated with one allocation core
+struct core_status {
+    struct bin *working_bins; // pool of backlog bins
+};
+
 // Demand/backlog info for a given src/dst pair
 struct flow_status {
     uint16_t demand;
@@ -82,7 +88,8 @@ struct admissible_status {
     uint16_t num_nodes;
     uint64_t timeslots[MAX_NODES * MAX_NODES];
     struct flow_status flows[MAX_NODES * MAX_NODES];
-    struct bin *working_bins;  // pool of backlog bins
+    struct core_status cores[NUM_CORES];
+    struct bin *q_head;
 };
 
 
@@ -443,8 +450,16 @@ struct admissible_status *create_admissible_status(bool oversubscribed,
     assert(status != NULL);
 
     init_admissible_status(status, oversubscribed, inter_rack_capacity, num_nodes);
-    status->working_bins = malloc(sizeof(struct bin) * (NUM_BINS + BATCH_SIZE - 1));
-    assert(status->working_bins != NULL);
+    uint8_t i;
+    for (i = 0; i < NUM_CORES; i++) {
+        status->cores[i].working_bins = malloc(sizeof(struct bin) * (NUM_BINS + BATCH_SIZE - 1));
+        assert(status->cores[i].working_bins != NULL);
+    }
+
+    size_t q_head_size = sizeof(struct bin) +
+        (MAX_NODES * MAX_NODES - BIN_SIZE) * sizeof(struct backlog_edge);
+    status->q_head = malloc(q_head_size);
+    assert(status->q_head != NULL);
 
     return status;
 }
@@ -453,7 +468,11 @@ static inline
 void destroy_admissible_status(struct admissible_status *status) {
     assert(status != NULL);
 
-    free(status->working_bins);
+    uint8_t i;
+    for (i = 0; i < NUM_CORES; i++)
+        free(status->cores[i].working_bins);
+    free(status->q_head);
+
     free(status);
 }
 

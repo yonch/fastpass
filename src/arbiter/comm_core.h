@@ -18,7 +18,12 @@ struct comm_core_cmd {
 /**
  * Initializes global data used by comm cores
  */
-void comm_init_shared_structs(void);
+void comm_init_global_structs(void);
+
+/**
+ * Initializes a single core to be a comm core
+ */
+void comm_init_core(uint16_t lcore_id);
 
 void exec_comm_core(struct comm_core_cmd * cmd);
 

@@ -9,6 +9,10 @@
 #define COMM_LOG_H_
 
 #include <rte_log.h>
+#include <rte_lcore.h>
+#include <rte_byteorder.h>
+
+#include "control.h"
 
 /**
  * logged information for a core
@@ -17,25 +21,62 @@ struct comm_log {
 	uint64_t rx_pkts;
 	uint64_t rx_batches;
 	uint64_t rx_non_empty_batches;
+	uint64_t tx_cannot_alloc_mbuf;
+	uint64_t rx_non_ipv4_pkts;
+	uint64_t rx_ipv4_non_fastpss_pkts;
+	uint64_t tx_pkt;
+	uint64_t pktdesc_alloc_failed;
 };
+
+extern struct comm_log comm_core_logs[N_COMM_CORES];
 
 #define RTE_LOGTYPE_COMM RTE_LOGTYPE_USER1
 #define COMM_DEBUG(a...) RTE_LOG(DEBUG, COMM, ##a)
+
+/* current comm log */
+#define CL		(&comm_core_logs[rte_lcore_id()])
 
 static inline void comm_log_init(struct comm_log *cl)
 {
 	memset(cl, 0, sizeof(*cl));
 }
 
-static inline void comm_log_processed_batch(struct comm_log *cl,
-		int nb_rx, uint64_t rx_time) {
-	cl->rx_pkts += nb_rx;
-	cl->rx_batches++;
+static inline void comm_log_processed_batch(int nb_rx, uint64_t rx_time) {
+	CL->rx_pkts += nb_rx;
+	CL->rx_batches++;
 	if (nb_rx > 0) {
 		COMM_DEBUG("at %lu: RX batch of %d packets, totals %lu batches, %lu packets\n",
-				rx_time, nb_rx, cl->rx_batches, cl->rx_pkts);
-		cl->rx_non_empty_batches++;
+				rx_time, nb_rx, CL->rx_batches, CL->rx_pkts);
+		CL->rx_non_empty_batches++;
 	}
 }
+
+static inline void comm_log_tx_cannot_allocate_mbuf(uint32_t dst_ip) {
+	CL->tx_cannot_alloc_mbuf++;
+	COMM_DEBUG("core %d could not allocate TX mbuf for packet to IP "
+			"0x%Xu\n",rte_lcore_id(), rte_be_to_cpu_32(dst_ip));
+}
+
+static inline void comm_log_rx_non_ipv4_packet(uint8_t portid) {
+	CL->rx_non_ipv4_pkts++;
+	COMM_DEBUG("got non-IPv4 packet on portid %d\n", portid);
+}
+
+static inline void comm_log_rx_ip_non_fastpass_pkt(uint8_t portid) {
+	CL->rx_ipv4_non_fastpss_pkts++;
+	COMM_DEBUG("got an IPv4 non-fastpass packet on portid %d\n", portid);
+}
+
+static inline void comm_log_tx_pkt(uint32_t node_id, uint64_t when) {
+	CL->tx_pkt++;
+	COMM_DEBUG("sending a packet to node ID %u at time %lu\n", node_id, when);
+}
+
+static inline void comm_log_pktdesc_alloc_failed(uint32_t node_id) {
+	CL->pktdesc_alloc_failed++;
+	COMM_DEBUG("failed to allocate a pktdesc for node ID %u\n", node_id);
+}
+
+#undef CL
 
 #endif /* COMM_LOG_H_ */

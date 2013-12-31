@@ -3,8 +3,13 @@
 #define DPDK_PLATFORM_H_
 
 #include <time.h>
+#include <rte_mempool.h>
 #include "../kernel-mod/linux-compat.h"
 #include "comm_log.h"
+#include "main.h"
+
+extern struct rte_mempool* pktdesc_pool[NB_SOCKETS];
+
 
 #define FASTPASS_PR_DEBUG(enable, fmt, a...)	do { if (enable)	     \
 							COMM_DEBUG("%s: " fmt, __func__, ##a); \
@@ -24,16 +29,20 @@ static inline
 struct fpproto_pktdesc *fpproto_pktdesc_alloc(void)
 {
 	struct fpproto_pktdesc *pd;
-	pd = NULL; /* TODO */
+	int socketid = rte_lcore_to_socket_id(rte_lcore_id());
+
+	if (unlikely(rte_mempool_get(pktdesc_pool[socketid], (void**)&pd) != 0))
+			return NULL;
+
 	return pd;
 }
 
 static inline
 void fpproto_pktdesc_free(struct fpproto_pktdesc *pd)
 {
-	(void) pd; /* TODO */
+	int socketid = rte_lcore_to_socket_id(rte_lcore_id());
+	rte_mempool_put(pktdesc_pool[socketid], pd);
 }
-
 
 static inline
 int cancel_timer(struct fpproto_conn *proto)

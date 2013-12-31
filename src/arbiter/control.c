@@ -61,7 +61,7 @@ void launch_controller_cores(void)
 	struct comm_core_cmd ctrl_cmd;
 
 	/* initialize comm core global data */
-	comm_init_shared_structs();
+	comm_init_global_structs();
 
 	// Calculate start and end times
 	start_time = rte_get_timer_cycles() + sec_to_hpet(0.2); /* start after last end */
@@ -95,6 +95,9 @@ void launch_controller_cores(void)
 //		rte_eal_remote_launch(exec_traffic_gen, &gen_cmds[gen_core], gen_core);
 //
 //	}
+
+	/* initialize comm core on this core */
+	comm_init_core(rte_lcore_id());
 
 	/** Run the controller on this core */
 	exec_comm_core(&ctrl_cmd);

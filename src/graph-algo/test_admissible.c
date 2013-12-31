@@ -270,7 +270,7 @@ int main(void) {
     free(queue_0);
     free(queue_1);
     free(new_requests);
-    free(status->admitted_bins);
+    free(status->working_bins);
     free(status);
     free(admitted);
 }

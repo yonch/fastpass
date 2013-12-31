@@ -82,7 +82,7 @@ struct admissible_status {
     uint16_t num_nodes;
     uint64_t timeslots[MAX_NODES * MAX_NODES];
     struct flow_status flows[MAX_NODES * MAX_NODES];
-    struct bin *admitted_bins;  // pool of backlog bins
+    struct bin *working_bins;  // pool of backlog bins
 };
 
 
@@ -443,8 +443,8 @@ struct admissible_status *create_admissible_status(bool oversubscribed,
     assert(status != NULL);
 
     init_admissible_status(status, oversubscribed, inter_rack_capacity, num_nodes);
-    status->admitted_bins = malloc(sizeof(struct bin) * (BATCH_SIZE - 1));
-    assert(status->admitted_bins != NULL);
+    status->working_bins = malloc(sizeof(struct bin) * (NUM_BINS + BATCH_SIZE - 1));
+    assert(status->working_bins != NULL);
 
     return status;
 }
@@ -453,7 +453,7 @@ static inline
 void destroy_admissible_status(struct admissible_status *status) {
     assert(status != NULL);
 
-    free(status->admitted_bins);
+    free(status->working_bins);
     free(status);
 }
 

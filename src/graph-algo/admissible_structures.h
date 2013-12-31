@@ -69,8 +69,10 @@ struct batch_state {
 };
 
 // Data structures associated with one allocation core
-struct core_status {
+struct allocation_core {
     struct bin *working_bins; // pool of backlog bins
+    struct batch_state batch_state;
+    struct admitted_traffic *admitted;  // one batch of traffic admitted by this core
 };
 
 // Demand/backlog info for a given src/dst pair
@@ -88,7 +90,7 @@ struct admissible_status {
     uint16_t num_nodes;
     uint64_t timeslots[MAX_NODES * MAX_NODES];
     struct flow_status flows[MAX_NODES * MAX_NODES];
-    struct core_status cores[NUM_CORES];
+    struct allocation_core cores[NUM_CORES];
     struct bin *q_head;
 };
 
@@ -377,6 +379,33 @@ void reset_flow(struct admissible_status *status, uint16_t src, uint16_t dst) {
     // END ATOMIC
 }
 
+// Initializes data structures associated with one allocation core for
+// a new batch of processing
+static inline
+void init_allocation_core(struct allocation_core *core,
+                          struct admissible_status *status) {
+    assert(core != NULL);
+
+    uint16_t i;
+    for (i = 0; i < NUM_BINS + BATCH_SIZE - 1; i++)
+        init_bin(&core->working_bins[i]);
+
+    init_batch_state(&core->batch_state, status->oversubscribed,
+                     status->inter_rack_capacity, status->num_nodes);
+
+    for (i = 0; i < BATCH_SIZE; i++)
+        init_admitted_traffic(&core->admitted[i]);
+}
+
+// Returns a pointer to the batch of traffic admitted by a particular core
+static inline
+struct admitted_traffic *get_admitted_by_core(struct admissible_status *status,
+                                              uint8_t core) {
+    assert(status != NULL);
+
+    return status->cores[core].admitted;
+}
+
 // Helper methods for testing in python
 static inline
 struct admitted_traffic *create_admitted_traffic(void) {
@@ -451,9 +480,13 @@ struct admissible_status *create_admissible_status(bool oversubscribed,
 
     init_admissible_status(status, oversubscribed, inter_rack_capacity, num_nodes);
     uint8_t i;
+    struct allocation_core *core;
     for (i = 0; i < NUM_CORES; i++) {
-        status->cores[i].working_bins = malloc(sizeof(struct bin) * (NUM_BINS + BATCH_SIZE - 1));
-        assert(status->cores[i].working_bins != NULL);
+        core = &status->cores[i];
+        core->working_bins = malloc(sizeof(struct bin) * (NUM_BINS + BATCH_SIZE - 1));
+        assert(core->working_bins != NULL);
+        core->admitted = malloc(sizeof(struct admitted_traffic) * BATCH_SIZE);
+        assert(core->admitted != NULL);
     }
 
     size_t q_head_size = sizeof(struct bin) +
@@ -469,8 +502,12 @@ void destroy_admissible_status(struct admissible_status *status) {
     assert(status != NULL);
 
     uint8_t i;
-    for (i = 0; i < NUM_CORES; i++)
-        free(status->cores[i].working_bins);
+    struct allocation_core *core;
+    for (i = 0; i < NUM_CORES; i++) {
+        core = &status->cores[i];
+        free(core->working_bins);
+        free(core->admitted);
+    }
     free(status->q_head);
 
     free(status);

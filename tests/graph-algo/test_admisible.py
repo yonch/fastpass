@@ -22,14 +22,15 @@ class Test(unittest.TestCase):
 
         queue_0 = structures.create_backlog_queue()
         queue_1 = structures.create_backlog_queue()
-        admitted = structures.create_admitted_traffic()
         status = structures.create_admissible_status(False, 0, 2)
+
+        admitted = structures.get_admitted_by_core(status, 0)
 
         # Make a request
         admissible.request_timeslots(status, 0, 1, 5)
  
         # Get admissible traffic (timeslot 1)
-        admissible.get_admissible_traffic(queue_0, queue_1, admitted, status)
+        admissible.get_admissible_traffic(queue_0, queue_1, status)
 
         # Check that one packet was admitted in each of the first 5 tslots
         # and queue_0 and queue_1 are empty
@@ -44,7 +45,6 @@ class Test(unittest.TestCase):
     
         structures.destroy_backlog_queue(queue_0)
         structures.destroy_backlog_queue(queue_1)
-        structures.destroy_admitted_traffic(admitted)
         structures.destroy_admissible_status(status)
 
         pass
@@ -54,16 +54,17 @@ class Test(unittest.TestCase):
  
         queue_0 = structures.create_backlog_queue()
         queue_1 = structures.create_backlog_queue()
-        admitted = structures.create_admitted_traffic()
         status = structures.create_admissible_status(False, 0, 8)
         empty_queue = structures.create_backlog_queue()
+
+        admitted = structures.get_admitted_by_core(status, 0)
 
         # Make a few competing requests
         admissible.request_timeslots(status, 0, 1, 2)
         admissible.request_timeslots(status, 0, 4, 1)
 
         # Get admissible traffic, check that one packet was admitted
-        admissible.get_admissible_traffic(queue_0, queue_1, admitted, status)
+        admissible.get_admissible_traffic(queue_0, queue_1, status)
 
         # Check that one packet was admitted in each of first 3 timeslots
         for i in range(3):
@@ -77,7 +78,6 @@ class Test(unittest.TestCase):
 
         structures.destroy_backlog_queue(queue_0)
         structures.destroy_backlog_queue(queue_1)
-        structures.destroy_admitted_traffic(admitted)
         structures.destroy_admissible_status(status)
         structures.destroy_backlog_queue(empty_queue)
 
@@ -89,31 +89,31 @@ class Test(unittest.TestCase):
 
         queue_0 = structures.create_backlog_queue()
         queue_1 = structures.create_backlog_queue()
-        admitted_batch_0 = structures.create_admitted_traffic()
-        admitted_batch_1 = structures.create_admitted_traffic()
         status = structures.create_admissible_status(False, 0, 8)
         empty_queue = structures.create_backlog_queue()
+
+        admitted = structures.get_admitted_by_core(status, 0)
 
         # Make two competing requests
         admissible.request_timeslots(status, 3, 5, 1)
         admissible.request_timeslots(status, 4, 5, 1)
     
         # Get admissible traffic (first batch)
-        admissible.get_admissible_traffic(queue_0, queue_1, admitted_batch_0, status)
+        admissible.get_admissible_traffic(queue_0, queue_1, status)
 
         # Check that one packet was admitted from src 3 in timeslot 0
-        admitted_0 = structures.get_admitted_struct(admitted_batch_0, 0)
+        admitted_0 = structures.get_admitted_struct(admitted, 0)
         self.assertEqual(admitted_0.size, 1)
         self.assertEqual(admitted_0.edges.src, 3)
 
         # Check that one packet was admitted from src 4 in timeslot 1
-        admitted_1 = structures.get_admitted_struct(admitted_batch_0, 1)
+        admitted_1 = structures.get_admitted_struct(admitted, 1)
         self.assertEqual(admitted_1.size, 1)
         self.assertEqual(admitted_1.edges.src, 4)
 
         # Check that no more packets were admitted in this batch
         for i in range(2, structures.BATCH_SIZE):
-            admitted_i = structures.get_admitted_struct(admitted_batch_0, i)
+            admitted_i = structures.get_admitted_struct(admitted, i)
             self.assertEqual(admitted_i.size, 0)
 
         # Make two competing requests out of their timeslot order
@@ -121,22 +121,20 @@ class Test(unittest.TestCase):
         admissible.request_timeslots(status, 3, 5, 2)
 
         # Get admissible traffic (second batch)
-        admissible.get_admissible_traffic(queue_0, queue_1, admitted_batch_1, status)
+        admissible.get_admissible_traffic(queue_0, queue_1, status)
 
         # Check that one packet was admitted from src 3 in timeslot 0
-        admitted_0 = structures.get_admitted_struct(admitted_batch_1, 0)
+        admitted_0 = structures.get_admitted_struct(admitted, 0)
         self.assertEqual(admitted_0.size, 1)
         self.assertEqual(admitted_0.edges.src, 3)
 
         # Check that one packet was admitted from src 4 in timeslot 1
-        admitted_1 = structures.get_admitted_struct(admitted_batch_1, 1)
+        admitted_1 = structures.get_admitted_struct(admitted, 1)
         self.assertEqual(admitted_1.size, 1)
         self.assertEqual(admitted_1.edges.src, 4)
 
         structures.destroy_backlog_queue(queue_0)
         structures.destroy_backlog_queue(queue_1)
-        structures.destroy_admitted_traffic(admitted_batch_0)
-        structures.destroy_admitted_traffic(admitted_batch_1)
         structures.destroy_admissible_status(status)
         structures.destroy_backlog_queue(empty_queue)
 
@@ -159,8 +157,9 @@ class Test(unittest.TestCase):
         # initialize structures
         queue_0 = structures.create_backlog_queue()
         queue_1 = structures.create_backlog_queue()
-        admitted = structures.create_admitted_traffic()
         status = structures.create_admissible_status(True, rack_capacity, n_nodes)
+
+        admitted = structures.get_admitted_by_core(status, 0)
 
         num_admitted = 0
         num_requested = 0
@@ -192,11 +191,8 @@ class Test(unittest.TestCase):
                 queue_in = queue_1
                 queue_out = queue_0
 
-            for i in range(structures.BATCH_SIZE):
-                admitted_i = structures.get_admitted_struct(admitted, i)
-                structures.init_admitted_traffic(admitted_i)
             structures.init_backlog_queue(queue_out)
-            admissible.get_admissible_traffic(queue_in, queue_out, admitted, status)
+            admissible.get_admissible_traffic(queue_in, queue_out, status)
             
             for i in range(structures.BATCH_SIZE):
                 admitted_i = structures.get_admitted_struct(admitted, i)
@@ -227,7 +223,6 @@ class Test(unittest.TestCase):
 
         structures.destroy_backlog_queue(queue_0)
         structures.destroy_backlog_queue(queue_1)
-        structures.destroy_admitted_traffic(admitted)
         structures.destroy_admissible_status(status)
 
         pass
@@ -237,9 +232,10 @@ class Test(unittest.TestCase):
 
         queue_in = structures.create_backlog_queue()
         queue_out = structures.create_backlog_queue()
-        admitted = structures.create_admitted_traffic()
         status = structures.create_admissible_status(True, 2, 128)
         empty_queue = structures.create_backlog_queue()
+
+        admitted = structures.get_admitted_by_core(status, 0)
 
         # Make requests that could overfill the links above the ToRs
         admissible.request_timeslots(status, 0, 32, 1)
@@ -249,7 +245,7 @@ class Test(unittest.TestCase):
         admissible.request_timeslots(status, 97, 66, 1)
     
         # Get admissible traffic
-        admissible.get_admissible_traffic(queue_in, queue_out, admitted, status)
+        admissible.get_admissible_traffic(queue_in, queue_out, status)
    
         # Check that we admitted at most 2 packets for each of the
         # oversubscribed links
@@ -267,7 +263,6 @@ class Test(unittest.TestCase):
 
         structures.destroy_backlog_queue(queue_in)
         structures.destroy_backlog_queue(queue_out)
-        structures.destroy_admitted_traffic(admitted)
         structures.destroy_admissible_status(status)
         structures.destroy_backlog_queue(empty_queue)
 
@@ -278,9 +273,10 @@ class Test(unittest.TestCase):
 
         queue_0 = structures.create_backlog_queue()
         queue_1 = structures.create_backlog_queue()
-        admitted = structures.create_admitted_traffic()
         status = structures.create_admissible_status(False, 0, 32)
         empty_queue = structures.create_backlog_queue()
+
+        admitted = structures.get_admitted_by_core(status, 0)
 
         # Make requests
         admissible.request_timeslots(status, 0, 10, structures.BATCH_SIZE)
@@ -288,7 +284,7 @@ class Test(unittest.TestCase):
         admissible.request_timeslots(status, 0, 20, structures.BATCH_SIZE)
 
         # Get admissible traffic
-        admissible.get_admissible_traffic(queue_0, queue_1, admitted, status)
+        admissible.get_admissible_traffic(queue_0, queue_1, status)
    
         # Check admitted traffic
         for i in range(structures.BATCH_SIZE):
@@ -312,11 +308,8 @@ class Test(unittest.TestCase):
         admissible.reset_sender(status, 0)
 
         # Get admissible traffic again
-        for i in range(structures.BATCH_SIZE):
-            admitted_i = structures.get_admitted_struct(admitted, i)
-            structures.init_admitted_traffic(admitted_i)
         structures.init_backlog_queue(queue_0)
-        admissible.get_admissible_traffic(queue_1, queue_0, admitted, status)
+        admissible.get_admissible_traffic(queue_1, queue_0, status)
    
         # Check that we admit only one more packet for each of src 0's
         # pending flows
@@ -346,7 +339,6 @@ class Test(unittest.TestCase):
         
         structures.destroy_backlog_queue(queue_0)
         structures.destroy_backlog_queue(queue_1)
-        structures.destroy_admitted_traffic(admitted)
         structures.destroy_admissible_status(status)
         structures.destroy_backlog_queue(empty_queue)
 

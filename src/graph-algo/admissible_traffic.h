@@ -17,10 +17,9 @@ void request_timeslots(struct admissible_status *status,
                        uint16_t src, uint16_t dst,
                        uint16_t demand_tslots);
 
-// Populate traffic_out with the admissible traffic for one timeslot from queue_in
+// Determine admissible traffic for one timeslot from queue_in
 void get_admissible_traffic(struct backlog_queue *queue_in,
                             struct backlog_queue *queue_out,
-                            struct admitted_traffic *traffic_out,
                             struct admissible_status *status);
 
 // Reset state of all flows for which src is the sender

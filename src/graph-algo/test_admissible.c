@@ -168,17 +168,20 @@ uint32_t generate_requests_poisson(struct request_info *edges, uint32_t size,
 // Runs one experiment. Returns the number of packets admitted.
 uint32_t run_experiment(struct request_info *requests, uint32_t start_time, uint32_t end_time,
                         uint32_t num_requests, struct admissible_status *status,
-                        struct pointer_queue *queue_0, struct pointer_queue *queue_1,
-                        struct request_info **next_request) {
-    assert(requests != NULL);
-    assert(queue_0->tail == queue_0->head + NUM_BINS);
-
-    struct allocation_core *core = &status->cores[0];
+                        struct request_info **next_request)
+{
+	struct allocation_core *core = &status->cores[0];
     struct admitted_traffic *admitted;
+    struct pointer_queue *queue_tmp;
 
     uint32_t b;
+    uint8_t i;
     uint32_t num_admitted = 0;
     struct request_info *current_request = requests;
+
+    assert(requests != NULL);
+    assert(core->q_bin_in->tail == core->q_bin_in->head + NUM_BINS);
+
     for (b = (start_time >> BATCH_SHIFT); b < (end_time >> BATCH_SHIFT); b++) {
         // Issue all new requests for this batch
         while ((current_request->timeslot >> BATCH_SHIFT) == (b % (65536 >> BATCH_SHIFT)) &&
@@ -189,14 +192,12 @@ uint32_t run_experiment(struct request_info *requests, uint32_t start_time, uint
         }
  
         // Get admissible traffic
-        struct pointer_queue *queue_in = queue_0;
-        struct pointer_queue *queue_out = queue_1;
-        if (b % 2 == 1) {
-            queue_in = queue_1;
-            queue_out = queue_0;
-        }
-        uint8_t i;
-        get_admissible_traffic(queue_in, queue_out, status);
+        get_admissible_traffic(core, status);
+
+        /* swap q_bin_in and q_bin_out for next iteration since there's only one core */
+        queue_tmp = core->q_bin_in;
+        core->q_bin_in = core->q_bin_out;
+        core->q_bin_out = queue_tmp;
 
         for (i = 0; i < BATCH_SIZE; i++) {
         	/* get admitted traffic */
@@ -210,7 +211,7 @@ uint32_t run_experiment(struct request_info *requests, uint32_t start_time, uint
 
     *next_request = current_request;
 
-    assert(queue_0->tail == queue_0->head + NUM_BINS);
+    assert(core->q_bin_in->tail == core->q_bin_in->head + NUM_BINS);
 	return num_admitted;
 }
 
@@ -229,13 +230,12 @@ int main(void) {
 
     // Data structures
     struct admissible_status *status = create_admissible_status(false, 0, 0);
-    struct pointer_queue *queue_0 = create_pointer_queue(NUM_BINS_SHIFT);
-    struct pointer_queue *queue_1 = create_pointer_queue(NUM_BINS_SHIFT);
+	struct allocation_core *core = &status->cores[0];
 
     /* fill backlog_queue with empty bins */
     uint16_t i;
     for (i = 0; i < NUM_BINS; i++) {
-        pointer_queue_enqueue(queue_0, create_bin());
+        pointer_queue_enqueue(core->q_bin_in, create_bin());
     }
 
     printf("target_utilization, nodes, time, observed_utilization, time/utilzn\n");
@@ -251,9 +251,9 @@ int main(void) {
             // Initialize data structures
             init_admissible_status(status, false, 0, num_nodes);
             for (k = 0; k < NUM_BINS; k++) {
-            	struct bin *b = (struct bin *)pointer_queue_dequeue(queue_0);
+            	struct bin *b = (struct bin *)pointer_queue_dequeue(core->q_bin_in);
                 init_bin(b);
-                pointer_queue_enqueue(queue_0, b);
+                pointer_queue_enqueue(core->q_bin_in, b);
             }
 
             // Allocate enough space for new requests
@@ -269,7 +269,7 @@ int main(void) {
             // requests once we start timing
             struct request_info *next_request;
             run_experiment(requests, 0, warm_up_duration, num_requests,
-                           status, queue_0, queue_1, &next_request);
+                           status, &next_request);
    
             // Start timining
             uint64_t start_time = current_time();
@@ -277,8 +277,7 @@ int main(void) {
             // Run the experiment
             uint32_t num_admitted = run_experiment(next_request, warm_up_duration, duration,
                                                    num_requests - (next_request - requests),
-                                                   status, queue_0, queue_1,
-                                                   &next_request);        
+                                                   status, &next_request);
             uint64_t end_time = current_time();
             double time_per_experiment = (end_time - start_time) / (PROCESSOR_SPEED * 1000 * (duration - warm_up_duration));
 
@@ -290,8 +289,6 @@ int main(void) {
         }
     }
 
-    free(queue_0);
-    free(queue_1);
     for (i = 0; i < NUM_CORES; i++) {
         free(status->cores[i].new_request_bins);
 		/* TODO: more memory to free up, but won't worry about it now */

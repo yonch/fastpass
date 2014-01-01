@@ -156,16 +156,17 @@ void process_new_requests(struct admissible_status *status,
 // Determine admissible traffic for one timeslot from queue_in
 // Puts unallocated traffic in queue_out
 // Allocate BATCH_SIZE timeslots at once
-void get_admissible_traffic(struct pointer_queue *queue_in,
-                            struct pointer_queue *queue_out,
-                            struct admissible_status *status) {
+void get_admissible_traffic(struct allocation_core *core,
+								struct admissible_status *status)
+{
     assert(queue_in != NULL);
     assert(queue_out != NULL);
     assert(status != NULL);
 
     // TODO: use multiple cores
     uint8_t core_id = 0;  // for now, just one core
-    struct allocation_core *core = &status->cores[core_id];
+    struct pointer_queue *queue_in = core->q_bin_in;
+    struct pointer_queue *queue_out = core->q_bin_out;
 
     // Initialize this core for a new batch of processing
     init_allocation_core(core, status);

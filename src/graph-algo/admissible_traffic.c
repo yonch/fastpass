@@ -65,7 +65,7 @@ void add_backlog(struct admissible_status *status, uint16_t src,
     // Get full quantity from 16-bit LSB
     uint32_t index = get_status_index(src, dst);
 
-	if (atomic32_add_return(&status->flows[index].backlog, backlog_increase) == 0)
+	if (atomic32_add_return(&status->flows[index].backlog, backlog_increase) == backlog_increase)
 		enqueue_to_Q_head(status, src, dst);
 }
 
@@ -97,7 +97,7 @@ void try_allocation_new(struct backlog_edge *edge,
         status->timeslots[index] = status->current_timeslot + batch_timeslot;
 
         // BEGIN ATOMIC
-        if (atomic32_sub_return(&status->flows[index].backlog, 1) == 0)
+        if (atomic32_sub_return(&status->flows[index].backlog, 1) > 0)
             enqueue_to_my_Q_urgent(src, dst);
         // END ATOMIC
     }
@@ -135,7 +135,7 @@ int try_allocation(struct backlog_edge *edge, struct allocation_core *core,
         status->timeslots[index] = status->current_timeslot + batch_timeslot;
 
         // BEGIN ATOMIC
-        if (atomic32_sub_return(&status->flows[index].backlog, 1) == 0) {
+        if (atomic32_sub_return(&status->flows[index].backlog, 1) > 0) {
             if (batch_timeslot == BATCH_SIZE - 1)
                 enqueue_bin(last_bin_out, src, dst);
             else

@@ -140,7 +140,7 @@ uint32_t generate_requests_poisson(struct request_info *edges, uint32_t size,
             current_edge->src = src;
             current_edge->dst = dst;
             current_edge->backlog = generate_exponential_variate(mean) * fraction + 0.5;
-            cumulative_demands[dst] += cumulative_demands[dst];
+            cumulative_demands[dst] += current_edge->backlog;
             current_edge->timeslot = (uint16_t) current_time;
             num_generated++;
             current_edge++;

@@ -173,7 +173,8 @@ uint32_t run_experiment(struct request_info *requests, uint32_t start_time, uint
     assert(requests != NULL);
     assert(queue_0->tail == queue_0->head + NUM_BINS);
 
-    struct admitted_traffic **admitted = get_admitted_by_core(status, 0);
+    struct allocation_core *core = &status->cores[0];
+    struct admitted_traffic *admitted;
 
     uint32_t b;
     uint32_t num_admitted = 0;
@@ -196,8 +197,15 @@ uint32_t run_experiment(struct request_info *requests, uint32_t start_time, uint
         }
         uint8_t i;
         get_admissible_traffic(queue_in, queue_out, status);
-        for (i = 0; i < BATCH_SIZE; i++)
-            num_admitted += admitted[i]->size;
+
+        for (i = 0; i < BATCH_SIZE; i++) {
+        	/* get admitted traffic */
+        	admitted = pointer_queue_dequeue(core->admitted_out);
+        	/* update statistics */
+        	num_admitted += admitted->size;
+        	/* return admitted traffic to core */
+        	core->admitted[i] = admitted;
+        }
     }
 
     *next_request = current_request;

@@ -79,6 +79,7 @@ struct allocation_core {
 	struct bin *temporary_bins[BATCH_SIZE]; // hold spare allocated bins during run
     struct batch_state batch_state;
     struct admitted_traffic *admitted[BATCH_SIZE];  // one batch of traffic admitted by this core
+    struct pointer_queue *admitted_out;
 };
 
 // Demand/backlog info for a given src/dst pair
@@ -529,6 +530,7 @@ struct admissible_status *create_admissible_status(bool oversubscribed,
         	core->admitted[j] = malloc(sizeof(struct admitted_traffic));
             assert(core->admitted[j] != NULL);
 		}
+		core->admitted_out = create_pointer_queue(BATCH_SHIFT);
     }
 
     size_t q_head_size = sizeof(struct bin) +

@@ -227,6 +227,10 @@ void get_admissible_traffic(struct pointer_queue *queue_in,
     pointer_queue_enqueue(queue_out, core->batch_bins[BATCH_SIZE - 1]);
     core->batch_bins[BATCH_SIZE - 1] = core->temporary_bins[BATCH_SIZE - 1];
 
+    for (bin = 0; bin < BATCH_SIZE; bin++) {
+    	pointer_queue_enqueue(core->admitted_out, core->admitted[bin]);
+    }
+
     core->temporary_bins[0] = bin_out;
 
     // Update current timeslot

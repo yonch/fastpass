@@ -12,8 +12,8 @@
 
 #include <inttypes.h>
 
-// Updates the total requested timeslots from src to dst to demand_tslots
-void request_timeslots(struct admissible_status *status,
+// Increase the backlog from src to dst
+void add_backlog(struct admissible_status *status,
                        uint16_t src, uint16_t dst,
                        uint16_t demand_tslots);
 

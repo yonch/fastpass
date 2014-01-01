@@ -14,6 +14,8 @@
 #include <stdio.h>
 #include <stdlib.h>
 
+#include "atomic.h"
+
 #define MAX_NODES 1024  // should be a multiple of 64, due to bitmaps
 #define NODES_SHIFT 10  // 2^NODES_SHIFT = MAX_NODES
 #define MAX_RACKS 16
@@ -77,8 +79,7 @@ struct allocation_core {
 
 // Demand/backlog info for a given src/dst pair
 struct flow_status {
-    uint16_t demand;
-    uint16_t backlog;
+    atomic32_t backlog;
 };
 
 // Tracks status for admissible traffic (last send time and demand for all flows, etc.)
@@ -346,10 +347,8 @@ void init_admissible_status(struct admissible_status *status, bool oversubscribe
     uint32_t i;
     for (i = 0; i < MAX_NODES * MAX_NODES; i++)
         status->timeslots[i] = 0;
-    for (i = 0; i < MAX_NODES * MAX_NODES; i++) {
-        status->flows[i].demand = 0;
-        status->flows[i].backlog = 0;
-    }
+    for (i = 0; i < MAX_NODES * MAX_NODES; i++)
+        atomic32_init(&status->flows[i].backlog);
 }
 
 // Get the index of this flow in the status data structure
@@ -365,18 +364,26 @@ void reset_flow(struct admissible_status *status, uint16_t src, uint16_t dst) {
 
     struct flow_status *flow = &status->flows[get_status_index(src, dst)];
 
-    // BEGIN ATOMIC
-    if (flow->backlog == 0) {
-        // No pending backog, reset both to zero
-        flow->demand = 0;
-        flow->backlog = 0;
+    uint32_t backlog = atomic32_read(&flow->backlog);
+
+    if (backlog != 0) {
+        /*
+         * There is pending backlog. We want to reduce the backlog, but want to
+         *    keep the invariant that a flow is in a bin iff backlog != 0.
+         *
+         * This invariant can be broken if the allocator races to eliminate the
+         *    backlog completely while we are executing this code. So we test for
+         *    the race.
+         */
+    	if (atomic32_sub_return(&flow->backlog, backlog + 1) == -(backlog+1))
+    		/* race happened, (backlog was 0 before sub) */
+    		atomic32_clear(&flow->backlog);
+    	else
+    		/* now backlog is <=-1, it's so large that a race is unlikely */
+    		atomic32_set(&flow->backlog, 1);
     }
-    else {
-        // Pending backlog - ensure only one packet will be allocated
-        flow->demand = 0;
-        flow->backlog = 1;
-    }
-    // END ATOMIC
+
+    /* if backlog was 0, nothing to be done */
 }
 
 // Initializes data structures associated with one allocation core for

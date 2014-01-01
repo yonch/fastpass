@@ -139,8 +139,8 @@ uint32_t generate_requests_poisson(struct request_info *edges, uint32_t size,
                 dst++;  // Don't send to self
             current_edge->src = src;
             current_edge->dst = dst;
-            cumulative_demands[dst] += generate_exponential_variate(mean) * fraction + 0.5;
-            current_edge->backlog = cumulative_demands[dst];
+            current_edge->backlog = generate_exponential_variate(mean) * fraction + 0.5;
+            cumulative_demands[dst] += cumulative_demands[dst];
             current_edge->timeslot = (uint16_t) current_time;
             num_generated++;
             current_edge++;
@@ -173,7 +173,7 @@ uint32_t run_experiment(struct request_info *requests, uint32_t start_time, uint
         // Issue all new requests for this batch
         while ((current_request->timeslot >> BATCH_SHIFT) == (b % (65536 >> BATCH_SHIFT)) &&
                current_request < requests + num_requests) {
-            request_timeslots(status, current_request->src,
+            add_backlog(status, current_request->src,
                               current_request->dst, current_request->backlog);
             current_request++;
         }

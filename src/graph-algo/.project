@@ -3,6 +3,7 @@
 	<name>graph-algo</name>
 	<comment></comment>
 	<projects>
+		<project>dpdk-include</project>
 	</projects>
 	<buildSpec>
 		<buildCommand>

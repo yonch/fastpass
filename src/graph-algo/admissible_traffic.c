@@ -58,31 +58,15 @@ void enqueue_to_my_Q_urgent(uint16_t src, uint16_t dst) {
 }
 
 // Request num_slots additional timeslots from src to dst
-void request_timeslots(struct admissible_status *status, uint16_t src,
-                       uint16_t dst, uint16_t demand_tslots) {
+void add_backlog(struct admissible_status *status, uint16_t src,
+                       uint16_t dst, uint16_t backlog_increase) {
     assert(status != NULL);
 
     // Get full quantity from 16-bit LSB
     uint32_t index = get_status_index(src, dst);
-    uint16_t prev = status->flows[index].demand;
-    int16_t prev_wnd = prev - (1 << 15);
-    int64_t new_demand = prev_wnd + ((demand_tslots - prev_wnd) & 0xFFFF);
 
-    if (new_demand > prev) {
-        // Just add this request at the end of the bin
-
-        // Calculate backlog increase and update demand
-        uint16_t backlog_increase = (uint16_t) new_demand -
-            status->flows[index].demand;
-        status->flows[index].demand = (uint16_t) new_demand;
-
-        // BEGIN ATOMIC
-        if (status->flows[index].backlog == 0)
-            enqueue_to_Q_head(status, src, dst);
-
-        status->flows[index].backlog += backlog_increase;
-        // END ATOMIC
-    }
+	if (atomic32_add_return(&status->flows[index].backlog, backlog_increase) == 0)
+		enqueue_to_Q_head(status, src, dst);
 }
 
 // Try to allocate the given new edge
@@ -113,17 +97,17 @@ void try_allocation_new(struct backlog_edge *edge,
         status->timeslots[index] = status->current_timeslot + batch_timeslot;
 
         // BEGIN ATOMIC
-        status->flows[index].backlog -= 1;
-        if (status->flows[index].backlog > 0) {
+        if (atomic32_sub_return(&status->flows[index].backlog, 1) == 0)
             enqueue_to_my_Q_urgent(src, dst);
-        }
         // END ATOMIC
     }
 }
 
-// Try to allocate the given edge
-// Returns the allocated timeslot or NONE_AVAILABLE if unsuccesful
-void try_allocation(struct backlog_edge *edge, struct allocation_core *core,
+/**
+ * Try to allocate the given edge
+ * Returns 0 if the flow is done, 1 if more backlog remains
+ */
+int try_allocation(struct backlog_edge *edge, struct allocation_core *core,
                     struct bin *bin_out, struct bin *last_bin_out,
                     struct admissible_status *status) {
     assert(edge != NULL);
@@ -151,8 +135,7 @@ void try_allocation(struct backlog_edge *edge, struct allocation_core *core,
         status->timeslots[index] = status->current_timeslot + batch_timeslot;
 
         // BEGIN ATOMIC
-        status->flows[index].backlog -= 1;
-        if (status->flows[index].backlog > 0) {
+        if (atomic32_sub_return(&status->flows[index].backlog, 1) == 0) {
             if (batch_timeslot == BATCH_SIZE - 1)
                 enqueue_bin(last_bin_out, src, dst);
             else

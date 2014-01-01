@@ -131,22 +131,30 @@ uint32_t generate_requests_poisson(struct request_info *edges, uint32_t size,
     uint16_t src;
     uint32_t num_generated = 0;
     for (src = 0; src < num_nodes; src++) {
-        uint16_t *cumulative_demands = calloc(num_nodes, sizeof(uint16_t));
-        double current_time = generate_exponential_variate(mean / fraction);
+        double current_time = 0;
+        double fractional_demand = 0;
         while (current_time < duration) {
             uint32_t dst = rand() / ((double) RAND_MAX) * (num_nodes - 1);
+            double new_demand = generate_exponential_variate(mean);
+            current_time += generate_exponential_variate(mean / fraction);
+            if (new_demand + fractional_demand < 1) {
+            	fractional_demand += new_demand;
+            	continue;
+            }
             if (dst >= src)
                 dst++;  // Don't send to self
             current_edge->src = src;
             current_edge->dst = dst;
-            current_edge->backlog = generate_exponential_variate(mean) * fraction + 0.5;
-            cumulative_demands[dst] += current_edge->backlog;
+            new_demand += fractional_demand;
+            current_edge->backlog = (uint16_t)new_demand;
+            fractional_demand = new_demand - (uint16_t)new_demand;
+            if (current_edge->backlog == 0) {
+            	printf("oops\n");
+            }
             current_edge->timeslot = (uint16_t) current_time;
             num_generated++;
             current_edge++;
-            current_time += generate_exponential_variate(mean);
         }
-        free(cumulative_demands);
     }
 
     assert(num_generated <= size);

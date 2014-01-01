@@ -99,7 +99,7 @@ struct admissible_status {
     uint64_t timeslots[MAX_NODES * MAX_NODES];
     struct flow_status flows[MAX_NODES * MAX_NODES];
     struct allocation_core cores[NUM_CORES];
-    struct bin *q_head;
+    struct pointer_queue *q_head;
 };
 
 // Forward declarations
@@ -210,6 +210,12 @@ static inline void * pointer_queue_dequeue(struct pointer_queue *queue) {
 	assert(queue->head != queue->tail);
 
 	return queue->elem[queue->head++ & queue->mask];
+}
+
+// Insert new bin to the back of this backlog queue
+static inline int pointer_queue_empty(struct pointer_queue *queue) {
+	assert(queue != NULL);
+	return (queue->head == queue->tail);
 }
 
 // Prints the contents of a backlog queue, useful for debugging
@@ -537,9 +543,7 @@ struct admissible_status *create_admissible_status(bool oversubscribed,
 		core->q_bin_out = create_pointer_queue(NUM_BINS_SHIFT);
     }
 
-    size_t q_head_size = sizeof(struct bin) +
-        (MAX_NODES * MAX_NODES - BIN_SIZE) * sizeof(struct backlog_edge);
-    status->q_head = malloc(q_head_size);
+    status->q_head = create_pointer_queue(2 * NODES_SHIFT);
     assert(status->q_head != NULL);
 
     return status;

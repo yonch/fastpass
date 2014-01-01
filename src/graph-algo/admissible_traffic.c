@@ -14,24 +14,6 @@
 
 #define MAX(a,b) (((a) > (b)) ? (a) : (b))
 
-// Methods to be replaced with inter-core communication
-static inline
-void enqueue_to_Q_head(struct admissible_status *status, uint16_t src,
-                       uint16_t dst) {
-    assert(status != NULL);
-
-    enqueue_bin(status->q_head, src, dst);
-}
-
-static inline
-struct backlog_edge *dequeue_from_Q_head(struct admissible_status *status) {
-    assert(status != NULL);
-
-    struct backlog_edge *current = peek_head_bin(status->q_head);
-    dequeue_bin(status->q_head);
-
-    return current;
-}
 
 static inline
 void enqueue_to_Q_bins_out(struct bin *bin_out) {
@@ -59,7 +41,7 @@ void add_backlog(struct admissible_status *status, uint16_t src,
     uint32_t index = get_status_index(src, dst);
 
 	if (atomic32_add_return(&status->flows[index].backlog, backlog_increase) == backlog_increase)
-		enqueue_to_Q_head(status, src, dst);
+		pointer_queue_enqueue(status->q_head, (void*)(uint64_t)((src << 16) | dst));
 }
 
 /**
@@ -121,13 +103,12 @@ void process_new_requests(struct admissible_status *status,
     assert(core != NULL);
 
     // TODO: choose between q_head and q_urgent when many cores
-    struct bin *new_requests = status->q_head;
 
     // Add new requests to the appropriate working bin
-    while (!is_empty_bin(new_requests)) {
-        struct backlog_edge *edge = dequeue_from_Q_head(status);
-        uint16_t src = edge->src;
-    	uint16_t dst = edge->dst;
+    while (!pointer_queue_empty(status->q_head)) {
+        uint64_t edge = (uint64_t)pointer_queue_dequeue(status->q_head);
+        uint16_t src = edge >> 16;
+    	uint16_t dst = (uint16_t)edge;
 
         uint32_t index = get_status_index(src, dst);
         uint64_t last_send_time = status->timeslots[index];
@@ -148,9 +129,6 @@ void process_new_requests(struct admissible_status *status,
             enqueue_bin(&core->new_request_bins[bin_index], src, dst);
         }
     }
-
-    // Re-initialize to empty because wrap-around is not currently handled
-    init_bin(new_requests);
 }
 
 // Determine admissible traffic for one timeslot from queue_in

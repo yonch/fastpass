@@ -2,8 +2,9 @@
 CC = gcc
 #CC = /mnt/sdb1/bin/icc
 CCFLAGS = -g
-CCFLAGS += -DNDEBUG
-CCFLAGS += -O3
+#CCFLAGS += -DNDEBUG
+#CCFLAGS += -O3
+CCFLAGS += -O1
 CCFLAGS += -DNO_DPDK 
 #CCFLAGS += -debug inline-debug-info
 LDFLAGS = -lm

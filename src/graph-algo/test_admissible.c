@@ -171,6 +171,8 @@ uint32_t run_experiment(struct request_info *requests, uint32_t start_time, uint
                         struct backlog_queue *queue_0, struct backlog_queue *queue_1,
                         struct request_info **next_request) {
     assert(requests != NULL);
+    assert(queue_0->head == 0);
+    assert(queue_0->tail == NUM_BINS);
 
     struct admitted_traffic *admitted = get_admitted_by_core(status, 0);
 
@@ -202,14 +204,17 @@ uint32_t run_experiment(struct request_info *requests, uint32_t start_time, uint
 
     *next_request = current_request;
 
-    return num_admitted;
+    assert(queue_0->head == 0);
+    assert(queue_0->tail == NUM_BINS);
+	return num_admitted;
 }
 
 // Simple experiment with Poisson arrivals and exponentially distributed request sizes
 int main(void) {
     // keep duration less than 65536 or else Poisson wont work correctly due to sorting
-    uint32_t duration = 60000;
-    uint32_t warm_up_duration = 10000;
+	// also keep both durations an even number of batches so that bin pointers return to queue_0
+    uint32_t warm_up_duration = ((10000 + 127) / 128) * 128;
+    uint32_t duration = warm_up_duration + ((50000 + 127) / 128) * 128;
     double mean = 10; // Mean request size and inter-arrival time
 
     // Each experiment tries out a different combination of target network utilization
@@ -222,9 +227,15 @@ int main(void) {
     struct backlog_queue *queue_0 = create_backlog_queue();
     struct backlog_queue *queue_1 = create_backlog_queue();
 
+    /* fill backlog_queue with empty bins */
+    uint16_t i;
+    for (i = 0; i < NUM_BINS; i++) {
+        backlog_queue_enqueue(queue_0, create_bin());
+    }
+
     printf("target_utilization, nodes, time\n");
 
-    uint16_t i, j;
+    uint16_t j, k;
     for (i = 0; i < NUM_FRACTIONS; i++) {
 
         double fraction = fractions[i];
@@ -234,8 +245,9 @@ int main(void) {
 
             // Initialize data structures
             init_admissible_status(status, false, 0, num_nodes);
-            init_backlog_queue(queue_0);
-            init_backlog_queue(queue_1);
+            for (k = 0; k < NUM_BINS; k++) {
+                init_bin(queue_0->bins[k]);
+            }
 
             // Allocate enough space for new requests
             // (this is sufficient for <= 1 request per node per timeslot)
@@ -274,8 +286,9 @@ int main(void) {
     free(queue_0);
     free(queue_1);
     for (i = 0; i < NUM_CORES; i++) {
-        free(status->cores[i].working_bins);
+        free(status->cores[i].new_request_bins);
         free(status->cores[i].admitted);
+		/* TODO: more memory to free up, but won't worry about it now */
     }
     free(status);
 }

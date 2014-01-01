@@ -55,7 +55,9 @@ struct bin {
 // Comprised of several bins. Each bin holds srd-dst pairs
 // that most recently sent at the corresponding timeslot
 struct backlog_queue {
-    struct bin bins[NUM_BINS];
+	uint16_t head;
+	uint16_t tail;
+	struct bin *bins[NUM_BINS];
 };
 
 // Tracks which srcs/dsts and src/dst racks are available for this batch
@@ -72,7 +74,9 @@ struct batch_state {
 
 // Data structures associated with one allocation core
 struct allocation_core {
-    struct bin *working_bins; // pool of backlog bins
+	struct bin *new_request_bins; // pool of backlog bins for incoming requests
+	struct bin *batch_bins[BATCH_SIZE]; // bins to hold flows to be re-processed later in batch
+	struct bin *temporary_bins[BATCH_SIZE]; // hold spare allocated bins during run
     struct batch_state batch_state;
     struct admitted_traffic *admitted;  // one batch of traffic admitted by this core
 };
@@ -95,10 +99,8 @@ struct admissible_status {
     struct bin *q_head;
 };
 
-
 // Forward declarations
 static void print_backlog(struct backlog_queue *queue);
-
 
 // Initialize a list of a traffic admitted in a timeslot
 static inline
@@ -184,11 +186,27 @@ void dequeue_bin(struct bin *bin) {
 static inline
 void init_backlog_queue(struct backlog_queue *queue) {
     assert(queue != NULL);
+	queue->head = 0;
+	queue->tail = 0;
+}
 
-    uint16_t i;
-    for (i = 0; i < NUM_BINS; i++) {
-        init_bin(&queue->bins[i]);
+// Insert new bin to the back of this backlog queue
+static inline
+void backlog_queue_enqueue(struct backlog_queue *queue, struct bin *bin) {
+	assert(queue != NULL);
+	assert(bin != NULL);
+	assert(queue->tail != NUM_BINS);
+
+	queue->bins[queue->tail] = bin;
+	queue->tail++;
     }
+
+// Insert new bin to the back of this backlog queue
+static inline struct bin * backlog_queue_dequeue(struct backlog_queue *queue) {
+	assert(queue != NULL);
+	assert(queue->head != queue->tail);
+
+	return queue->bins[queue->head++];
 }
 
 // Prints the contents of a backlog queue, useful for debugging
@@ -196,7 +214,7 @@ static inline
 void print_backlog(struct backlog_queue *queue) {
     assert(queue != NULL);
 
-    struct bin *bin = &queue->bins[0];
+	struct bin *bin = queue->bins[0];
     printf("printing backlog queue:\n");
     struct backlog_edge *edge;
     for (edge = &bin->edges[bin->head]; edge < &bin->edges[bin->tail]; edge++)
@@ -212,7 +230,7 @@ void print_backlog_counts(struct backlog_queue *queue) {
     uint16_t bin_num;
     uint32_t bin_sums = 0;
     for (bin_num = 0; bin_num < NUM_BINS; bin_num++) {
-        struct bin *bin = &queue->bins[bin_num];
+		struct bin *bin = queue->bins[bin_num];
         printf("\tsize of bin %d: %d\n", bin_num, bin->tail - bin->head);
         bin_sums += bin->tail - bin->head;
     }
@@ -232,7 +250,7 @@ bool has_duplicates(struct backlog_queue *queue) {
     assert(flows != NULL);
 
     for (bin_num = 0; bin_num < NUM_BINS; bin_num++) {
-        struct bin *bin = &queue->bins[bin_num];
+		struct bin *bin = queue->bins[bin_num];
         for (index = bin->head; index < bin->tail; index++) {
             struct backlog_edge *edge = &bin->edges[index];
             if (flows[edge->src * MAX_NODES + edge->dst] == true)
@@ -394,8 +412,11 @@ void init_allocation_core(struct allocation_core *core,
     assert(core != NULL);
 
     uint16_t i;
-    for (i = 0; i < NUM_BINS + BATCH_SIZE - 1; i++)
-        init_bin(&core->working_bins[i]);
+	for (i = 0; i < NUM_BINS; i++)
+		init_bin(&core->new_request_bins[i]);
+
+	for (i = 0; i < BATCH_SIZE; i++)
+		init_bin(core->batch_bins[i]);
 
     init_batch_state(&core->batch_state, status->oversubscribed,
                      status->inter_rack_capacity, status->num_nodes);
@@ -474,6 +495,7 @@ struct backlog_queue *create_backlog_queue(void) {
 static inline
 void destroy_backlog_queue(struct backlog_queue *queue) {
     assert(queue != NULL);
+	assert(queue->head == queue->tail);
 
     free(queue);
 }
@@ -485,13 +507,18 @@ struct admissible_status *create_admissible_status(bool oversubscribed,
     struct admissible_status *status = malloc(sizeof(struct admissible_status));
     assert(status != NULL);
 
-    init_admissible_status(status, oversubscribed, inter_rack_capacity, num_nodes);
-    uint8_t i;
+	init_admissible_status(status, oversubscribed, inter_rack_capacity,
+			num_nodes);
+	uint8_t i, j;
     struct allocation_core *core;
     for (i = 0; i < NUM_CORES; i++) {
         core = &status->cores[i];
-        core->working_bins = malloc(sizeof(struct bin) * (NUM_BINS + BATCH_SIZE - 1));
-        assert(core->working_bins != NULL);
+		core->new_request_bins = malloc(
+				sizeof(struct bin) * (NUM_BINS));
+		assert(core->new_request_bins != NULL);
+		core->temporary_bins[0] = create_bin();
+		for (j = 0; j < BATCH_SIZE; j++)
+			core->batch_bins[j] = create_bin();
         core->admitted = malloc(sizeof(struct admitted_traffic) * BATCH_SIZE);
         assert(core->admitted != NULL);
     }
@@ -512,7 +539,7 @@ void destroy_admissible_status(struct admissible_status *status) {
     struct allocation_core *core;
     for (i = 0; i < NUM_CORES; i++) {
         core = &status->cores[i];
-        free(core->working_bins);
+		free(core->new_request_bins);
         free(core->admitted);
     }
     free(status->q_head);

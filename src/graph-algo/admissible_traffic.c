@@ -41,13 +41,6 @@ void enqueue_to_Q_bins_out(struct bin *bin_out) {
 }
 
 static inline
-struct bin *dequeue_from_Q_bins_in(struct backlog_queue *queue_in, uint16_t bin) {
-    assert(queue_in != NULL);
-
-    return &queue_in->bins[bin];
-}
-
-static inline
 void enqueue_to_next_Q_urgent(uint16_t src, uint16_t dst) {
     // TODO
 }
@@ -75,13 +68,10 @@ void add_backlog(struct admissible_status *status, uint16_t src,
  * 		   1 if more backlog remains and should be handled by the caller
  */
 int try_allocation(uint16_t src, uint16_t dst, struct allocation_core *core,
-		struct bin *last_bin_out, struct admissible_status *status)
+		struct admissible_status *status)
 {
     assert(core != NULL);
-    assert(bin_out != NULL);
     assert(status != NULL);
-
-    struct bin *admitted_backlog = &core->working_bins[NUM_BINS];
 
     uint8_t batch_timeslot = get_first_timeslot(&core->batch_state, src, dst);
 
@@ -96,18 +86,14 @@ int try_allocation(uint16_t src, uint16_t dst, struct allocation_core *core,
 	uint32_t index = get_status_index(src, dst);
 	status->timeslots[index] = status->current_timeslot + batch_timeslot;
 
-	if (atomic32_sub_return(&status->flows[index].backlog, 1) != 0) {
-		if (batch_timeslot == BATCH_SIZE - 1)
-			enqueue_bin(last_bin_out, src, dst);
-		else
-			enqueue_bin(&admitted_backlog[batch_timeslot], src, dst);
-	}
+	if (atomic32_sub_return(&status->flows[index].backlog, 1) != 0)
+		enqueue_bin(core->batch_bins[batch_timeslot], src, dst);
+
 	return 0;
 }
 
 void try_allocation_bin(struct bin *in_bin, struct allocation_core *core,
-                    struct bin *bin_out, struct bin *last_bin_out,
-                    struct admissible_status *status)
+                    struct bin *bin_out, struct admissible_status *status)
 {
 	int rc;
     while (!is_empty_bin(in_bin)) {
@@ -116,7 +102,7 @@ void try_allocation_bin(struct bin *in_bin, struct allocation_core *core,
         uint16_t src = edge->src;
     	uint16_t dst = edge->dst;
 
-        rc = try_allocation(src, dst, core, last_bin_out, status);
+        rc = try_allocation(src, dst, core, status);
         if (rc == 1) {
 			// We cannot allocate this edge now - copy to queue_out
 			enqueue_bin(bin_out, src, dst);
@@ -130,8 +116,7 @@ void try_allocation_bin(struct bin *in_bin, struct allocation_core *core,
 // and sorts them
 void process_new_requests(struct admissible_status *status,
                           struct allocation_core *core,
-                          uint16_t current_bin,
-                          struct bin *last_bin_out) {
+                          uint16_t current_bin) {
     assert(status != NULL);
     assert(core != NULL);
 
@@ -154,13 +139,13 @@ void process_new_requests(struct admissible_status *status,
         if (bin_index < current_bin) {
             // We have already processed the bin for this src/dst pair
             // Try to allocate immediately
-            if (try_allocation(src, dst, core, last_bin_out, status) == 1)
+            if (try_allocation(src, dst, core, status) == 1)
             	enqueue_to_next_Q_urgent(src, dst);
         }
         else {
             // We have not yet processed the bin for this src/dst pair
             // Enqueue it to the working bins for later processing
-            enqueue_bin(&core->working_bins[bin_index], src, dst);
+            enqueue_bin(&core->new_request_bins[bin_index], src, dst);
         }
     }
 
@@ -187,32 +172,62 @@ void get_admissible_traffic(struct backlog_queue *queue_in,
 
     // Process all bins from previous core, then process all bins from
     // residual backlog from traffic admitted in this batch
-    struct bin *last_bin = &queue_out->bins[NUM_BINS - 1];
     struct bin *current_bin, *bin_out, *new_bin;
     uint16_t bin;
-    for (bin = 0; bin < NUM_BINS + BATCH_SIZE - 1; bin++) {
-        process_new_requests(status, core, bin, last_bin);
 
-        bin_out = &queue_out->bins[MAX(0, bin - BATCH_SIZE)];
+    bin_out = core->temporary_bins[0];
 
-        // Process a bin from the previous core, if applicable
-        if (bin < NUM_BINS) {
-            current_bin = dequeue_from_Q_bins_in(queue_in, bin);
+    /* Fold the first 2*BATCH_SIZE bins into BATCH_SIZE bins */
+    for (bin = 0; bin < BATCH_SIZE; bin++) {
+    	init_bin(bin_out);
 
-            // Process this bin
-            try_allocation_bin(current_bin, core, bin_out, last_bin, status);
-        }
-     
-        // Process the corresponding new bin
-        // The new bin has flows from Q_urgent and residual backlog
-        // from traffic admitted in this batch
-        new_bin = &core->working_bins[bin];
-		try_allocation_bin(new_bin, core, bin_out, last_bin, status);
+    	process_new_requests(status, core, 2 * bin);
 
-        // If we finished an output bin, enqueue it to the next core
-        if (bin >= BATCH_SIZE)
-            enqueue_to_Q_bins_out(bin_out);
+    	current_bin = backlog_queue_dequeue(queue_in);
+		try_allocation_bin(current_bin, core, bin_out, status);
+		try_allocation_bin(&core->new_request_bins[2 * bin], core, bin_out, status);
+		core->temporary_bins[bin] = current_bin;
+
+    	current_bin = backlog_queue_dequeue(queue_in);
+		try_allocation_bin(current_bin, core, bin_out, status);
+		try_allocation_bin(&core->new_request_bins[2 * bin + 1], core, bin_out, status);
+
+		backlog_queue_enqueue(queue_out, bin_out);
+		bin_out = current_bin;
     }
+
+    /* process the next bins one to one */
+    for (bin = 2 * BATCH_SIZE; bin < NUM_BINS; bin++) {
+    	init_bin(bin_out);
+
+    	process_new_requests(status, core, bin);
+
+    	current_bin = backlog_queue_dequeue(queue_in);
+		try_allocation_bin(current_bin, core, bin_out, status);
+		try_allocation_bin(&core->new_request_bins[bin], core, bin_out, status);
+
+		backlog_queue_enqueue(queue_out, bin_out);
+		bin_out = current_bin;
+    }
+
+    /* process the batch bins */
+    for (bin = 0; bin < BATCH_SIZE - 1; bin++) {
+    	init_bin(bin_out);
+
+    	process_new_requests(status, core, bin);
+
+    	current_bin = core->batch_bins[bin];
+		try_allocation_bin(current_bin, core, bin_out, status);
+
+		backlog_queue_enqueue(queue_out, bin_out);
+		bin_out = core->temporary_bins[bin];
+    }
+
+    /* enqueue the last bin in batch as-is, next batch will take care of it */
+    backlog_queue_enqueue(queue_out, core->batch_bins[BATCH_SIZE - 1]);
+    core->batch_bins[BATCH_SIZE - 1] = core->temporary_bins[BATCH_SIZE - 1];
+
+    core->temporary_bins[0] = bin_out;
 
     // Update current timeslot
     status->current_timeslot += BATCH_SIZE;

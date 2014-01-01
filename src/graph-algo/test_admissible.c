@@ -168,11 +168,10 @@ uint32_t generate_requests_poisson(struct request_info *edges, uint32_t size,
 // Runs one experiment. Returns the number of packets admitted.
 uint32_t run_experiment(struct request_info *requests, uint32_t start_time, uint32_t end_time,
                         uint32_t num_requests, struct admissible_status *status,
-                        struct backlog_queue *queue_0, struct backlog_queue *queue_1,
+                        struct pointer_queue *queue_0, struct pointer_queue *queue_1,
                         struct request_info **next_request) {
     assert(requests != NULL);
-    assert(queue_0->head == 0);
-    assert(queue_0->tail == NUM_BINS);
+    assert(queue_0->tail == queue_0->head + NUM_BINS);
 
     struct admitted_traffic *admitted = get_admitted_by_core(status, 0);
 
@@ -189,14 +188,13 @@ uint32_t run_experiment(struct request_info *requests, uint32_t start_time, uint
         }
  
         // Get admissible traffic
-        struct backlog_queue *queue_in = queue_0;
-        struct backlog_queue *queue_out = queue_1;
+        struct pointer_queue *queue_in = queue_0;
+        struct pointer_queue *queue_out = queue_1;
         if (b % 2 == 1) {
             queue_in = queue_1;
             queue_out = queue_0;
         }
         uint8_t i;
-        init_backlog_queue(queue_out);
         get_admissible_traffic(queue_in, queue_out, status);
         for (i = 0; i < BATCH_SIZE; i++)
             num_admitted += admitted[i].size;
@@ -204,8 +202,7 @@ uint32_t run_experiment(struct request_info *requests, uint32_t start_time, uint
 
     *next_request = current_request;
 
-    assert(queue_0->head == 0);
-    assert(queue_0->tail == NUM_BINS);
+    assert(queue_0->tail == queue_0->head + NUM_BINS);
 	return num_admitted;
 }
 
@@ -224,13 +221,13 @@ int main(void) {
 
     // Data structures
     struct admissible_status *status = create_admissible_status(false, 0, 0);
-    struct backlog_queue *queue_0 = create_backlog_queue();
-    struct backlog_queue *queue_1 = create_backlog_queue();
+    struct pointer_queue *queue_0 = create_pointer_queue(NUM_BINS_SHIFT);
+    struct pointer_queue *queue_1 = create_pointer_queue(NUM_BINS_SHIFT);
 
     /* fill backlog_queue with empty bins */
     uint16_t i;
     for (i = 0; i < NUM_BINS; i++) {
-        backlog_queue_enqueue(queue_0, create_bin());
+        pointer_queue_enqueue(queue_0, create_bin());
     }
 
     printf("target_utilization, nodes, time\n");
@@ -246,7 +243,9 @@ int main(void) {
             // Initialize data structures
             init_admissible_status(status, false, 0, num_nodes);
             for (k = 0; k < NUM_BINS; k++) {
-                init_bin(queue_0->bins[k]);
+            	struct bin *b = (struct bin *)pointer_queue_dequeue(queue_0);
+                init_bin(b);
+                pointer_queue_enqueue(queue_0, b);
             }
 
             // Allocate enough space for new requests

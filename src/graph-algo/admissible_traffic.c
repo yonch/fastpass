@@ -156,8 +156,8 @@ void process_new_requests(struct admissible_status *status,
 // Determine admissible traffic for one timeslot from queue_in
 // Puts unallocated traffic in queue_out
 // Allocate BATCH_SIZE timeslots at once
-void get_admissible_traffic(struct backlog_queue *queue_in,
-                            struct backlog_queue *queue_out,
+void get_admissible_traffic(struct pointer_queue *queue_in,
+                            struct pointer_queue *queue_out,
                             struct admissible_status *status) {
     assert(queue_in != NULL);
     assert(queue_out != NULL);
@@ -183,16 +183,16 @@ void get_admissible_traffic(struct backlog_queue *queue_in,
 
     	process_new_requests(status, core, 2 * bin);
 
-    	current_bin = backlog_queue_dequeue(queue_in);
+    	current_bin = (struct bin *)pointer_queue_dequeue(queue_in);
 		try_allocation_bin(current_bin, core, bin_out, status);
 		try_allocation_bin(&core->new_request_bins[2 * bin], core, bin_out, status);
 		core->temporary_bins[bin] = current_bin;
 
-    	current_bin = backlog_queue_dequeue(queue_in);
+    	current_bin = (struct bin *)pointer_queue_dequeue(queue_in);
 		try_allocation_bin(current_bin, core, bin_out, status);
 		try_allocation_bin(&core->new_request_bins[2 * bin + 1], core, bin_out, status);
 
-		backlog_queue_enqueue(queue_out, bin_out);
+		pointer_queue_enqueue(queue_out, bin_out);
 		bin_out = current_bin;
     }
 
@@ -202,11 +202,11 @@ void get_admissible_traffic(struct backlog_queue *queue_in,
 
     	process_new_requests(status, core, bin);
 
-    	current_bin = backlog_queue_dequeue(queue_in);
+    	current_bin = (struct bin *)pointer_queue_dequeue(queue_in);
 		try_allocation_bin(current_bin, core, bin_out, status);
 		try_allocation_bin(&core->new_request_bins[bin], core, bin_out, status);
 
-		backlog_queue_enqueue(queue_out, bin_out);
+		pointer_queue_enqueue(queue_out, bin_out);
 		bin_out = current_bin;
     }
 
@@ -219,12 +219,12 @@ void get_admissible_traffic(struct backlog_queue *queue_in,
     	current_bin = core->batch_bins[bin];
 		try_allocation_bin(current_bin, core, bin_out, status);
 
-		backlog_queue_enqueue(queue_out, bin_out);
+		pointer_queue_enqueue(queue_out, bin_out);
 		bin_out = core->temporary_bins[bin];
     }
 
     /* enqueue the last bin in batch as-is, next batch will take care of it */
-    backlog_queue_enqueue(queue_out, core->batch_bins[BATCH_SIZE - 1]);
+    pointer_queue_enqueue(queue_out, core->batch_bins[BATCH_SIZE - 1]);
     core->batch_bins[BATCH_SIZE - 1] = core->temporary_bins[BATCH_SIZE - 1];
 
     core->temporary_bins[0] = bin_out;

@@ -25,7 +25,8 @@
 #define NONE_AVAILABLE 251
 #define MAX_TIME 66535
 #define BIN_SIZE MAX_NODES * MAX_NODES // TODO: try smaller values
-#define NUM_BINS 256
+#define NUM_BINS_SHIFT 8
+#define NUM_BINS (1 << NUM_BINS_SHIFT)
 #define NUM_CORES 1
 
 struct admitted_edge {
@@ -51,13 +52,12 @@ struct bin {
     struct backlog_edge edges[BIN_SIZE];
 };
 
-// Table of all edges (src-dst pairs) with non-zero backlog
-// Comprised of several bins. Each bin holds srd-dst pairs
-// that most recently sent at the corresponding timeslot
-struct backlog_queue {
-	uint16_t head;
-	uint16_t tail;
-	struct bin *bins[NUM_BINS];
+/* A data-structure to communicate pointers between components */
+struct pointer_queue {
+	uint32_t head;
+	uint32_t tail;
+	uint32_t mask;
+	void *elem[0]; // must be last in struct
 };
 
 // Tracks which srcs/dsts and src/dst racks are available for this batch
@@ -100,7 +100,7 @@ struct admissible_status {
 };
 
 // Forward declarations
-static void print_backlog(struct backlog_queue *queue);
+static void print_backlog(struct pointer_queue *queue);
 
 // Initialize a list of a traffic admitted in a timeslot
 static inline
@@ -184,7 +184,7 @@ void dequeue_bin(struct bin *bin) {
 
 // Initialize a backlog queue
 static inline
-void init_backlog_queue(struct backlog_queue *queue) {
+void init_pointer_queue(struct pointer_queue *queue) {
     assert(queue != NULL);
 	queue->head = 0;
 	queue->tail = 0;
@@ -192,29 +192,29 @@ void init_backlog_queue(struct backlog_queue *queue) {
 
 // Insert new bin to the back of this backlog queue
 static inline
-void backlog_queue_enqueue(struct backlog_queue *queue, struct bin *bin) {
+void pointer_queue_enqueue(struct pointer_queue *queue, void *elem) {
 	assert(queue != NULL);
-	assert(bin != NULL);
-	assert(queue->tail != NUM_BINS);
+	assert(elem != NULL);
+	assert(queue->tail != queue->head - queue->mask - 1);
 
-	queue->bins[queue->tail] = bin;
+	queue->elem[queue->tail & queue->mask] = elem;
 	queue->tail++;
     }
 
 // Insert new bin to the back of this backlog queue
-static inline struct bin * backlog_queue_dequeue(struct backlog_queue *queue) {
+static inline void * pointer_queue_dequeue(struct pointer_queue *queue) {
 	assert(queue != NULL);
 	assert(queue->head != queue->tail);
 
-	return queue->bins[queue->head++];
+	return queue->elem[queue->head++ & queue->mask];
 }
 
 // Prints the contents of a backlog queue, useful for debugging
 static inline
-void print_backlog(struct backlog_queue *queue) {
+void print_backlog(struct pointer_queue *queue) {
     assert(queue != NULL);
 
-	struct bin *bin = queue->bins[0];
+	struct bin *bin = queue->elem[0];
     printf("printing backlog queue:\n");
     struct backlog_edge *edge;
     for (edge = &bin->edges[bin->head]; edge < &bin->edges[bin->tail]; edge++)
@@ -223,14 +223,14 @@ void print_backlog(struct backlog_queue *queue) {
 
 // Prints the number of src/dst pairs per bin
 static inline
-void print_backlog_counts(struct backlog_queue *queue) {
+void print_backlog_counts(struct pointer_queue *queue) {
     assert(queue != NULL);
 
     printf("printing backlog bin counts\n");
     uint16_t bin_num;
     uint32_t bin_sums = 0;
     for (bin_num = 0; bin_num < NUM_BINS; bin_num++) {
-		struct bin *bin = queue->bins[bin_num];
+		struct bin *bin = queue->elem[bin_num];
         printf("\tsize of bin %d: %d\n", bin_num, bin->tail - bin->head);
         bin_sums += bin->tail - bin->head;
     }
@@ -241,7 +241,7 @@ void print_backlog_counts(struct backlog_queue *queue) {
 // Used for debugging
 // Note this runs in n^2 time - super slow
 static inline
-bool has_duplicates(struct backlog_queue *queue) {
+bool has_duplicates(struct pointer_queue *queue) {
     assert(queue != NULL);
     
     uint16_t index;
@@ -250,7 +250,7 @@ bool has_duplicates(struct backlog_queue *queue) {
     assert(flows != NULL);
 
     for (bin_num = 0; bin_num < NUM_BINS; bin_num++) {
-		struct bin *bin = queue->bins[bin_num];
+		struct bin *bin = (struct bin *)queue->elem[bin_num];
         for (index = bin->head; index < bin->tail; index++) {
             struct backlog_edge *edge = &bin->edges[index];
             if (flows[edge->src * MAX_NODES + edge->dst] == true)
@@ -482,20 +482,27 @@ void destroy_bin(struct bin *bin) {
     free(bin);
 }
 
+/**
+ * Creates a new backlog queue, with 2^{log_size} elements
+ */
 static inline
-struct backlog_queue *create_backlog_queue(void) {
-    struct backlog_queue *queue = malloc(sizeof(struct backlog_queue));
+struct pointer_queue *create_pointer_queue(uint32_t log_size) {
+	uint32_t num_elems = (1 << log_size);
+	uint32_t mem_size = sizeof(struct pointer_queue)
+							+ num_elems * sizeof(void *);
+    struct pointer_queue *queue = malloc(mem_size);
     assert(queue != NULL);
 
-    init_backlog_queue(queue);
+    queue->mask = num_elems - 1;
+    init_pointer_queue(queue);
 
     return queue;
 }
 
 static inline
-void destroy_backlog_queue(struct backlog_queue *queue) {
+void destroy_pointer_queue(struct pointer_queue *queue) {
     assert(queue != NULL);
-	assert(queue->head == queue->tail);
+	assert((queue->head & queue->mask) == queue->tail);
 
     free(queue);
 }

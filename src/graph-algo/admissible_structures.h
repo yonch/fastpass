@@ -78,7 +78,7 @@ struct allocation_core {
 	struct bin *batch_bins[BATCH_SIZE]; // bins to hold flows to be re-processed later in batch
 	struct bin *temporary_bins[BATCH_SIZE]; // hold spare allocated bins during run
     struct batch_state batch_state;
-    struct admitted_traffic *admitted;  // one batch of traffic admitted by this core
+    struct admitted_traffic *admitted[BATCH_SIZE];  // one batch of traffic admitted by this core
 };
 
 // Demand/backlog info for a given src/dst pair
@@ -422,12 +422,12 @@ void init_allocation_core(struct allocation_core *core,
                      status->inter_rack_capacity, status->num_nodes);
 
     for (i = 0; i < BATCH_SIZE; i++)
-        init_admitted_traffic(&core->admitted[i]);
+        init_admitted_traffic(core->admitted[i]);
 }
 
 // Returns a pointer to the batch of traffic admitted by a particular core
 static inline
-struct admitted_traffic *get_admitted_by_core(struct admissible_status *status,
+struct admitted_traffic **get_admitted_by_core(struct admissible_status *status,
                                               uint8_t core) {
     assert(status != NULL);
 
@@ -524,10 +524,11 @@ struct admissible_status *create_admissible_status(bool oversubscribed,
 				sizeof(struct bin) * (NUM_BINS));
 		assert(core->new_request_bins != NULL);
 		core->temporary_bins[0] = create_bin();
-		for (j = 0; j < BATCH_SIZE; j++)
+		for (j = 0; j < BATCH_SIZE; j++) {
 			core->batch_bins[j] = create_bin();
-        core->admitted = malloc(sizeof(struct admitted_traffic) * BATCH_SIZE);
-        assert(core->admitted != NULL);
+        	core->admitted[j] = malloc(sizeof(struct admitted_traffic));
+            assert(core->admitted[j] != NULL);
+		}
     }
 
     size_t q_head_size = sizeof(struct bin) +
@@ -542,12 +543,13 @@ static inline
 void destroy_admissible_status(struct admissible_status *status) {
     assert(status != NULL);
 
-    uint8_t i;
+    uint8_t i, j;
     struct allocation_core *core;
     for (i = 0; i < NUM_CORES; i++) {
         core = &status->cores[i];
 		free(core->new_request_bins);
-        free(core->admitted);
+		for (j = 0; j < BATCH_SIZE; j++)
+			free(core->admitted[j]);
     }
     free(status->q_head);
 

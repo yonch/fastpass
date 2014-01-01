@@ -173,7 +173,7 @@ uint32_t run_experiment(struct request_info *requests, uint32_t start_time, uint
     assert(requests != NULL);
     assert(queue_0->tail == queue_0->head + NUM_BINS);
 
-    struct admitted_traffic *admitted = get_admitted_by_core(status, 0);
+    struct admitted_traffic **admitted = get_admitted_by_core(status, 0);
 
     uint32_t b;
     uint32_t num_admitted = 0;
@@ -197,7 +197,7 @@ uint32_t run_experiment(struct request_info *requests, uint32_t start_time, uint
         uint8_t i;
         get_admissible_traffic(queue_in, queue_out, status);
         for (i = 0; i < BATCH_SIZE; i++)
-            num_admitted += admitted[i].size;
+            num_admitted += admitted[i]->size;
     }
 
     *next_request = current_request;
@@ -230,7 +230,7 @@ int main(void) {
         pointer_queue_enqueue(queue_0, create_bin());
     }
 
-    printf("target_utilization, nodes, time\n");
+    printf("target_utilization, nodes, time, observed_utilization, time/utilzn\n");
 
     uint16_t j, k;
     for (i = 0; i < NUM_FRACTIONS; i++) {
@@ -274,11 +274,11 @@ int main(void) {
             uint64_t end_time = current_time();
             double time_per_experiment = (end_time - start_time) / (PROCESSOR_SPEED * 1000 * (duration - warm_up_duration));
 
-            //printf("utilization: %f\n", ((double) num_admitted) / ((duration - warm_up_duration) * num_nodes));
+            double utilzn = ((double) num_admitted) / ((duration - warm_up_duration) * num_nodes);
 
             // Print stats - percent of network capacity utilized and computation time
             // per admitted timeslot (in microseconds) for different numbers of nodes
-            printf("%f, %d, %f\n", fraction, num_nodes, time_per_experiment);
+            printf("%f, %d, %f, %f, %f\n", fraction, num_nodes, time_per_experiment, utilzn, time_per_experiment / utilzn);
         }
     }
 
@@ -286,7 +286,6 @@ int main(void) {
     free(queue_1);
     for (i = 0; i < NUM_CORES; i++) {
         free(status->cores[i].new_request_bins);
-        free(status->cores[i].admitted);
 		/* TODO: more memory to free up, but won't worry about it now */
     }
     free(status);

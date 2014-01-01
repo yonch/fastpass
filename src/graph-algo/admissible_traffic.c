@@ -82,7 +82,7 @@ int try_allocation(uint16_t src, uint16_t dst, struct allocation_core *core,
 	// We can allocate this edge now
 	set_timeslot_occupied(&core->batch_state, src, dst, batch_timeslot);
 
-	insert_admitted_edge(&core->admitted[batch_timeslot], src, dst);
+	insert_admitted_edge(core->admitted[batch_timeslot], src, dst);
 	uint32_t index = get_status_index(src, dst);
 	status->timeslots[index] = status->current_timeslot + batch_timeslot;
 

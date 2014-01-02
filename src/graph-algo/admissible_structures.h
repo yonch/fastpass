@@ -490,6 +490,23 @@ static inline int alloc_core_init(struct admission_core_state* core,
 }
 
 /**
+ * Initializes an already-allocated struct admissible_status.
+ */
+static inline
+void init_admissible_status(struct admissible_status *status,
+		bool oversubscribed, uint16_t inter_rack_capacity, uint16_t num_nodes,
+		struct fp_ring *q_head, struct fp_ring *q_admitted_out)
+{
+	assert(status != NULL);
+
+	reset_admissible_status(status, oversubscribed, inter_rack_capacity,
+			num_nodes);
+
+    status->q_head = q_head;
+	status->q_admitted_out = q_admitted_out;
+}
+
+/**
  * Returns an initialized struct admissible_status, or NULL on error.
  */
 static inline
@@ -503,11 +520,8 @@ struct admissible_status *create_admissible_status(bool oversubscribed,
     if (status == NULL)
     	return NULL;
 
-	reset_admissible_status(status, oversubscribed, inter_rack_capacity,
-			num_nodes);
-
-    status->q_head = q_head;
-	status->q_admitted_out = q_admitted_out;
+    init_admissible_status(status, oversubscribed, inter_rack_capacity,
+    		num_nodes, q_head, q_admitted_out);
 
     return status;
 }

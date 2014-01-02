@@ -16,6 +16,7 @@
 
 #include "atomic.h"
 #include "fp_ring.h"
+#include "platform.h"
 
 #define MAX_NODES 1024  // should be a multiple of 64, due to bitmaps
 #define NODES_SHIFT 10  // 2^NODES_SHIFT = MAX_NODES
@@ -402,7 +403,7 @@ void alloc_core_reset(struct allocation_core *core,
 static inline
 struct admitted_traffic *create_admitted_traffic(void)
 {
-    struct admitted_traffic *admitted = malloc(sizeof(struct admitted_traffic));
+    struct admitted_traffic *admitted = fp_malloc(sizeof(struct admitted_traffic));
 
     if (admitted == NULL)
     	return NULL;
@@ -433,7 +434,7 @@ struct bin *create_bin(size_t size)
 	uint32_t n_bytes =
 			sizeof(struct bin) + size * sizeof(struct backlog_edge);
 
-	struct bin *bin = malloc(n_bytes);
+	struct bin *bin = fp_malloc(n_bytes);
     if (bin == NULL)
     	return NULL;
 
@@ -492,7 +493,7 @@ struct admissible_status *create_admissible_status(bool oversubscribed,
 		uint16_t inter_rack_capacity, uint16_t num_nodes,
 		struct fp_ring *q_head, struct fp_ring *q_admitted_out)
 {
-    struct admissible_status *status = malloc(sizeof(struct admissible_status));
+    struct admissible_status *status = fp_malloc(sizeof(struct admissible_status));
 
     if (status == NULL)
     	return NULL;

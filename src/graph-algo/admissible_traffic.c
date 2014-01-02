@@ -201,13 +201,12 @@ void get_admissible_traffic(struct allocation_core *core,
 		try_allocation_bin(bin_in, core, bin_out, status);
 
 		pointer_queue_enqueue(queue_out, bin_out);
-		bin_out = core->temporary_bins[bin];
+		bin_out = bin_in;
     	init_bin(bin_out);
     }
 
     /* enqueue the last bin in batch as-is, next batch will take care of it */
     pointer_queue_enqueue(queue_out, core->new_request_bins[NUM_BINS + BATCH_SIZE - 1]);
-    core->new_request_bins[NUM_BINS + BATCH_SIZE - 1] = core->temporary_bins[BATCH_SIZE - 1];
 
     for (bin = 0; bin < BATCH_SIZE; bin++) {
     	pointer_queue_enqueue(core->admitted_out, core->admitted[bin]);
@@ -216,6 +215,9 @@ void get_admissible_traffic(struct allocation_core *core,
     /* hand over token to next core */
     pointer_queue_enqueue(core->q_urgent_out, (void*)URGENT_Q_HEAD_TOKEN);
 
+    /* re-arrange memory */
+    for (bin = 0; bin < BATCH_SIZE; bin++)
+    	core->new_request_bins[NUM_BINS + bin] = core->temporary_bins[bin];
     core->temporary_bins[0] = bin_out;
 
     // Update current timeslot

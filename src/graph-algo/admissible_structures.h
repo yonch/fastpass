@@ -25,7 +25,8 @@
 #define BATCH_SHIFT 6  // 2^BATCH_SHIFT = BATCH_SIZE
 #define NONE_AVAILABLE 251
 #define MAX_TIME 66535
-#define BIN_SIZE MAX_NODES * MAX_NODES // TODO: try smaller values
+#define SMALL_BIN_SIZE (MAX_NODES * MAX_NODES) // TODO: try smaller values
+#define LARGE_BIN_SIZE (MAX_NODES * MAX_NODES) // TODO: try smaller values
 #define NUM_BINS_SHIFT 8
 #define NUM_BINS (1 << NUM_BINS_SHIFT)
 #define NUM_CORES 1
@@ -50,7 +51,7 @@ struct backlog_edge {
 struct bin {
     uint16_t head;
     uint16_t tail;
-    struct backlog_edge edges[BIN_SIZE];
+    struct backlog_edge edges[0];
 };
 
 // Tracks which srcs/dsts and src/dst racks are available for this batch
@@ -72,7 +73,7 @@ struct allocation_core {
     struct batch_state batch_state;
     struct admitted_traffic *admitted[BATCH_SIZE];  // one batch of traffic admitted by this core
     uint8_t is_head;
-    struct fp_ring *admitted_out;
+    struct fp_ring *q_admitted_out;
     struct fp_ring *q_bin_in;
     struct fp_ring *q_bin_out;
     struct fp_ring *q_urgent_in;
@@ -93,7 +94,6 @@ struct admissible_status {
     uint16_t num_nodes;
     uint64_t last_alloc_tslot[MAX_NODES * MAX_NODES];
     struct flow_status flows[MAX_NODES * MAX_NODES];
-    struct allocation_core cores[NUM_CORES];
     struct fp_ring *q_head;
 };
 
@@ -378,7 +378,7 @@ void reset_flow(struct admissible_status *status, uint16_t src, uint16_t dst) {
 // Initializes data structures associated with one allocation core for
 // a new batch of processing
 static inline
-void init_allocation_core(struct allocation_core *core,
+void alloc_core_reset(struct allocation_core *core,
                           struct admissible_status *status) {
     assert(core != NULL);
 
@@ -425,10 +425,11 @@ struct admitted_traffic *get_admitted_struct(struct admitted_traffic *admitted,
 }
 
 static inline
-struct bin *create_bin(void) {
-    size_t size = sizeof(struct bin) +
-        (MAX_NODES * MAX_NODES - BIN_SIZE) * sizeof(struct backlog_edge);
-    struct bin *bin = malloc(size);
+struct bin *create_bin(size_t size)
+{
+	uint32_t n_bytes =
+			sizeof(struct bin) + size * sizeof(struct backlog_edge);
+    struct bin *bin = malloc(n_bytes);
     assert(bin != NULL);
 
     init_bin(bin);
@@ -443,6 +444,37 @@ void destroy_bin(struct bin *bin) {
     free(bin);
 }
 
+static inline void alloc_core_init(struct allocation_core* core,
+		struct fp_ring *q_bin_in, struct fp_ring *q_bin_out,
+		struct fp_ring *q_urgent_in, struct fp_ring *q_urgent_out,
+		struct fp_ring *q_admitted_out)
+{
+	int j;
+
+	for (j = 0; j < NUM_BINS; j++) {
+		core->new_request_bins[j] = create_bin(SMALL_BIN_SIZE);
+		assert(core->new_request_bins[j] != NULL);
+	}
+
+	for (j = NUM_BINS; j < NUM_BINS + BATCH_SIZE; j++) {
+		core->new_request_bins[j] = create_bin(LARGE_BIN_SIZE);
+		assert(core->new_request_bins[j] != NULL);
+	}
+
+	core->temporary_bins[0] = create_bin(LARGE_BIN_SIZE);
+
+	for (j = 0; j < BATCH_SIZE; j++) {
+		core->admitted[j] = malloc(sizeof(struct admitted_traffic));
+		assert(core->admitted[j] != NULL);
+	}
+
+	core->q_bin_in = q_bin_in;
+	core->q_bin_out = q_bin_out;
+	core->q_urgent_in = q_urgent_in;
+	core->q_urgent_out = q_urgent_out;
+	core->q_admitted_out = q_admitted_out;
+}
+
 static inline
 struct admissible_status *create_admissible_status(bool oversubscribed,
                                                    uint16_t inter_rack_capacity,
@@ -452,60 +484,11 @@ struct admissible_status *create_admissible_status(bool oversubscribed,
 
 	init_admissible_status(status, oversubscribed, inter_rack_capacity,
 			num_nodes);
-	uint16_t i, j;
-    struct allocation_core *core;
-    for (i = 0; i < NUM_CORES; i++) {
-        core = &status->cores[i];
-
-        for (j = 0; j < NUM_BINS; j++) {
-			core->new_request_bins[j] = malloc(sizeof(struct bin));
-			assert(core->new_request_bins[j] != NULL);
-		}
-		for (j = NUM_BINS; j < NUM_BINS + BATCH_SIZE; j++) {
-			core->new_request_bins[j] = create_bin();
-			assert(core->new_request_bins[j] != NULL);
-		}
-
-		core->temporary_bins[0] = create_bin();
-
-		for (j = 0; j < BATCH_SIZE; j++) {
-        	core->admitted[j] = malloc(sizeof(struct admitted_traffic));
-            assert(core->admitted[j] != NULL);
-		}
-		core->admitted_out = fp_ring_create(BATCH_SHIFT);
-		core->q_bin_in = fp_ring_create(NUM_BINS_SHIFT);
-		if (!core->q_bin_in) exit(-1);
-		core->q_bin_out = fp_ring_create(NUM_BINS_SHIFT);
-		if (!core->q_bin_out) exit(-1);
-		core->q_urgent_in = fp_ring_create(2 * NODES_SHIFT + 1);
-		if (!core->q_urgent_in) exit(-1);
-		core->q_urgent_out = fp_ring_create(2 * NODES_SHIFT + 1);
-		if (!core->q_urgent_out) exit(-1);
-		core->is_head = 0;
-    }
 
     status->q_head = fp_ring_create(2 * NODES_SHIFT);
     assert(status->q_head != NULL);
 
     return status;
-}
-
-static inline
-void destroy_admissible_status(struct admissible_status *status) {
-    assert(status != NULL);
-
-    uint8_t i, j;
-    struct allocation_core *core;
-    for (i = 0; i < NUM_CORES; i++) {
-        core = &status->cores[i];
-		for (j = 0; j < NUM_BINS + BATCH_SIZE; j++)
-			free(core->new_request_bins[j]);
-		for (j = 0; j < BATCH_SIZE; j++)
-			free(core->admitted[j]);
-    }
-    free(status->q_head);
-
-    free(status);
 }
 
 #endif /* ADMISSIBLE_STRUCTURES_H_ */

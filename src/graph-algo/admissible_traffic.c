@@ -160,7 +160,7 @@ void get_admissible_traffic(struct allocation_core *core,
     struct fp_ring *queue_out = core->q_bin_out;
 
     // Initialize this core for a new batch of processing
-    init_allocation_core(core, status);
+    alloc_core_reset(core, status);
 
     // Process all bins from previous core, then process all bins from
     // residual backlog from traffic admitted in this batch
@@ -202,7 +202,7 @@ void get_admissible_traffic(struct allocation_core *core,
     fp_ring_enqueue(queue_out, core->new_request_bins[NUM_BINS + BATCH_SIZE - 1]);
 
     for (bin = 0; bin < BATCH_SIZE; bin++) {
-    	fp_ring_enqueue(core->admitted_out, core->admitted[bin]);
+    	fp_ring_enqueue(core->q_admitted_out, core->admitted[bin]);
     }
 
     /* hand over token to next core */

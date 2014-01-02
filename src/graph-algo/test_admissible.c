@@ -168,9 +168,9 @@ uint32_t generate_requests_poisson(struct request_info *edges, uint32_t size,
 // Runs one experiment. Returns the number of packets admitted.
 uint32_t run_experiment(struct request_info *requests, uint32_t start_time, uint32_t end_time,
                         uint32_t num_requests, struct admissible_status *status,
-                        struct request_info **next_request)
+                        struct request_info **next_request,
+                        struct allocation_core *core)
 {
-	struct allocation_core *core = &status->cores[0];
     struct admitted_traffic *admitted;
     struct fp_ring *queue_tmp;
 
@@ -194,19 +194,9 @@ uint32_t run_experiment(struct request_info *requests, uint32_t start_time, uint
         // Get admissible traffic
         get_admissible_traffic(core, status);
 
-        /* swap q_bin_in and q_bin_out for next iteration since there's only one core */
-        queue_tmp = core->q_bin_in;
-        core->q_bin_in = core->q_bin_out;
-        core->q_bin_out = queue_tmp;
-
-        /* swap q_urgent_in and q_urgent_out for next iteration since there's only one core */
-        queue_tmp = core->q_urgent_in;
-        core->q_urgent_in = core->q_urgent_out;
-        core->q_urgent_out = queue_tmp;
-
         for (i = 0; i < BATCH_SIZE; i++) {
         	/* get admitted traffic */
-        	admitted = fp_ring_dequeue(core->admitted_out);
+        	admitted = fp_ring_dequeue(core->q_admitted_out);
         	/* update statistics */
         	num_admitted += admitted->size;
         	/* return admitted traffic to core */
@@ -235,12 +225,26 @@ int main(void) {
 
     // Data structures
     struct admissible_status *status = create_admissible_status(false, 0, 0);
-	struct allocation_core *core = &status->cores[0];
+	struct allocation_core core;
+	struct fp_ring *q_bin;
+	struct fp_ring *q_urgent;
+	struct fp_ring *q_admitted_out;
 
-    /* fill backlog_queue with empty bins */
+	/* init queues */
+	q_bin = fp_ring_create(NUM_BINS_SHIFT);
+	q_urgent = fp_ring_create(2 * NODES_SHIFT + 1);
+	q_admitted_out = fp_ring_create(BATCH_SHIFT);
+	if (!q_bin) exit(-1);
+	if (!q_urgent) exit(-1);
+	if (!q_admitted_out) exit(-1);
+
+	/* init core */
+	alloc_core_init(&core, q_bin, q_bin, q_urgent, q_urgent, q_admitted_out);
+
+    /* fill bin_queue with empty bins */
     uint16_t i;
     for (i = 0; i < NUM_BINS; i++) {
-        fp_ring_enqueue(core->q_bin_in, create_bin());
+        fp_ring_enqueue(q_bin, create_bin(LARGE_BIN_SIZE));
     }
 
     printf("target_utilization, nodes, time, observed_utilization, time/utilzn\n");
@@ -256,13 +260,13 @@ int main(void) {
             // Initialize data structures
             init_admissible_status(status, false, 0, num_nodes);
             for (k = 0; k < NUM_BINS; k++) {
-            	struct bin *b = (struct bin *)fp_ring_dequeue(core->q_bin_in);
+            	struct bin *b = (struct bin *)fp_ring_dequeue(q_bin);
                 init_bin(b);
-                fp_ring_enqueue(core->q_bin_in, b);
+                fp_ring_enqueue(q_bin, b);
             }
-            while (!fp_ring_empty(core->q_urgent_in))
-            	fp_ring_dequeue(core->q_urgent_in);
-            fp_ring_enqueue(core->q_urgent_in, (void*)URGENT_Q_HEAD_TOKEN);
+            while (!fp_ring_empty(q_urgent))
+            	fp_ring_dequeue(q_urgent);
+            fp_ring_enqueue(q_urgent, (void*)URGENT_Q_HEAD_TOKEN);
 
             // Allocate enough space for new requests
             // (this is sufficient for <= 1 request per node per timeslot)
@@ -277,7 +281,7 @@ int main(void) {
             // requests once we start timing
             struct request_info *next_request;
             run_experiment(requests, 0, warm_up_duration, num_requests,
-                           status, &next_request);
+                           status, &next_request, &core);
    
             // Start timining
             uint64_t start_time = current_time();
@@ -285,7 +289,7 @@ int main(void) {
             // Run the experiment
             uint32_t num_admitted = run_experiment(next_request, warm_up_duration, duration,
                                                    num_requests - (next_request - requests),
-                                                   status, &next_request);
+                                                   status, &next_request, &core);
             uint64_t end_time = current_time();
             double time_per_experiment = (end_time - start_time) / (PROCESSOR_SPEED * 1000 * (duration - warm_up_duration));
 

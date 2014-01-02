@@ -58,7 +58,7 @@ int try_allocation(uint16_t src, uint16_t dst, struct allocation_core *core,
 	status->timeslots[index] = status->current_timeslot + batch_timeslot;
 
 	if (atomic32_sub_return(&status->flows[index].backlog, 1) != 0)
-		enqueue_bin(core->batch_bins[batch_timeslot], src, dst);
+		enqueue_bin(core->new_request_bins[NUM_BINS + batch_timeslot], src, dst);
 
 	return 0;
 }
@@ -102,7 +102,7 @@ static inline void process_one_new_request(uint16_t src, uint16_t dst,
 	} else {
 		// We have not yet processed the bin for this src/dst pair
 		// Enqueue it to the working bins for later processing
-		enqueue_bin(&core->new_request_bins[bin_index], src, dst);
+		enqueue_bin(core->new_request_bins[bin_index], src, dst);
 	}
 }
 
@@ -176,7 +176,7 @@ void get_admissible_traffic(struct allocation_core *core,
 
     	bin_in = (struct bin *)pointer_queue_dequeue(queue_in);
 		try_allocation_bin(bin_in, core, bin_out, status);
-		try_allocation_bin(&core->new_request_bins[bin], core, bin_out, status);
+		try_allocation_bin(core->new_request_bins[bin], core, bin_out, status);
 
 		if (likely(bin & ((~0UL << (BATCH_SHIFT+1)) | 1))) {
 			pointer_queue_enqueue(queue_out, bin_out);
@@ -197,7 +197,7 @@ void get_admissible_traffic(struct allocation_core *core,
 
 //    	process_new_requests(status, core, NUM_BINS + bin);
 
-    	bin_in = core->batch_bins[bin];
+    	bin_in = core->new_request_bins[NUM_BINS + bin];
 		try_allocation_bin(bin_in, core, bin_out, status);
 
 		pointer_queue_enqueue(queue_out, bin_out);
@@ -206,8 +206,8 @@ void get_admissible_traffic(struct allocation_core *core,
     }
 
     /* enqueue the last bin in batch as-is, next batch will take care of it */
-    pointer_queue_enqueue(queue_out, core->batch_bins[BATCH_SIZE - 1]);
-    core->batch_bins[BATCH_SIZE - 1] = core->temporary_bins[BATCH_SIZE - 1];
+    pointer_queue_enqueue(queue_out, core->new_request_bins[NUM_BINS + BATCH_SIZE - 1]);
+    core->new_request_bins[NUM_BINS + BATCH_SIZE - 1] = core->temporary_bins[BATCH_SIZE - 1];
 
     for (bin = 0; bin < BATCH_SIZE; bin++) {
     	pointer_queue_enqueue(core->admitted_out, core->admitted[bin]);

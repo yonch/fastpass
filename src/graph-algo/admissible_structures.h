@@ -74,8 +74,7 @@ struct batch_state {
 
 // Data structures associated with one allocation core
 struct allocation_core {
-	struct bin *new_request_bins; // pool of backlog bins for incoming requests
-	struct bin *batch_bins[BATCH_SIZE]; // bins to hold flows to be re-processed later in batch
+	struct bin *new_request_bins[NUM_BINS + BATCH_SIZE]; // pool of backlog bins for incoming requests
 	struct bin *temporary_bins[BATCH_SIZE]; // hold spare allocated bins during run
     struct batch_state batch_state;
     struct admitted_traffic *admitted[BATCH_SIZE];  // one batch of traffic admitted by this core
@@ -424,11 +423,8 @@ void init_allocation_core(struct allocation_core *core,
     assert(core != NULL);
 
     uint16_t i;
-	for (i = 0; i < NUM_BINS; i++)
-		init_bin(&core->new_request_bins[i]);
-
-	for (i = 0; i < BATCH_SIZE; i++)
-		init_bin(core->batch_bins[i]);
+	for (i = 0; i < NUM_BINS + BATCH_SIZE; i++)
+		init_bin(core->new_request_bins[i]);
 
     init_batch_state(&core->batch_state, status->oversubscribed,
                      status->inter_rack_capacity, status->num_nodes);
@@ -530,14 +526,22 @@ struct admissible_status *create_admissible_status(bool oversubscribed,
 
 	init_admissible_status(status, oversubscribed, inter_rack_capacity,
 			num_nodes);
-	uint8_t i, j;
+	uint16_t i, j;
     struct allocation_core *core;
     for (i = 0; i < NUM_CORES; i++) {
         core = &status->cores[i];
-		core->new_request_bins = malloc(
-				sizeof(struct bin) * (NUM_BINS));
-		assert(core->new_request_bins != NULL);
+
+        for (j = 0; j < NUM_BINS; j++) {
+			core->new_request_bins[j] = malloc(sizeof(struct bin));
+			assert(core->new_request_bins[j] != NULL);
+		}
+		for (j = NUM_BINS; j < NUM_BINS + BATCH_SIZE; j++) {
+			core->new_request_bins[j] = create_bin();
+			assert(core->new_request_bins[j] != NULL);
+		}
+
 		core->temporary_bins[0] = create_bin();
+
 		for (j = 0; j < BATCH_SIZE; j++) {
 			core->batch_bins[j] = create_bin();
         	core->admitted[j] = malloc(sizeof(struct admitted_traffic));
@@ -569,7 +573,8 @@ void destroy_admissible_status(struct admissible_status *status) {
     struct allocation_core *core;
     for (i = 0; i < NUM_CORES; i++) {
         core = &status->cores[i];
-		free(core->new_request_bins);
+		for (j = 0; j < NUM_BINS + BATCH_SIZE; j++)
+			free(core->new_request_bins[j]);
 		for (j = 0; j < BATCH_SIZE; j++)
 			free(core->admitted[j]);
     }

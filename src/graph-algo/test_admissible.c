@@ -296,9 +296,6 @@ int main(void) {
         }
     }
 
-    for (i = 0; i < NUM_CORES; i++) {
-        free(status->cores[i].new_request_bins);
-		/* TODO: more memory to free up, but won't worry about it now */
-    }
+	/* TODO: memory to free up, but won't worry about it now */
     free(status);
 }

@@ -38,7 +38,7 @@ void add_backlog(struct admissible_status *status, uint16_t src,
  * Returns 0 if the flow will be handled internally,
  * 		   1 if more backlog remains and should be handled by the caller
  */
-static int try_allocation(uint16_t src, uint16_t dst, struct allocation_core *core,
+static int try_allocation(uint16_t src, uint16_t dst, struct admission_core_state *core,
 		struct admissible_status *status)
 {
     assert(core != NULL);
@@ -63,7 +63,7 @@ static int try_allocation(uint16_t src, uint16_t dst, struct allocation_core *co
 	return 0;
 }
 
-static void try_allocation_bin(struct bin *in_bin, struct allocation_core *core,
+static void try_allocation_bin(struct bin *in_bin, struct admission_core_state *core,
                     struct bin *bin_out, struct admissible_status *status)
 {
 	int rc;
@@ -84,7 +84,7 @@ static void try_allocation_bin(struct bin *in_bin, struct allocation_core *core,
 }
 
 static inline void process_one_new_request(uint16_t src, uint16_t dst,
-		uint16_t bin_index, struct allocation_core* core,
+		uint16_t bin_index, struct admission_core_state* core,
 		struct admissible_status* status, uint16_t current_bin)
 {
 	if (bin_index < current_bin) {
@@ -109,7 +109,7 @@ static inline void process_one_new_request(uint16_t src, uint16_t dst,
 // Sets the last send time for new requests based on the contents of status
 // and sorts them
 static void process_new_requests(struct admissible_status *status,
-                          struct allocation_core *core,
+                          struct admission_core_state *core,
                           uint16_t current_bin)
 {
     assert(status != NULL);
@@ -149,7 +149,7 @@ process_head:
 // Determine admissible traffic for one timeslot from queue_in
 // Puts unallocated traffic in queue_out
 // Allocate BATCH_SIZE timeslots at once
-void get_admissible_traffic(struct allocation_core *core,
+void get_admissible_traffic(struct admission_core_state *core,
 								struct admissible_status *status,
 								struct admitted_traffic **admitted)
 {

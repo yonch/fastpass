@@ -70,7 +70,7 @@ struct batch_state {
 };
 
 // Data structures associated with one allocation core
-struct allocation_core {
+struct admission_core_state {
 	struct bin *new_request_bins[NUM_BINS + BATCH_SIZE]; // pool of backlog bins for incoming requests
 	struct bin *temporary_bins[BATCH_SIZE]; // hold spare allocated bins during run
     struct batch_state batch_state;
@@ -383,7 +383,7 @@ void reset_flow(struct admissible_status *status, uint16_t src, uint16_t dst) {
 // Initializes data structures associated with one allocation core for
 // a new batch of processing
 static inline
-void alloc_core_reset(struct allocation_core *core,
+void alloc_core_reset(struct admission_core_state *core,
                           struct admissible_status *status,
                           struct admitted_traffic **admitted) {
     assert(core != NULL);
@@ -459,7 +459,7 @@ void destroy_bin(struct bin *bin) {
  * Returns: 0 if successful, -1 on error.
  * @note: doesn't clean up memory on error - may leak!
  */
-static inline int alloc_core_init(struct allocation_core* core,
+static inline int alloc_core_init(struct admission_core_state* core,
 		struct fp_ring *q_bin_in, struct fp_ring *q_bin_out,
 		struct fp_ring *q_urgent_in, struct fp_ring *q_urgent_out)
 {

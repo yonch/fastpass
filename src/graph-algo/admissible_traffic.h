@@ -21,7 +21,7 @@ void add_backlog(struct admissible_status *status,
                        uint16_t demand_tslots);
 
 // Determine admissible traffic for one timeslot from queue_in
-void get_admissible_traffic(struct allocation_core *core,
+void get_admissible_traffic(struct admission_core_state *core,
 								struct admissible_status *status,
 								struct admitted_traffic **admitted);
 

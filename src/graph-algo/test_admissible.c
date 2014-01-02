@@ -169,7 +169,7 @@ uint32_t generate_requests_poisson(struct request_info *edges, uint32_t size,
 uint32_t run_experiment(struct request_info *requests, uint32_t start_time, uint32_t end_time,
                         uint32_t num_requests, struct admissible_status *status,
                         struct request_info **next_request,
-                        struct allocation_core *core,
+                        struct admission_core_state *core,
                         struct admitted_traffic **admitted_batch)
 {
     struct admitted_traffic *admitted;
@@ -224,12 +224,13 @@ int main(void)
 
     // Each experiment tries out a different combination of target network utilization
     // and number of nodes
-    double fractions [NUM_FRACTIONS] = {0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9, 0.95, 0.99};
+    //double fractions [NUM_FRACTIONS] = {0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9, 0.95, 0.99};
+    double fractions [NUM_FRACTIONS] = {0.7, 0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.8, 0.9, 0.95, 0.99};
     uint32_t sizes [NUM_SIZES] = {1024, 512, 256, 128, 64, 32, 16};
 
     // Data structures
     struct admissible_status *status;
-	struct allocation_core core;
+	struct admission_core_state core;
 	struct fp_ring *q_bin;
 	struct fp_ring *q_urgent;
 	struct fp_ring *q_head;

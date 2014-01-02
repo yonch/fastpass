@@ -156,7 +156,6 @@ void get_admissible_traffic(struct allocation_core *core,
     assert(status != NULL);
 
     // TODO: use multiple cores
-    uint8_t core_id = 0;  // for now, just one core
     struct pointer_queue *queue_in = core->q_bin_in;
     struct pointer_queue *queue_out = core->q_bin_out;
 
@@ -165,42 +164,28 @@ void get_admissible_traffic(struct allocation_core *core,
 
     // Process all bins from previous core, then process all bins from
     // residual backlog from traffic admitted in this batch
-    struct bin *current_bin, *bin_out, *new_bin;
+    struct bin *bin_in, *bin_out;
     uint16_t bin;
 
     bin_out = core->temporary_bins[0];
+    assert(is_empty_bin(bin_out) && (bin_out->head == 0));
 
-    /* Fold the first 2*BATCH_SIZE bins into BATCH_SIZE bins */
-    for (bin = 0; bin < BATCH_SIZE; bin++) {
-    	init_bin(bin_out);
-
-//    	process_new_requests(status, core, 2 * bin);
-
-    	current_bin = (struct bin *)pointer_queue_dequeue(queue_in);
-		try_allocation_bin(current_bin, core, bin_out, status);
-		try_allocation_bin(&core->new_request_bins[2 * bin], core, bin_out, status);
-		core->temporary_bins[bin] = current_bin;
-
-    	current_bin = (struct bin *)pointer_queue_dequeue(queue_in);
-		try_allocation_bin(current_bin, core, bin_out, status);
-		try_allocation_bin(&core->new_request_bins[2 * bin + 1], core, bin_out, status);
-
-		pointer_queue_enqueue(queue_out, bin_out);
-		bin_out = current_bin;
-    }
-
-    /* process the next bins one to one */
-    for (bin = 2 * BATCH_SIZE; bin < NUM_BINS; bin++) {
-    	init_bin(bin_out);
+    for (bin = 0; bin < NUM_BINS; bin++) {
 
 //    	process_new_requests(status, core, bin);
 
-    	current_bin = (struct bin *)pointer_queue_dequeue(queue_in);
-		try_allocation_bin(current_bin, core, bin_out, status);
+    	bin_in = (struct bin *)pointer_queue_dequeue(queue_in);
+		try_allocation_bin(bin_in, core, bin_out, status);
 		try_allocation_bin(&core->new_request_bins[bin], core, bin_out, status);
 
-		pointer_queue_enqueue(queue_out, bin_out);
-		bin_out = current_bin;
+		if (likely(bin & ((~0UL << (BATCH_SHIFT+1)) | 1))) {
+			pointer_queue_enqueue(queue_out, bin_out);
+			bin_out = bin_in;
+	    	init_bin(bin_out);
+		} else {
+			/* we keep the same bin_out to fold 2-into-1. */
+			core->temporary_bins[bin / 2] = bin_in;
+		}
     }
 
     /* wait until the next core had finished allocating */
@@ -209,15 +194,15 @@ void get_admissible_traffic(struct allocation_core *core,
 
     /* process the batch bins */
     for (bin = 0; bin < BATCH_SIZE - 1; bin++) {
-    	init_bin(bin_out);
 
 //    	process_new_requests(status, core, NUM_BINS + bin);
 
-    	current_bin = core->batch_bins[bin];
-		try_allocation_bin(current_bin, core, bin_out, status);
+    	bin_in = core->batch_bins[bin];
+		try_allocation_bin(bin_in, core, bin_out, status);
 
 		pointer_queue_enqueue(queue_out, bin_out);
 		bin_out = core->temporary_bins[bin];
+    	init_bin(bin_out);
     }
 
     /* enqueue the last bin in batch as-is, next batch will take care of it */

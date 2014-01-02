@@ -59,12 +59,14 @@ struct bin {
 struct batch_state {
     bool oversubscribed;
     uint16_t inter_rack_capacity;  // Only valid if oversubscribed is true
+    uint64_t allowed_mask;
     uint64_t src_endnodes [MAX_NODES];
     uint64_t dst_endnodes [MAX_NODES];
     uint64_t src_rack_bitmaps [MAX_NODES];
     uint64_t dst_rack_bitmaps [MAX_NODES];
     uint16_t src_rack_counts [MAX_RACKS * BATCH_SIZE];  // rows are racks
     uint16_t dst_rack_counts [MAX_RACKS * BATCH_SIZE];
+
 };
 
 // Data structures associated with one allocation core
@@ -248,6 +250,7 @@ void init_batch_state(struct batch_state *state, bool oversubscribed,
 
     state->oversubscribed = oversubscribed;
     state->inter_rack_capacity = inter_rack_capacity;
+    state->allowed_mask = ~0UL;
 
     int i;
     if (oversubscribed) {
@@ -278,7 +281,7 @@ uint8_t get_first_timeslot(struct batch_state *state, uint16_t src, uint16_t dst
     assert(src < MAX_NODES);
     assert(dst < MAX_NODES);
 
-    uint64_t endnode_bitmap = state->src_endnodes[src] & state->dst_endnodes[dst];
+    uint64_t endnode_bitmap = state->allowed_mask & state->src_endnodes[src] & state->dst_endnodes[dst];
       
     uint64_t bitmap = endnode_bitmap;
     if (state->oversubscribed) {
@@ -292,6 +295,7 @@ uint8_t get_first_timeslot(struct batch_state *state, uint16_t src, uint16_t dst
 
     uint64_t timeslot;
     asm("bsfq %1,%0" : "=r"(timeslot) : "r"(bitmap));
+
 
     return (uint8_t) timeslot;
 }

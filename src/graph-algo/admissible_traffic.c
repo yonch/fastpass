@@ -185,6 +185,11 @@ void get_admissible_traffic(struct allocation_core *core,
     	    	process_new_requests(status, core, bin);
     	    	/* at least until the next core had finished allocating */
     	    while (!core->is_head);
+    	    /* enqueue the allocated traffic for this timeslot */
+    	    fp_ring_enqueue(status->q_admitted_out, core->admitted[bin - NUM_BINS]);
+    	    /* disallow further allocations to that timeslot */
+    	    core->batch_state.allowed_mask <<= 1;
+    	    /* will process flows that this batch had previously allocated to timeslot */
     	    bin_in = core->new_request_bins[bin];
     	}
 
@@ -200,15 +205,15 @@ void get_admissible_traffic(struct allocation_core *core,
 		}
     }
 
+    /* enqueue the last allocated timeslot */
+    fp_ring_enqueue(status->q_admitted_out, core->admitted[BATCH_SIZE - 1]);
+
+    /* hand over token to next core. this should happen after enqueuing _all_
+     * allocated_traffic structs, to prevent allocation re-ordering */
+    fp_ring_enqueue(core->q_urgent_out, (void*)URGENT_Q_HEAD_TOKEN);
+
     /* enqueue the last bin in batch as-is, next batch will take care of it */
     fp_ring_enqueue(queue_out, core->new_request_bins[NUM_BINS + BATCH_SIZE - 1]);
-
-    for (bin = 0; bin < BATCH_SIZE; bin++) {
-    	fp_ring_enqueue(status->q_admitted_out, core->admitted[bin]);
-    }
-
-    /* hand over token to next core */
-    fp_ring_enqueue(core->q_urgent_out, (void*)URGENT_Q_HEAD_TOKEN);
 
     /* re-arrange memory */
     for (bin = 0; bin < BATCH_SIZE; bin++)

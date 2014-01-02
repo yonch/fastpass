@@ -38,7 +38,7 @@ void add_backlog(struct admissible_status *status, uint16_t src,
  * Returns 0 if the flow will be handled internally,
  * 		   1 if more backlog remains and should be handled by the caller
  */
-int try_allocation(uint16_t src, uint16_t dst, struct allocation_core *core,
+static int try_allocation(uint16_t src, uint16_t dst, struct allocation_core *core,
 		struct admissible_status *status)
 {
     assert(core != NULL);
@@ -63,7 +63,7 @@ int try_allocation(uint16_t src, uint16_t dst, struct allocation_core *core,
 	return 0;
 }
 
-void try_allocation_bin(struct bin *in_bin, struct allocation_core *core,
+static void try_allocation_bin(struct bin *in_bin, struct allocation_core *core,
                     struct bin *bin_out, struct admissible_status *status)
 {
 	int rc;
@@ -92,7 +92,6 @@ static inline void process_one_new_request(uint16_t src, uint16_t dst,
 		// Try to allocate immediately
 		if (try_allocation(src, dst, core, status) == 1) {
 			/* couldn't process, pass on to next core */
-			uint64_t edge;
 			bin_index = (bin_index >= 2 * BATCH_SIZE) ?
 							(bin_index - BATCH_SIZE) :
 							(bin_index / 2);
@@ -109,7 +108,7 @@ static inline void process_one_new_request(uint16_t src, uint16_t dst,
 
 // Sets the last send time for new requests based on the contents of status
 // and sorts them
-void process_new_requests(struct admissible_status *status,
+static void process_new_requests(struct admissible_status *status,
                           struct allocation_core *core,
                           uint16_t current_bin)
 {

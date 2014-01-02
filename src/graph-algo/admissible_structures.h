@@ -100,9 +100,6 @@ struct admissible_status {
     struct fp_ring *q_admitted_out;
 };
 
-// Forward declarations
-static void print_backlog(struct fp_ring *queue);
-
 // Initialize a list of a traffic admitted in a timeslot
 static inline
 void init_admitted_traffic(struct admitted_traffic *admitted) {
@@ -183,6 +180,7 @@ void dequeue_bin(struct bin *bin) {
     bin->head++;
 }
 
+#ifdef NO_DPDK
 // Prints the contents of a backlog queue, useful for debugging
 static inline
 void print_backlog(struct fp_ring *queue) {
@@ -234,6 +232,7 @@ bool has_duplicates(struct fp_ring *queue) {
     }
     return false;
 }
+#endif
 
 // Returns the ID of the rack corresponding to id
 static inline
@@ -359,7 +358,7 @@ void reset_flow(struct admissible_status *status, uint16_t src, uint16_t dst) {
 
     struct flow_status *flow = &status->flows[get_status_index(src, dst)];
 
-    uint32_t backlog = atomic32_read(&flow->backlog);
+    int32_t backlog = atomic32_read(&flow->backlog);
 
     if (backlog != 0) {
         /*
@@ -407,7 +406,8 @@ void alloc_core_reset(struct allocation_core *core,
 static inline
 struct admitted_traffic *create_admitted_traffic(void)
 {
-    struct admitted_traffic *admitted = fp_malloc(sizeof(struct admitted_traffic));
+    struct admitted_traffic *admitted =
+    		fp_malloc("admitted_traffic", sizeof(struct admitted_traffic));
 
     if (admitted == NULL)
     	return NULL;
@@ -438,7 +438,7 @@ struct bin *create_bin(size_t size)
 	uint32_t n_bytes =
 			sizeof(struct bin) + size * sizeof(struct backlog_edge);
 
-	struct bin *bin = fp_malloc(n_bytes);
+	struct bin *bin = fp_malloc("admissible_bin", n_bytes);
     if (bin == NULL)
     	return NULL;
 
@@ -497,7 +497,8 @@ struct admissible_status *create_admissible_status(bool oversubscribed,
 		uint16_t inter_rack_capacity, uint16_t num_nodes,
 		struct fp_ring *q_head, struct fp_ring *q_admitted_out)
 {
-    struct admissible_status *status = fp_malloc(sizeof(struct admissible_status));
+    struct admissible_status *status =
+    		fp_malloc("admissible_status", sizeof(struct admissible_status));
 
     if (status == NULL)
     	return NULL;

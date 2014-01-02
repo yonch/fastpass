@@ -9,12 +9,12 @@
 
 /** DPDK **/
 #include <rte_malloc.h>
-#define fp_malloc		rte_malloc
+#define fp_malloc(typestr, size)		rte_malloc(typestr, size, 0)
 
 #else
 
 /** VANILLA **/
-#define fp_malloc		malloc
+#define fp_malloc(typestr, size)		malloc(size)
 
 #endif
 

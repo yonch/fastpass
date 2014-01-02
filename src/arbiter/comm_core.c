@@ -17,9 +17,10 @@
 #include "../kernel-mod/linux-compat.h"
 #include "../kernel-mod/fpproto.h"
 #include "../graph-algo/admissible_structures.h"
+#include "../graph-algo/admissible_traffic.h"
 #include "dpdk-platform.h"
 #include "bigmap.h"
-#include "alloc_core.h"
+#include "admission_core.h"
 
 /* number of elements to keep in the pktdesc local core cache */
 #define PKTDESC_MEMPOOL_CACHE_SIZE		256
@@ -58,7 +59,7 @@ bool fastpass_debug;
 struct bigmap triggered_nodes;
 
 /* logs */
-struct comm_log comm_core_logs[N_COMM_CORES];
+struct comm_log comm_core_logs[RTE_MAX_LCORE];
 
 /* per-end-node information */
 static struct end_node_state end_nodes[MAX_NODES];
@@ -90,7 +91,7 @@ void comm_init_global_structs(uint64_t first_time_slot)
 		wnd_reset(&end_nodes[i].pending, first_time_slot - 1);
 	}
 
-	for (i = 0; i < N_COMM_CORES; i++)
+	for (i = 0; i < RTE_MAX_LCORE; i++)
 		comm_log_init(&comm_core_logs[i]);
 
 	bigmap_init(&triggered_nodes);
@@ -148,7 +149,7 @@ static void handle_areq(void *param, u16 *dst_and_count, int n)
 		demand_diff = (s32)demand - (s32)orig_demand;
 		if (demand_diff > 0) {
 			comm_log_demand_increased(node_id, dst, orig_demand, demand, demand_diff);
-			alloc_increase_demand(node_id, dst, demand_diff);
+			add_backlog(&g_admissible_status, node_id, dst, demand_diff);
 			num_increases++;
 		} else {
 			comm_log_demand_remained(node_id, dst, orig_demand, demand);
@@ -319,9 +320,11 @@ void exec_comm_core(struct comm_core_cmd * cmd)
 {
 	struct rte_mbuf *pkts_burst[MAX_PKT_BURST];
 	int i, j, nb_rx;
+	int rc;
 	uint8_t portid, queueid;
 	uint64_t rx_time;
 	struct lcore_conf *qconf;
+	struct admitted_traffic *admitted[MAX_ADMITTED_PER_LOOP];
 
 	qconf = &lcore_conf[rte_lcore_id()];
 
@@ -377,8 +380,20 @@ void exec_comm_core(struct comm_core_cmd * cmd)
 			comm_log_processed_batch(nb_rx, rx_time);
 		}
 
-		/* TODO: Process newly allocated timeslots */
-
+		/* Process newly allocated timeslots */
+		rc = rte_ring_dequeue_burst(cmd->q_admitted,
+				(void **)&admitted[0],
+				MAX_ADMITTED_PER_LOOP);
+		if (unlikely(rc < 0)) {
+			comm_log_dequeue_admitted_failed(rc);
+		} else {
+			for (i = 0; i < rc; i++) {
+				comm_log_got_admitted_tslot(admitted[i]->size);
+				/* TODO: actually process allocations */
+			}
+			/* free memory */
+			rte_mempool_put_bulk(admitted_traffic_pool[0], (void **)admitted, rc);
+		}
 
 		/* send allocation packets */
 		for (i = 0; i < MAX_PKT_BURST; i++) {
@@ -404,6 +419,8 @@ void exec_comm_core(struct comm_core_cmd * cmd)
 				comm_log_pktdesc_alloc_failed(node_ind);
 				break;
 			}
+
+			/* TODO: fill in allocated timeslots */
 
 			/* we want this packet's reliability to be tracked */
 			now = fp_get_time_ns();

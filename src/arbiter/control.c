@@ -2,9 +2,11 @@
 #include "control.h"
 
 #include <rte_cycles.h>
+#include <rte_errno.h>
 #include "port_alloc.h"
 #include "main.h"
 #include "comm_core.h"
+#include "admission_core.h"
 
 int control_do_queue_allocation(void)
 {
@@ -15,9 +17,9 @@ int control_do_queue_allocation(void)
 		return 0;
 	}
 
-	if(n_enabled_lcore < N_ALLOC_CORES + N_COMM_CORES + N_LOG_CORES) {
+	if(n_enabled_lcore < N_ADMISSION_CORES + N_COMM_CORES + N_LOG_CORES) {
 		rte_exit(EXIT_FAILURE, "Need #alloc + #comm + #log cores (need %d, got %d)\n",
-				N_ALLOC_CORES + N_COMM_CORES + N_LOG_CORES, n_enabled_lcore);
+				N_ADMISSION_CORES + N_COMM_CORES + N_LOG_CORES, n_enabled_lcore);
 	}
 
 	if(n_enabled_port < N_CONTROLLER_PORTS) {
@@ -51,29 +53,69 @@ int control_do_queue_allocation(void)
  *
  * @return number of remaining experiments after this one
  */
-void launch_controller_cores(void)
+void launch_cores(void)
 {
 	/* variables */
 	//struct comm_core_cmd comm_cores[RTE_MAX_LCORE];
 	uint64_t start_time;
 	static uint64_t end_time;
 	int i; (void)i;
-	struct comm_core_cmd ctrl_cmd;
+	struct comm_core_cmd comm_cmd;
+	struct admission_core_cmd admission_cmd;
 	uint64_t first_time_slot = 0;
+	struct rte_ring *q_admitted;
 
 	/* TODO: decide what the first time slot to be output is */
 
+	/*** GLOBAL INIT ***/
 	/* initialize comm core global data */
 	comm_init_global_structs(first_time_slot);
+
+	/* create q_admitted_out */
+	q_admitted = rte_ring_create("q_admitted",
+			2 * ADMITTED_TRAFFIC_MEMPOOL_SIZE, 0, 0);
+	if (q_admitted == NULL)
+		rte_exit(EXIT_FAILURE,
+				"Cannot init q_admitted_out: %s\n", rte_strerror(rte_errno));
+
+	/* initialize admission core global data */
+	admission_init_global(q_admitted);
 
 	// Calculate start and end times
 	start_time = rte_get_timer_cycles() + sec_to_hpet(0.2); /* start after last end */
 	end_time = start_time + sec_to_hpet(1000);
 
-	// Set commands
-	ctrl_cmd.start_time = start_time;
-	ctrl_cmd.end_time = end_time;
+	/*** ADMISSION CORES ***/
+	/* set commands */
+	admission_cmd.start_time = start_time;
+	admission_cmd.end_time = end_time;
+	admission_cmd.admission_core_index = 0;
 
+	/* initialize core structures */
+	admission_init_core(enabled_lcore[1]);
+
+	/* launch admission core */
+	rte_eal_remote_launch(exec_admission_core, &admission_cmd, enabled_lcore[1]);
+
+	/*** COMM CORES ***/
+	// Set commands
+	comm_cmd.start_time = start_time;
+	comm_cmd.end_time = end_time;
+	comm_cmd.q_admitted = q_admitted;
+
+	/* initialize comm core on this core */
+	comm_init_core(rte_lcore_id());
+
+	/** Run the controller on this core */
+	exec_comm_core(&comm_cmd);
+
+	/** Wait for all cores */
+	rte_eal_mp_wait_lcore();
+
+	rte_exit(EXIT_SUCCESS, "Done");
+}
+
+/* may be useful later for logging cores */
 //	for (i = 0; i < N_CONTROLLER_PORTS; i++) {
 //		uint32_t log_core = 1 + i;
 //		uint32_t gen_core = 1 + N_CONTROLLER_PORTS + i;
@@ -98,16 +140,3 @@ void launch_controller_cores(void)
 //		rte_eal_remote_launch(exec_traffic_gen, &gen_cmds[gen_core], gen_core);
 //
 //	}
-
-	/* initialize comm core on this core */
-	comm_init_core(rte_lcore_id());
-
-	/** Run the controller on this core */
-	exec_comm_core(&ctrl_cmd);
-
-	/** Wait for all cores */
-	rte_eal_mp_wait_lcore();
-
-	rte_exit(EXIT_SUCCESS, "Done");
-}
-

@@ -6,6 +6,10 @@
 
 #define CONTROLLER_SEND_TIMEOUT_NS (4*1000*1000)
 
+/* The maximum number of admitted time-slots to process in a batch before
+ *   sending and receiving packets */
+#define MAX_ADMITTED_PER_LOOP		8
+
 /* Specifications for controller thread */
 struct comm_core_cmd {
 	uint64_t start_time;
@@ -13,6 +17,8 @@ struct comm_core_cmd {
 
 	uint64_t tslot_len; /**< Length of a time slot */
 	uint32_t tslot_offset; /**< How many offsets in the future the controller allocates */
+
+	struct rte_ring *q_admitted;
 };
 
 /**

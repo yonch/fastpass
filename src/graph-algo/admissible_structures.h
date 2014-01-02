@@ -18,8 +18,8 @@
 #include "fp_ring.h"
 #include "platform.h"
 
-#define MAX_NODES 1024  // should be a multiple of 64, due to bitmaps
-#define NODES_SHIFT 10  // 2^NODES_SHIFT = MAX_NODES
+#define MAX_NODES 256  // should be a multiple of 64, due to bitmaps
+#define NODES_SHIFT 8  // 2^NODES_SHIFT = MAX_NODES
 #define MAX_RACKS 16
 #define TOR_SHIFT 5  // number of machines per rack is at most 2^TOR_SHIFT
 #define BATCH_SIZE 64  // must be consistent with bitmaps in batch_state

@@ -53,7 +53,7 @@ struct bin {
 };
 
 /* A data-structure to communicate pointers between components */
-struct pointer_queue {
+struct fp_ring {
 	uint32_t head;
 	uint32_t tail;
 	uint32_t mask;
@@ -79,11 +79,11 @@ struct allocation_core {
     struct batch_state batch_state;
     struct admitted_traffic *admitted[BATCH_SIZE];  // one batch of traffic admitted by this core
     uint8_t is_head;
-    struct pointer_queue *admitted_out;
-    struct pointer_queue *q_bin_in;
-    struct pointer_queue *q_bin_out;
-    struct pointer_queue *q_urgent_in;
-    struct pointer_queue *q_urgent_out;
+    struct fp_ring *admitted_out;
+    struct fp_ring *q_bin_in;
+    struct fp_ring *q_bin_out;
+    struct fp_ring *q_urgent_in;
+    struct fp_ring *q_urgent_out;
 };
 
 // Demand/backlog info for a given src/dst pair
@@ -98,14 +98,14 @@ struct admissible_status {
     bool oversubscribed;
     uint16_t inter_rack_capacity;  // Only valid if oversubscribed is true
     uint16_t num_nodes;
-    uint64_t timeslots[MAX_NODES * MAX_NODES];
+    uint64_t last_alloc_tslot[MAX_NODES * MAX_NODES];
     struct flow_status flows[MAX_NODES * MAX_NODES];
     struct allocation_core cores[NUM_CORES];
-    struct pointer_queue *q_head;
+    struct fp_ring *q_head;
 };
 
 // Forward declarations
-static void print_backlog(struct pointer_queue *queue);
+static void print_backlog(struct fp_ring *queue);
 
 // Initialize a list of a traffic admitted in a timeslot
 static inline
@@ -187,42 +187,34 @@ void dequeue_bin(struct bin *bin) {
     bin->head++;
 }
 
-// Initialize a backlog queue
-static inline
-void init_pointer_queue(struct pointer_queue *queue) {
-    assert(queue != NULL);
-	queue->head = 0;
-	queue->tail = 0;
-}
-
 // Insert new bin to the back of this backlog queue
 static inline
-void pointer_queue_enqueue(struct pointer_queue *queue, void *elem) {
-	assert(queue != NULL);
+void fp_ring_enqueue(struct fp_ring *ring, void *elem) {
+	assert(ring != NULL);
 	assert(elem != NULL);
-	assert(queue->tail != queue->head - queue->mask - 1);
+	assert(ring->tail != ring->head - ring->mask - 1);
 
-	queue->elem[queue->tail & queue->mask] = elem;
-	queue->tail++;
-    }
-
-// Insert new bin to the back of this backlog queue
-static inline void * pointer_queue_dequeue(struct pointer_queue *queue) {
-	assert(queue != NULL);
-	assert(queue->head != queue->tail);
-
-	return queue->elem[queue->head++ & queue->mask];
+	ring->elem[ring->tail & ring->mask] = elem;
+	ring->tail++;
 }
 
 // Insert new bin to the back of this backlog queue
-static inline int pointer_queue_empty(struct pointer_queue *queue) {
-	assert(queue != NULL);
-	return (queue->head == queue->tail);
+static inline void * fp_ring_dequeue(struct fp_ring *ring) {
+	assert(ring != NULL);
+	assert(ring->head != ring->tail);
+
+	return ring->elem[ring->head++ & ring->mask];
+}
+
+// Insert new bin to the back of this backlog queue
+static inline int fp_ring_empty(struct fp_ring *ring) {
+	assert(ring != NULL);
+	return (ring->head == ring->tail);
 }
 
 // Prints the contents of a backlog queue, useful for debugging
 static inline
-void print_backlog(struct pointer_queue *queue) {
+void print_backlog(struct fp_ring *queue) {
     assert(queue != NULL);
 
 	struct bin *bin = queue->elem[0];
@@ -234,7 +226,7 @@ void print_backlog(struct pointer_queue *queue) {
 
 // Prints the number of src/dst pairs per bin
 static inline
-void print_backlog_counts(struct pointer_queue *queue) {
+void print_backlog_counts(struct fp_ring *queue) {
     assert(queue != NULL);
 
     printf("printing backlog bin counts\n");
@@ -252,7 +244,7 @@ void print_backlog_counts(struct pointer_queue *queue) {
 // Used for debugging
 // Note this runs in n^2 time - super slow
 static inline
-bool has_duplicates(struct pointer_queue *queue) {
+bool has_duplicates(struct fp_ring *queue) {
     assert(queue != NULL);
     
     uint16_t index;
@@ -375,7 +367,7 @@ void init_admissible_status(struct admissible_status *status, bool oversubscribe
 
     uint32_t i;
     for (i = 0; i < MAX_NODES * MAX_NODES; i++)
-        status->timeslots[i] = 0;
+        status->last_alloc_tslot[i] = 0;
     for (i = 0; i < MAX_NODES * MAX_NODES; i++)
         atomic32_init(&status->flows[i].backlog);
 }
@@ -496,21 +488,21 @@ void destroy_bin(struct bin *bin) {
  * Creates a new backlog queue, with 2^{log_size} elements
  */
 static inline
-struct pointer_queue *create_pointer_queue(uint32_t log_size) {
+struct fp_ring *create_pointer_queue(uint32_t log_size) {
 	uint32_t num_elems = (1 << log_size);
-	uint32_t mem_size = sizeof(struct pointer_queue)
+	uint32_t mem_size = sizeof(struct fp_ring)
 							+ num_elems * sizeof(void *);
-    struct pointer_queue *queue = malloc(mem_size);
+    struct fp_ring *queue = malloc(mem_size);
     assert(queue != NULL);
 
     queue->mask = num_elems - 1;
-    init_pointer_queue(queue);
-
+	queue->head = 0;
+	queue->tail = 0;
     return queue;
 }
 
 static inline
-void destroy_pointer_queue(struct pointer_queue *queue) {
+void destroy_pointer_queue(struct fp_ring *queue) {
     assert(queue != NULL);
 	assert((queue->head & queue->mask) == queue->tail);
 

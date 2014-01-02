@@ -172,7 +172,7 @@ uint32_t run_experiment(struct request_info *requests, uint32_t start_time, uint
 {
 	struct allocation_core *core = &status->cores[0];
     struct admitted_traffic *admitted;
-    struct pointer_queue *queue_tmp;
+    struct fp_ring *queue_tmp;
 
     uint32_t b;
     uint8_t i;
@@ -206,7 +206,7 @@ uint32_t run_experiment(struct request_info *requests, uint32_t start_time, uint
 
         for (i = 0; i < BATCH_SIZE; i++) {
         	/* get admitted traffic */
-        	admitted = pointer_queue_dequeue(core->admitted_out);
+        	admitted = fp_ring_dequeue(core->admitted_out);
         	/* update statistics */
         	num_admitted += admitted->size;
         	/* return admitted traffic to core */
@@ -240,7 +240,7 @@ int main(void) {
     /* fill backlog_queue with empty bins */
     uint16_t i;
     for (i = 0; i < NUM_BINS; i++) {
-        pointer_queue_enqueue(core->q_bin_in, create_bin());
+        fp_ring_enqueue(core->q_bin_in, create_bin());
     }
 
     printf("target_utilization, nodes, time, observed_utilization, time/utilzn\n");
@@ -256,12 +256,13 @@ int main(void) {
             // Initialize data structures
             init_admissible_status(status, false, 0, num_nodes);
             for (k = 0; k < NUM_BINS; k++) {
-            	struct bin *b = (struct bin *)pointer_queue_dequeue(core->q_bin_in);
+            	struct bin *b = (struct bin *)fp_ring_dequeue(core->q_bin_in);
                 init_bin(b);
-                pointer_queue_enqueue(core->q_bin_in, b);
+                fp_ring_enqueue(core->q_bin_in, b);
             }
-            init_pointer_queue(core->q_urgent_in);
-            pointer_queue_enqueue(core->q_urgent_in, (void*)URGENT_Q_HEAD_TOKEN);
+            while (!fp_ring_empty(core->q_urgent_in))
+            	fp_ring_dequeue(core->q_urgent_in);
+            fp_ring_enqueue(core->q_urgent_in, (void*)URGENT_Q_HEAD_TOKEN);
 
             // Allocate enough space for new requests
             // (this is sufficient for <= 1 request per node per timeslot)

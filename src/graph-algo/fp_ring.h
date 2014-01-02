@@ -3,6 +3,16 @@
 
 #include <errno.h>
 
+#ifndef NO_DPDK
+
+#include <rte_ring.h>
+
+#define		fp_ring				rte_ring
+#define		fp_ring_enqueue		rte_ring_enqueue
+#define		fp_ring_dequeue		rte_ring_dequeue
+
+#else
+
 /* A data-structure to communicate pointers between components */
 struct fp_ring {
 	uint32_t head;
@@ -68,5 +78,6 @@ void destroy_pointer_queue(struct fp_ring *queue) {
     free(queue);
 }
 
+#endif
 
 #endif /* FP_RING_H_ */

@@ -543,7 +543,6 @@ struct admissible_status *create_admissible_status(bool oversubscribed,
 		core->temporary_bins[0] = create_bin();
 
 		for (j = 0; j < BATCH_SIZE; j++) {
-			core->batch_bins[j] = create_bin();
         	core->admitted[j] = malloc(sizeof(struct admitted_traffic));
             assert(core->admitted[j] != NULL);
 		}

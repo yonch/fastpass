@@ -22,7 +22,8 @@ void add_backlog(struct admissible_status *status,
 
 // Determine admissible traffic for one timeslot from queue_in
 void get_admissible_traffic(struct allocation_core *core,
-								struct admissible_status *status);
+								struct admissible_status *status,
+								struct admitted_traffic **admitted);
 
 // Reset state of all flows for which src is the sender
 void reset_sender(struct admissible_status *status, uint16_t src);

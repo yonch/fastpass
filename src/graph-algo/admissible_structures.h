@@ -71,7 +71,7 @@ struct allocation_core {
 	struct bin *new_request_bins[NUM_BINS + BATCH_SIZE]; // pool of backlog bins for incoming requests
 	struct bin *temporary_bins[BATCH_SIZE]; // hold spare allocated bins during run
     struct batch_state batch_state;
-    struct admitted_traffic *admitted[BATCH_SIZE];  // one batch of traffic admitted by this core
+    struct admitted_traffic **admitted;
     uint8_t is_head;
     struct fp_ring *q_bin_in;
     struct fp_ring *q_bin_out;
@@ -380,7 +380,8 @@ void reset_flow(struct admissible_status *status, uint16_t src, uint16_t dst) {
 // a new batch of processing
 static inline
 void alloc_core_reset(struct allocation_core *core,
-                          struct admissible_status *status) {
+                          struct admissible_status *status,
+                          struct admitted_traffic **admitted) {
     assert(core != NULL);
 
     uint16_t i;
@@ -391,7 +392,8 @@ void alloc_core_reset(struct allocation_core *core,
                      status->inter_rack_capacity, status->num_nodes);
 
     for (i = 0; i < BATCH_SIZE; i++)
-        init_admitted_traffic(core->admitted[i]);
+        init_admitted_traffic(admitted[i]);
+    core->admitted = admitted;
 
     core->is_head = 0;
 }
@@ -473,12 +475,6 @@ static inline int alloc_core_init(struct allocation_core* core,
 	core->temporary_bins[0] = create_bin(LARGE_BIN_SIZE);
 	if (core->temporary_bins[0] == NULL)
 		return -1;
-
-	for (j = 0; j < BATCH_SIZE; j++) {
-		core->admitted[j] = create_admitted_traffic();
-		if (core->admitted[j] == NULL)
-			return -1;
-	}
 
 	core->q_bin_in = q_bin_in;
 	core->q_bin_out = q_bin_out;

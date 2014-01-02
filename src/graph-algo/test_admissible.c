@@ -169,7 +169,8 @@ uint32_t generate_requests_poisson(struct request_info *edges, uint32_t size,
 uint32_t run_experiment(struct request_info *requests, uint32_t start_time, uint32_t end_time,
                         uint32_t num_requests, struct admissible_status *status,
                         struct request_info **next_request,
-                        struct allocation_core *core)
+                        struct allocation_core *core,
+                        struct admitted_traffic **admitted_batch)
 {
     struct admitted_traffic *admitted;
     struct fp_ring *queue_tmp;
@@ -192,7 +193,7 @@ uint32_t run_experiment(struct request_info *requests, uint32_t start_time, uint
         }
  
         // Get admissible traffic
-        get_admissible_traffic(core, status);
+        get_admissible_traffic(core, status, admitted_batch);
 
         for (i = 0; i < BATCH_SIZE; i++) {
         	/* get admitted traffic */
@@ -200,7 +201,7 @@ uint32_t run_experiment(struct request_info *requests, uint32_t start_time, uint
         	/* update statistics */
         	num_admitted += admitted->size;
         	/* return admitted traffic to core */
-        	core->admitted[i] = admitted;
+        	admitted_batch[i] = admitted;
         }
     }
 
@@ -211,7 +212,10 @@ uint32_t run_experiment(struct request_info *requests, uint32_t start_time, uint
 }
 
 // Simple experiment with Poisson arrivals and exponentially distributed request sizes
-int main(void) {
+int main(void)
+{
+    uint16_t i, j, k;
+
     // keep duration less than 65536 or else Poisson wont work correctly due to sorting
 	// also keep both durations an even number of batches so that bin pointers return to queue_0
     uint32_t warm_up_duration = ((10000 + 127) / 128) * 128;
@@ -230,6 +234,7 @@ int main(void) {
 	struct fp_ring *q_urgent;
 	struct fp_ring *q_head;
 	struct fp_ring *q_admitted_out;
+    struct admitted_traffic *admitted[BATCH_SIZE];
 
 	/* init queues */
 	q_bin = fp_ring_create(NUM_BINS_SHIFT);
@@ -250,15 +255,20 @@ int main(void) {
 	/* init global status */
 	status = create_admissible_status(false, 0, 0, q_head, q_admitted_out);
 
-    /* fill bin_queue with empty bins */
-    uint16_t i;
+	/* make allocated_traffic containers */
+	for (j = 0; j < BATCH_SIZE; j++) {
+		admitted[j] = create_admitted_traffic();
+		if (admitted[j] == NULL)
+			return -1;
+	}
+
+	/* fill bin_queue with empty bins */
     for (i = 0; i < NUM_BINS; i++) {
         fp_ring_enqueue(q_bin, create_bin(LARGE_BIN_SIZE));
     }
 
     printf("target_utilization, nodes, time, observed_utilization, time/utilzn\n");
 
-    uint16_t j, k;
     for (i = 0; i < NUM_FRACTIONS; i++) {
 
         double fraction = fractions[i];
@@ -290,7 +300,7 @@ int main(void) {
             // requests once we start timing
             struct request_info *next_request;
             run_experiment(requests, 0, warm_up_duration, num_requests,
-                           status, &next_request, &core);
+                           status, &next_request, &core, admitted);
    
             // Start timining
             uint64_t start_time = current_time();
@@ -298,7 +308,7 @@ int main(void) {
             // Run the experiment
             uint32_t num_admitted = run_experiment(next_request, warm_up_duration, duration,
                                                    num_requests - (next_request - requests),
-                                                   status, &next_request, &core);
+                                                   status, &next_request, &core, admitted);
             uint64_t end_time = current_time();
             double time_per_experiment = (end_time - start_time) / (PROCESSOR_SPEED * 1000 * (duration - warm_up_duration));
 

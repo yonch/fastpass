@@ -151,7 +151,8 @@ process_head:
 // Puts unallocated traffic in queue_out
 // Allocate BATCH_SIZE timeslots at once
 void get_admissible_traffic(struct allocation_core *core,
-								struct admissible_status *status)
+								struct admissible_status *status,
+								struct admitted_traffic **admitted)
 {
     assert(status != NULL);
 
@@ -160,7 +161,7 @@ void get_admissible_traffic(struct allocation_core *core,
     struct fp_ring *queue_out = core->q_bin_out;
 
     // Initialize this core for a new batch of processing
-    alloc_core_reset(core, status);
+    alloc_core_reset(core, status, admitted);
 
     // Process all bins from previous core, then process all bins from
     // residual backlog from traffic admitted in this batch

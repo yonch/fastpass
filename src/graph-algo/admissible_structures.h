@@ -15,6 +15,7 @@
 #include <stdlib.h>
 
 #include "atomic.h"
+#include "fp_ring.h"
 
 #define MAX_NODES 1024  // should be a multiple of 64, due to bitmaps
 #define NODES_SHIFT 10  // 2^NODES_SHIFT = MAX_NODES
@@ -50,14 +51,6 @@ struct bin {
     uint16_t head;
     uint16_t tail;
     struct backlog_edge edges[BIN_SIZE];
-};
-
-/* A data-structure to communicate pointers between components */
-struct fp_ring {
-	uint32_t head;
-	uint32_t tail;
-	uint32_t mask;
-	void *elem[0]; // must be last in struct
 };
 
 // Tracks which srcs/dsts and src/dst racks are available for this batch
@@ -185,31 +178,6 @@ void dequeue_bin(struct bin *bin) {
     assert(!is_empty_bin(bin));
 
     bin->head++;
-}
-
-// Insert new bin to the back of this backlog queue
-static inline
-void fp_ring_enqueue(struct fp_ring *ring, void *elem) {
-	assert(ring != NULL);
-	assert(elem != NULL);
-	assert(ring->tail != ring->head - ring->mask - 1);
-
-	ring->elem[ring->tail & ring->mask] = elem;
-	ring->tail++;
-}
-
-// Insert new bin to the back of this backlog queue
-static inline void * fp_ring_dequeue(struct fp_ring *ring) {
-	assert(ring != NULL);
-	assert(ring->head != ring->tail);
-
-	return ring->elem[ring->head++ & ring->mask];
-}
-
-// Insert new bin to the back of this backlog queue
-static inline int fp_ring_empty(struct fp_ring *ring) {
-	assert(ring != NULL);
-	return (ring->head == ring->tail);
 }
 
 // Prints the contents of a backlog queue, useful for debugging
@@ -484,31 +452,6 @@ void destroy_bin(struct bin *bin) {
     free(bin);
 }
 
-/**
- * Creates a new backlog queue, with 2^{log_size} elements
- */
-static inline
-struct fp_ring *create_pointer_queue(uint32_t log_size) {
-	uint32_t num_elems = (1 << log_size);
-	uint32_t mem_size = sizeof(struct fp_ring)
-							+ num_elems * sizeof(void *);
-    struct fp_ring *queue = malloc(mem_size);
-    assert(queue != NULL);
-
-    queue->mask = num_elems - 1;
-	queue->head = 0;
-	queue->tail = 0;
-    return queue;
-}
-
-static inline
-void destroy_pointer_queue(struct fp_ring *queue) {
-    assert(queue != NULL);
-	assert((queue->head & queue->mask) == queue->tail);
-
-    free(queue);
-}
-
 static inline
 struct admissible_status *create_admissible_status(bool oversubscribed,
                                                    uint16_t inter_rack_capacity,
@@ -538,19 +481,19 @@ struct admissible_status *create_admissible_status(bool oversubscribed,
         	core->admitted[j] = malloc(sizeof(struct admitted_traffic));
             assert(core->admitted[j] != NULL);
 		}
-		core->admitted_out = create_pointer_queue(BATCH_SHIFT);
-		core->q_bin_in = create_pointer_queue(NUM_BINS_SHIFT);
+		core->admitted_out = fp_ring_create(BATCH_SHIFT);
+		core->q_bin_in = fp_ring_create(NUM_BINS_SHIFT);
 		if (!core->q_bin_in) exit(-1);
-		core->q_bin_out = create_pointer_queue(NUM_BINS_SHIFT);
+		core->q_bin_out = fp_ring_create(NUM_BINS_SHIFT);
 		if (!core->q_bin_out) exit(-1);
-		core->q_urgent_in = create_pointer_queue(2 * NODES_SHIFT + 1);
+		core->q_urgent_in = fp_ring_create(2 * NODES_SHIFT + 1);
 		if (!core->q_urgent_in) exit(-1);
-		core->q_urgent_out = create_pointer_queue(2 * NODES_SHIFT + 1);
+		core->q_urgent_out = fp_ring_create(2 * NODES_SHIFT + 1);
 		if (!core->q_urgent_out) exit(-1);
 		core->is_head = 0;
     }
 
-    status->q_head = create_pointer_queue(2 * NODES_SHIFT);
+    status->q_head = fp_ring_create(2 * NODES_SHIFT);
     assert(status->q_head != NULL);
 
     return status;

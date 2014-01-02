@@ -79,9 +79,12 @@ struct allocation_core {
 	struct bin *temporary_bins[BATCH_SIZE]; // hold spare allocated bins during run
     struct batch_state batch_state;
     struct admitted_traffic *admitted[BATCH_SIZE];  // one batch of traffic admitted by this core
+    uint8_t is_head;
     struct pointer_queue *admitted_out;
     struct pointer_queue *q_bin_in;
     struct pointer_queue *q_bin_out;
+    struct pointer_queue *q_urgent_in;
+    struct pointer_queue *q_urgent_out;
 };
 
 // Demand/backlog info for a given src/dst pair
@@ -432,6 +435,8 @@ void init_allocation_core(struct allocation_core *core,
 
     for (i = 0; i < BATCH_SIZE; i++)
         init_admitted_traffic(core->admitted[i]);
+
+    core->is_head = 0;
 }
 
 // Returns a pointer to the batch of traffic admitted by a particular core
@@ -540,7 +545,14 @@ struct admissible_status *create_admissible_status(bool oversubscribed,
 		}
 		core->admitted_out = create_pointer_queue(BATCH_SHIFT);
 		core->q_bin_in = create_pointer_queue(NUM_BINS_SHIFT);
+		if (!core->q_bin_in) exit(-1);
 		core->q_bin_out = create_pointer_queue(NUM_BINS_SHIFT);
+		if (!core->q_bin_out) exit(-1);
+		core->q_urgent_in = create_pointer_queue(2 * NODES_SHIFT + 1);
+		if (!core->q_urgent_in) exit(-1);
+		core->q_urgent_out = create_pointer_queue(2 * NODES_SHIFT + 1);
+		if (!core->q_urgent_out) exit(-1);
+		core->is_head = 0;
     }
 
     status->q_head = create_pointer_queue(2 * NODES_SHIFT);

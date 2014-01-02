@@ -15,23 +15,6 @@
 #define MAX(a,b) (((a) > (b)) ? (a) : (b))
 
 
-static inline
-void enqueue_to_Q_bins_out(struct bin *bin_out) {
-    assert(bin_out != NULL);
-
-    // do nothing for now
-}
-
-static inline
-void enqueue_to_next_Q_urgent(uint16_t src, uint16_t dst) {
-    // TODO
-}
-
-static inline
-void enqueue_to_my_Q_urgent(uint16_t src, uint16_t dst) {
-    // TODO
-}
-
 // Request num_slots additional timeslots from src to dst
 void add_backlog(struct admissible_status *status, uint16_t src,
                        uint16_t dst, uint16_t backlog_increase) {
@@ -94,6 +77,30 @@ void try_allocation_bin(struct bin *in_bin, struct allocation_core *core,
     }
 }
 
+static inline void process_one_new_request(uint16_t src, uint16_t dst,
+		uint16_t bin_index, struct allocation_core* core,
+		struct admissible_status* status, uint16_t current_bin)
+{
+	if (bin_index < current_bin) {
+		// We have already processed the bin for this src/dst pair
+		// Try to allocate immediately
+		if (try_allocation(src, dst, core, status) == 1) {
+			/* couldn't process, pass on to next core */
+			uint64_t edge;
+			bin_index = (bin_index >= 2 * BATCH_SIZE) ?
+							(bin_index - BATCH_SIZE) :
+							(bin_index / 2);
+			edge = ((uint64_t)bin_index << 32) | ((uint32_t)src << 16) | dst;
+			pointer_queue_enqueue(core->q_urgent_out, (void*)edge);
+		}
+	} else {
+		// We have not yet processed the bin for this src/dst pair
+		// Enqueue it to the working bins for later processing
+		enqueue_bin(&core->new_request_bins[bin_index], src, dst);
+	}
+}
+
+
 // Sets the last send time for new requests based on the contents of status
 // and sorts them
 void process_new_requests(struct admissible_status *status,
@@ -102,32 +109,37 @@ void process_new_requests(struct admissible_status *status,
     assert(status != NULL);
     assert(core != NULL);
 
-    // TODO: choose between q_head and q_urgent when many cores
+    /* likely because we want fast branch prediction when is_head = true */
+    if (likely(core->is_head))
+    	goto process_head;
 
+    while (!pointer_queue_empty(core->q_urgent_in)) {
+        uint64_t edge = (uint64_t)pointer_queue_dequeue(core->q_urgent_in);
+        uint16_t src = (uint16_t)(edge >> 16);
+    	uint16_t dst = (uint16_t)edge;
+        uint16_t bin_index = (uint16_t)(edge >> 32);
+
+        if (unlikely(edge == URGENT_Q_HEAD_TOKEN)) {
+        	/* got token! */
+        	core->is_head = 1;
+        	goto process_head;
+        }
+
+        process_one_new_request(src, dst, bin_index, core, status, current_bin);
+    }
+
+process_head:
     // Add new requests to the appropriate working bin
     while (!pointer_queue_empty(status->q_head)) {
         uint64_t edge = (uint64_t)pointer_queue_dequeue(status->q_head);
         uint16_t src = edge >> 16;
     	uint16_t dst = (uint16_t)edge;
-
         uint32_t index = get_status_index(src, dst);
-        uint64_t last_send_time = status->timeslots[index];
   
-        uint16_t bin_index = last_send_time - (status->current_timeslot - NUM_BINS);
-        if (last_send_time < status->current_timeslot - NUM_BINS)
-            bin_index = 0;
+        uint16_t bin_index = bin_index_from_timeslot(
+        		status->timeslots[index], status->current_timeslot);
         
-        if (bin_index < current_bin) {
-            // We have already processed the bin for this src/dst pair
-            // Try to allocate immediately
-            if (try_allocation(src, dst, core, status) == 1)
-            	enqueue_to_next_Q_urgent(src, dst);
-        }
-        else {
-            // We have not yet processed the bin for this src/dst pair
-            // Enqueue it to the working bins for later processing
-            enqueue_bin(&core->new_request_bins[bin_index], src, dst);
-        }
+        process_one_new_request(src, dst, bin_index, core, status, current_bin);
     }
 }
 
@@ -137,8 +149,6 @@ void process_new_requests(struct admissible_status *status,
 void get_admissible_traffic(struct allocation_core *core,
 								struct admissible_status *status)
 {
-    assert(queue_in != NULL);
-    assert(queue_out != NULL);
     assert(status != NULL);
 
     // TODO: use multiple cores
@@ -160,7 +170,7 @@ void get_admissible_traffic(struct allocation_core *core,
     for (bin = 0; bin < BATCH_SIZE; bin++) {
     	init_bin(bin_out);
 
-    	process_new_requests(status, core, 2 * bin);
+//    	process_new_requests(status, core, 2 * bin);
 
     	current_bin = (struct bin *)pointer_queue_dequeue(queue_in);
 		try_allocation_bin(current_bin, core, bin_out, status);
@@ -179,7 +189,7 @@ void get_admissible_traffic(struct allocation_core *core,
     for (bin = 2 * BATCH_SIZE; bin < NUM_BINS; bin++) {
     	init_bin(bin_out);
 
-    	process_new_requests(status, core, bin);
+//    	process_new_requests(status, core, bin);
 
     	current_bin = (struct bin *)pointer_queue_dequeue(queue_in);
 		try_allocation_bin(current_bin, core, bin_out, status);
@@ -189,11 +199,15 @@ void get_admissible_traffic(struct allocation_core *core,
 		bin_out = current_bin;
     }
 
+    /* wait until the next core had finished allocating */
+    while (!core->is_head)
+    	process_new_requests(status, core, NUM_BINS);
+
     /* process the batch bins */
     for (bin = 0; bin < BATCH_SIZE - 1; bin++) {
     	init_bin(bin_out);
 
-    	process_new_requests(status, core, bin);
+//    	process_new_requests(status, core, NUM_BINS + bin);
 
     	current_bin = core->batch_bins[bin];
 		try_allocation_bin(current_bin, core, bin_out, status);
@@ -209,6 +223,9 @@ void get_admissible_traffic(struct allocation_core *core,
     for (bin = 0; bin < BATCH_SIZE; bin++) {
     	pointer_queue_enqueue(core->admitted_out, core->admitted[bin]);
     }
+
+    /* hand over token to next core */
+    pointer_queue_enqueue(core->q_urgent_out, (void*)URGENT_Q_HEAD_TOKEN);
 
     core->temporary_bins[0] = bin_out;
 

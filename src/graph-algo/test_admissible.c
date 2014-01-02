@@ -199,6 +199,11 @@ uint32_t run_experiment(struct request_info *requests, uint32_t start_time, uint
         core->q_bin_in = core->q_bin_out;
         core->q_bin_out = queue_tmp;
 
+        /* swap q_urgent_in and q_urgent_out for next iteration since there's only one core */
+        queue_tmp = core->q_urgent_in;
+        core->q_urgent_in = core->q_urgent_out;
+        core->q_urgent_out = queue_tmp;
+
         for (i = 0; i < BATCH_SIZE; i++) {
         	/* get admitted traffic */
         	admitted = pointer_queue_dequeue(core->admitted_out);
@@ -255,6 +260,8 @@ int main(void) {
                 init_bin(b);
                 pointer_queue_enqueue(core->q_bin_in, b);
             }
+            init_pointer_queue(core->q_urgent_in);
+            pointer_queue_enqueue(core->q_urgent_in, (void*)URGENT_Q_HEAD_TOKEN);
 
             // Allocate enough space for new requests
             // (this is sufficient for <= 1 request per node per timeslot)

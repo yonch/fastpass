@@ -2,7 +2,7 @@
 CC = gcc
 #CC = /mnt/sdb1/bin/icc
 CCFLAGS = -g
-CCFLAGS += -DNDEBUG
+#CCFLAGS += -DNDEBUG
 CCFLAGS += -O3
 #CCFLAGS += -O1
 CCFLAGS += -DNO_DPDK 
@@ -15,9 +15,9 @@ LDFLAGS = -lm
 	$(CC) $(CCFLAGS) -c $<
 
 # Dependency rules for non-file targets
-all: test_euler_split test_admissible
+all: test_euler_split test_admissible test_bin_computation
 clean:
-	rm -f test_euler_split test_admissible *.o *~
+	rm -f test_euler_split test_admissible test_bin_computation *.o *~
 
 # Dependency rules for file target
 test_euler_split: test_euler_split.o euler_split.o
@@ -25,3 +25,7 @@ test_euler_split: test_euler_split.o euler_split.o
 
 test_admissible: test_admissible.o admissible_traffic.o
 	$(CC) $< admissible_traffic.o -o $@ $(LDFLAGS)
+
+test_bin_computation: test_bin_computation.o
+	$(CC) $< -o $@ $(LDFLAGS)
+	

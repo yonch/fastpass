@@ -395,15 +395,6 @@ void init_allocation_core(struct allocation_core *core,
     core->is_head = 0;
 }
 
-// Returns a pointer to the batch of traffic admitted by a particular core
-static inline
-struct admitted_traffic **get_admitted_by_core(struct admissible_status *status,
-                                              uint8_t core) {
-    assert(status != NULL);
-
-    return status->cores[core].admitted;
-}
-
 // Helper methods for testing in python
 static inline
 struct admitted_traffic *create_admitted_traffic(void) {

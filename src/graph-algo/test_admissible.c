@@ -196,7 +196,7 @@ uint32_t run_experiment(struct request_info *requests, uint32_t start_time, uint
 
         for (i = 0; i < BATCH_SIZE; i++) {
         	/* get admitted traffic */
-        	admitted = fp_ring_dequeue(core->q_admitted_out);
+        	admitted = fp_ring_dequeue(status->q_admitted_out);
         	/* update statistics */
         	num_admitted += admitted->size;
         	/* return admitted traffic to core */
@@ -224,22 +224,28 @@ int main(void) {
     uint32_t sizes [NUM_SIZES] = {1024, 512, 256, 128, 64, 32, 16};
 
     // Data structures
-    struct admissible_status *status = create_admissible_status(false, 0, 0);
+    struct admissible_status *status;
 	struct allocation_core core;
 	struct fp_ring *q_bin;
 	struct fp_ring *q_urgent;
+	struct fp_ring *q_head;
 	struct fp_ring *q_admitted_out;
 
 	/* init queues */
 	q_bin = fp_ring_create(NUM_BINS_SHIFT);
 	q_urgent = fp_ring_create(2 * NODES_SHIFT + 1);
+	q_head = fp_ring_create(2 * NODES_SHIFT);
 	q_admitted_out = fp_ring_create(BATCH_SHIFT);
 	if (!q_bin) exit(-1);
 	if (!q_urgent) exit(-1);
+	if (!q_head) exit(-1);
 	if (!q_admitted_out) exit(-1);
 
 	/* init core */
-	alloc_core_init(&core, q_bin, q_bin, q_urgent, q_urgent, q_admitted_out);
+	alloc_core_init(&core, q_bin, q_bin, q_urgent, q_urgent);
+
+	/* init global status */
+	status = create_admissible_status(false, 0, 0, q_head, q_admitted_out);
 
     /* fill bin_queue with empty bins */
     uint16_t i;

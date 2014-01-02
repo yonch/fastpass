@@ -73,7 +73,6 @@ struct allocation_core {
     struct batch_state batch_state;
     struct admitted_traffic *admitted[BATCH_SIZE];  // one batch of traffic admitted by this core
     uint8_t is_head;
-    struct fp_ring *q_admitted_out;
     struct fp_ring *q_bin_in;
     struct fp_ring *q_bin_out;
     struct fp_ring *q_urgent_in;
@@ -95,6 +94,7 @@ struct admissible_status {
     uint64_t last_alloc_tslot[MAX_NODES * MAX_NODES];
     struct flow_status flows[MAX_NODES * MAX_NODES];
     struct fp_ring *q_head;
+    struct fp_ring *q_admitted_out;
 };
 
 // Forward declarations
@@ -446,8 +446,7 @@ void destroy_bin(struct bin *bin) {
 
 static inline void alloc_core_init(struct allocation_core* core,
 		struct fp_ring *q_bin_in, struct fp_ring *q_bin_out,
-		struct fp_ring *q_urgent_in, struct fp_ring *q_urgent_out,
-		struct fp_ring *q_admitted_out)
+		struct fp_ring *q_urgent_in, struct fp_ring *q_urgent_out)
 {
 	int j;
 
@@ -472,21 +471,20 @@ static inline void alloc_core_init(struct allocation_core* core,
 	core->q_bin_out = q_bin_out;
 	core->q_urgent_in = q_urgent_in;
 	core->q_urgent_out = q_urgent_out;
-	core->q_admitted_out = q_admitted_out;
 }
 
 static inline
 struct admissible_status *create_admissible_status(bool oversubscribed,
-                                                   uint16_t inter_rack_capacity,
-                                                   uint16_t num_nodes) {
+		uint16_t inter_rack_capacity, uint16_t num_nodes,
+		struct fp_ring *q_head, struct fp_ring *q_admitted_out) {
     struct admissible_status *status = malloc(sizeof(struct admissible_status));
     assert(status != NULL);
 
 	init_admissible_status(status, oversubscribed, inter_rack_capacity,
 			num_nodes);
 
-    status->q_head = fp_ring_create(2 * NODES_SHIFT);
-    assert(status->q_head != NULL);
+    status->q_head = q_head;
+	status->q_admitted_out = q_admitted_out;
 
     return status;
 }

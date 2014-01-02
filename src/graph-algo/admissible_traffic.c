@@ -202,7 +202,7 @@ void get_admissible_traffic(struct allocation_core *core,
     fp_ring_enqueue(queue_out, core->new_request_bins[NUM_BINS + BATCH_SIZE - 1]);
 
     for (bin = 0; bin < BATCH_SIZE; bin++) {
-    	fp_ring_enqueue(core->q_admitted_out, core->admitted[bin]);
+    	fp_ring_enqueue(status->q_admitted_out, core->admitted[bin]);
     }
 
     /* hand over token to next core */

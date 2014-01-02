@@ -242,7 +242,10 @@ int main(void) {
 	if (!q_admitted_out) exit(-1);
 
 	/* init core */
-	alloc_core_init(&core, q_bin, q_bin, q_urgent, q_urgent);
+	if (!alloc_core_init(&core, q_bin, q_bin, q_urgent, q_urgent)) {
+		printf("Error initializing alloc core!\n");
+		exit(-1);
+	}
 
 	/* init global status */
 	status = create_admissible_status(false, 0, 0, q_head, q_admitted_out);
@@ -264,7 +267,7 @@ int main(void) {
             uint32_t num_nodes = sizes[j];
 
             // Initialize data structures
-            init_admissible_status(status, false, 0, num_nodes);
+            reset_admissible_status(status, false, 0, num_nodes);
             for (k = 0; k < NUM_BINS; k++) {
             	struct bin *b = (struct bin *)fp_ring_dequeue(q_bin);
                 init_bin(b);

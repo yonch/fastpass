@@ -324,8 +324,9 @@ void set_timeslot_occupied(struct batch_state *state, uint16_t src,
 
 // Initialize all timeslots and demands to zero
 static inline
-void init_admissible_status(struct admissible_status *status, bool oversubscribed,
-                            uint16_t inter_rack_capacity, uint16_t num_nodes) {
+void reset_admissible_status(struct admissible_status *status, bool oversubscribed,
+                            uint16_t inter_rack_capacity, uint16_t num_nodes)
+{
     assert(status != NULL);
 
     status->current_timeslot = NUM_BINS;  // simplifies logic in request_timeslots
@@ -429,8 +430,10 @@ struct bin *create_bin(size_t size)
 {
 	uint32_t n_bytes =
 			sizeof(struct bin) + size * sizeof(struct backlog_edge);
-    struct bin *bin = malloc(n_bytes);
-    assert(bin != NULL);
+
+	struct bin *bin = malloc(n_bytes);
+    if (bin == NULL)
+    	return NULL;
 
     init_bin(bin);
 
@@ -444,7 +447,12 @@ void destroy_bin(struct bin *bin) {
     free(bin);
 }
 
-static inline void alloc_core_init(struct allocation_core* core,
+/**
+ * Initializes the alloc core.
+ * Returns: 0 if successful, -1 on error.
+ * @note: doesn't clean up memory on error - may leak!
+ */
+static inline int alloc_core_init(struct allocation_core* core,
 		struct fp_ring *q_bin_in, struct fp_ring *q_bin_out,
 		struct fp_ring *q_urgent_in, struct fp_ring *q_urgent_out)
 {
@@ -452,36 +460,48 @@ static inline void alloc_core_init(struct allocation_core* core,
 
 	for (j = 0; j < NUM_BINS; j++) {
 		core->new_request_bins[j] = create_bin(SMALL_BIN_SIZE);
-		assert(core->new_request_bins[j] != NULL);
+		if (core->new_request_bins[j] == NULL)
+			return -1;
 	}
 
 	for (j = NUM_BINS; j < NUM_BINS + BATCH_SIZE; j++) {
 		core->new_request_bins[j] = create_bin(LARGE_BIN_SIZE);
-		assert(core->new_request_bins[j] != NULL);
+		if (core->new_request_bins[j] == NULL)
+			return -1;
 	}
 
 	core->temporary_bins[0] = create_bin(LARGE_BIN_SIZE);
+	if (core->temporary_bins[0] == NULL)
+		return -1;
 
 	for (j = 0; j < BATCH_SIZE; j++) {
 		core->admitted[j] = malloc(sizeof(struct admitted_traffic));
-		assert(core->admitted[j] != NULL);
+		if (core->admitted[j] == NULL)
+			return -1;
 	}
 
 	core->q_bin_in = q_bin_in;
 	core->q_bin_out = q_bin_out;
 	core->q_urgent_in = q_urgent_in;
 	core->q_urgent_out = q_urgent_out;
+
+	return 0;
 }
 
+/**
+ * Returns an initialized struct admissible_status, or NULL on error.
+ */
 static inline
 struct admissible_status *create_admissible_status(bool oversubscribed,
 		uint16_t inter_rack_capacity, uint16_t num_nodes,
-		struct fp_ring *q_head, struct fp_ring *q_admitted_out) {
+		struct fp_ring *q_head, struct fp_ring *q_admitted_out)
+{
     struct admissible_status *status = malloc(sizeof(struct admissible_status));
-    assert(status != NULL);
 
-	init_admissible_status(status, oversubscribed, inter_rack_capacity,
-			num_nodes);
+    if (status == NULL)
+    	return NULL;
+
+	reset_admissible_status(status, oversubscribed, inter_rack_capacity);
 
     status->q_head = q_head;
 	status->q_admitted_out = q_admitted_out;

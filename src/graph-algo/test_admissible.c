@@ -197,7 +197,7 @@ uint32_t run_experiment(struct request_info *requests, uint32_t start_time, uint
 
         for (i = 0; i < BATCH_SIZE; i++) {
         	/* get admitted traffic */
-        	admitted = fp_ring_dequeue(status->q_admitted_out);
+        	fp_ring_dequeue(status->q_admitted_out, (void **)&admitted);
         	/* update statistics */
         	num_admitted += admitted->size;
         	/* return admitted traffic to core */
@@ -279,12 +279,15 @@ int main(void)
             // Initialize data structures
             reset_admissible_status(status, false, 0, num_nodes);
             for (k = 0; k < NUM_BINS; k++) {
-            	struct bin *b = (struct bin *)fp_ring_dequeue(q_bin);
+            	struct bin *b;
+            	fp_ring_dequeue(q_bin, (void **)&b);
                 init_bin(b);
                 fp_ring_enqueue(q_bin, b);
             }
-            while (!fp_ring_empty(q_urgent))
-            	fp_ring_dequeue(q_urgent);
+            void *vp;
+            while (fp_ring_dequeue(q_urgent, &vp) == 0)
+            	/* continue to dequeue */ ;
+
             fp_ring_enqueue(q_urgent, (void*)URGENT_Q_HEAD_TOKEN);
 
             // Allocate enough space for new requests

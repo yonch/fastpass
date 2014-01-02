@@ -111,17 +111,18 @@ static inline void process_one_new_request(uint16_t src, uint16_t dst,
 // and sorts them
 void process_new_requests(struct admissible_status *status,
                           struct allocation_core *core,
-                          uint16_t current_bin) {
+                          uint16_t current_bin)
+{
     assert(status != NULL);
     assert(core != NULL);
+
+    uint64_t edge;
 
     /* likely because we want fast branch prediction when is_head = true */
     if (likely(core->is_head))
     	goto process_head;
 
-    while (!fp_ring_empty(core->q_urgent_in)) {
-        uint64_t edge = (uint64_t)fp_ring_dequeue(core->q_urgent_in);
-
+    while (fp_ring_dequeue(core->q_urgent_in, (void **)&edge) == 0) {
         if (unlikely(edge == URGENT_Q_HEAD_TOKEN)) {
         	/* got token! */
         	core->is_head = 1;
@@ -134,8 +135,7 @@ void process_new_requests(struct admissible_status *status,
 
 process_head:
     // Add new requests to the appropriate working bin
-    while (!fp_ring_empty(status->q_head)) {
-        uint64_t edge = (uint64_t)fp_ring_dequeue(status->q_head);
+	while (fp_ring_dequeue(status->q_head, (void **)&edge) == 0) {
         uint16_t src = EDGE_SRC(edge);
     	uint16_t dst = EDGE_DST(edge);
         uint32_t index = get_status_index(src, dst);
@@ -176,7 +176,8 @@ void get_admissible_traffic(struct allocation_core *core,
 //    	process_new_requests(status, core, bin);
 
     	if (likely(bin < NUM_BINS)) {
-			bin_in = (struct bin *)fp_ring_dequeue(queue_in);
+			while (fp_ring_dequeue(queue_in, (void **)&bin_in) != 0)
+				process_new_requests(status, core, bin);
 			try_allocation_bin(bin_in, core, bin_out, status);
     	} else {
     	    do

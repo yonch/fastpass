@@ -1,6 +1,8 @@
 #ifndef FP_RING_H_
 #define FP_RING_H_
 
+#include <errno.h>
+
 /* A data-structure to communicate pointers between components */
 struct fp_ring {
 	uint32_t head;
@@ -37,12 +39,19 @@ void fp_ring_enqueue(struct fp_ring *ring, void *elem) {
 	ring->tail++;
 }
 
-// Insert new bin to the back of this backlog queue
-static inline void * fp_ring_dequeue(struct fp_ring *ring) {
+/**
+ * dequeue
+ * @returns 0 on success, -ENOENT if no empty
+ */
+static inline int fp_ring_dequeue(struct fp_ring *ring, void **obj_p) {
 	assert(ring != NULL);
-	assert(ring->head != ring->tail);
+	assert(obj_p != NULL);
 
-	return ring->elem[ring->head++ & ring->mask];
+	if (ring->head == ring->tail)
+		return -ENOENT;
+
+	*obj_p = ring->elem[ring->head++ & ring->mask];
+	return 0;
 }
 
 // Insert new bin to the back of this backlog queue

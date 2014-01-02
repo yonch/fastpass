@@ -14,6 +14,12 @@
 
 #define MAX(a,b) (((a) > (b)) ? (a) : (b))
 
+#define MAKE_EDGE(bin,src,dst) \
+	((void*)(((uint64_t)bin << 32) | ((uint32_t)src << 16) | dst))
+
+#define EDGE_BIN(edge)		((uint16_t)(edge >> 32))
+#define EDGE_SRC(edge)		((uint16_t)(edge >> 16))
+#define EDGE_DST(edge)		((uint16_t)(edge	  ))
 
 // Request num_slots additional timeslots from src to dst
 void add_backlog(struct admissible_status *status, uint16_t src,
@@ -24,7 +30,7 @@ void add_backlog(struct admissible_status *status, uint16_t src,
     uint32_t index = get_status_index(src, dst);
 
 	if (atomic32_add_return(&status->flows[index].backlog, backlog_increase) == backlog_increase)
-		pointer_queue_enqueue(status->q_head, (void*)(uint64_t)((src << 16) | dst));
+		pointer_queue_enqueue(status->q_head, MAKE_EDGE(0,src,dst));
 }
 
 /**
@@ -90,8 +96,8 @@ static inline void process_one_new_request(uint16_t src, uint16_t dst,
 			bin_index = (bin_index >= 2 * BATCH_SIZE) ?
 							(bin_index - BATCH_SIZE) :
 							(bin_index / 2);
-			edge = ((uint64_t)bin_index << 32) | ((uint32_t)src << 16) | dst;
-			pointer_queue_enqueue(core->q_urgent_out, (void*)edge);
+			pointer_queue_enqueue(core->q_urgent_out,
+					MAKE_EDGE(bin_index, src, dst));
 		}
 	} else {
 		// We have not yet processed the bin for this src/dst pair
@@ -115,9 +121,6 @@ void process_new_requests(struct admissible_status *status,
 
     while (!pointer_queue_empty(core->q_urgent_in)) {
         uint64_t edge = (uint64_t)pointer_queue_dequeue(core->q_urgent_in);
-        uint16_t src = (uint16_t)(edge >> 16);
-    	uint16_t dst = (uint16_t)edge;
-        uint16_t bin_index = (uint16_t)(edge >> 32);
 
         if (unlikely(edge == URGENT_Q_HEAD_TOKEN)) {
         	/* got token! */
@@ -125,15 +128,16 @@ void process_new_requests(struct admissible_status *status,
         	goto process_head;
         }
 
-        process_one_new_request(src, dst, bin_index, core, status, current_bin);
+        process_one_new_request(EDGE_SRC(edge), EDGE_DST(edge), EDGE_BIN(edge),
+        		core, status, current_bin);
     }
 
 process_head:
     // Add new requests to the appropriate working bin
     while (!pointer_queue_empty(status->q_head)) {
         uint64_t edge = (uint64_t)pointer_queue_dequeue(status->q_head);
-        uint16_t src = edge >> 16;
-    	uint16_t dst = (uint16_t)edge;
+        uint16_t src = EDGE_SRC(edge);
+    	uint16_t dst = EDGE_DST(edge);
         uint32_t index = get_status_index(src, dst);
   
         uint16_t bin_index = bin_index_from_timeslot(

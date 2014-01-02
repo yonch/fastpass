@@ -242,7 +242,7 @@ int main(void) {
 	if (!q_admitted_out) exit(-1);
 
 	/* init core */
-	if (!alloc_core_init(&core, q_bin, q_bin, q_urgent, q_urgent)) {
+	if (alloc_core_init(&core, q_bin, q_bin, q_urgent, q_urgent) != 0) {
 		printf("Error initializing alloc core!\n");
 		exit(-1);
 	}

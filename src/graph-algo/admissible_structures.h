@@ -398,14 +398,14 @@ void alloc_core_reset(struct allocation_core *core,
 
 // Helper methods for testing in python
 static inline
-struct admitted_traffic *create_admitted_traffic(void) {
-    struct admitted_traffic *admitted = malloc(sizeof(struct admitted_traffic) *
-                                               BATCH_SIZE);
-    assert(admitted != NULL);
+struct admitted_traffic *create_admitted_traffic(void)
+{
+    struct admitted_traffic *admitted = malloc(sizeof(struct admitted_traffic));
 
-    uint8_t i;
-    for (i = 0; i < BATCH_SIZE; i++)
-        init_admitted_traffic(&admitted[i]);
+    if (admitted == NULL)
+    	return NULL;
+
+	init_admitted_traffic(admitted);
 
     return admitted;
 }
@@ -475,7 +475,7 @@ static inline int alloc_core_init(struct allocation_core* core,
 		return -1;
 
 	for (j = 0; j < BATCH_SIZE; j++) {
-		core->admitted[j] = malloc(sizeof(struct admitted_traffic));
+		core->admitted[j] = create_admitted_traffic();
 		if (core->admitted[j] == NULL)
 			return -1;
 	}
@@ -501,7 +501,8 @@ struct admissible_status *create_admissible_status(bool oversubscribed,
     if (status == NULL)
     	return NULL;
 
-	reset_admissible_status(status, oversubscribed, inter_rack_capacity);
+	reset_admissible_status(status, oversubscribed, inter_rack_capacity,
+			num_nodes);
 
     status->q_head = q_head;
 	status->q_admitted_out = q_admitted_out;

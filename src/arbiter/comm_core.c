@@ -316,15 +316,124 @@ cleanup:
 	rte_pktmbuf_free(m);
 }
 
-void exec_comm_core(struct comm_core_cmd * cmd)
+/*
+ * Read packets from RX queues
+ */
+static inline void do_rx_burst(struct lcore_conf* qconf)
 {
 	struct rte_mbuf *pkts_burst[MAX_PKT_BURST];
 	int i, j, nb_rx;
-	int rc;
-	uint8_t portid, queueid;
+	uint8_t portid;
+	uint8_t queueid;
 	uint64_t rx_time;
+
+	for (i = 0; i < qconf->n_rx_queue; ++i) {
+		portid = qconf->rx_queue_list[i].port_id;
+		queueid = qconf->rx_queue_list[i].queue_id;
+		nb_rx = rte_eth_rx_burst(portid, queueid, pkts_burst, MAX_PKT_BURST);
+		rx_time = rte_get_timer_cycles();
+
+		/* Prefetch first packets */
+		for (j = 0; j < PREFETCH_OFFSET && j < nb_rx; j++) {
+			rte_prefetch0(rte_pktmbuf_mtod(pkts_burst[j], void *));
+		}
+
+		/* Prefetch and handle already prefetched packets */
+		for (j = 0; j < (nb_rx - PREFETCH_OFFSET); j++) {
+			rte_prefetch0(
+					rte_pktmbuf_mtod(pkts_burst[ j + PREFETCH_OFFSET], void *));
+			comm_rx(pkts_burst[j], portid);
+		}
+
+		/* handle remaining prefetched packets */
+		for (; j < nb_rx; j++) {
+			comm_rx(pkts_burst[j], portid);
+		}
+
+		comm_log_processed_batch(nb_rx, rx_time);
+	}
+}
+
+static inline void process_allocated_traffic(struct rte_ring *q_admitted)
+{
+	int rc;
+	int i;
+	struct admitted_traffic* admitted[MAX_ADMITTED_PER_LOOP];
+
+	/* Process newly allocated timeslots */
+	rc = rte_ring_dequeue_burst(q_admitted, (void **) &admitted[0],
+								MAX_ADMITTED_PER_LOOP);
+	if (unlikely(rc < 0)) {
+		comm_log_dequeue_admitted_failed(rc);
+		return;
+	}
+
+	for (i = 0; i < rc; i++) {
+		comm_log_got_admitted_tslot(admitted[i]->size);
+		/* TODO: actually process allocations */
+	}
+	/* free memory */
+	rte_mempool_put_bulk(admitted_traffic_pool[0], (void **) admitted, rc);
+}
+
+static inline void do_tx_burst(void)
+{
+	int i;
+
+	/* send allocation packets */
+	for (i = 0; i < MAX_PKT_BURST; i++) {
+		uint32_t node_ind;
+		struct rte_mbuf *out_pkt;
+		struct end_node_state *en;
+		struct fpproto_pktdesc *pd;
+		u64 now;
+
+		if (bigmap_empty(&triggered_nodes))
+			break;
+
+		node_ind = bigmap_find(&triggered_nodes);
+		en = &end_nodes[node_ind];
+
+		/* prepare to send */
+		fpproto_prepare_to_send(&en->conn);
+
+		/* allocate pktdesc */
+		pd = fpproto_pktdesc_alloc();
+		if (unlikely(pd == NULL)) {
+			comm_log_pktdesc_alloc_failed(node_ind);
+			break;
+		}
+
+		/* TODO: fill in allocated timeslots */
+
+		/* we want this packet's reliability to be tracked */
+		now = fp_get_time_ns();
+		fpproto_commit_packet(&en->conn, pd, now);
+
+		/* make the packet */
+		out_pkt = make_packet(en, pd);
+		if (unlikely(out_pkt == NULL))
+			break;
+
+		/* send on port */
+		send_packet_via_queue(out_pkt, en->dst_port);
+
+		/* log sent packet */
+		comm_log_tx_pkt(node_ind, now);
+
+		/* clear the trigger */
+		bigmap_clear(&triggered_nodes, node_ind);
+	}
+	/* Flush queued packets */
+	for (i = 0; i < n_enabled_port; i++)
+		send_queued_packets(enabled_port[i]);
+}
+
+void exec_comm_core(struct comm_core_cmd * cmd)
+{
+	int i;
+	uint8_t portid, queueid;
 	struct lcore_conf *qconf;
-	struct admitted_traffic *admitted[MAX_ADMITTED_PER_LOOP];
 
 	qconf = &lcore_conf[rte_lcore_id()];
 
@@ -348,103 +457,16 @@ void exec_comm_core(struct comm_core_cmd * cmd)
 		send_gratuitous_arp(portid, controller_ip(i));
 	}
 
+	/* MAIN LOOP */
 	while (rte_get_timer_cycles() < cmd->end_time) {
-		/*
-		 * Read packet from RX queues
-		 */
-		for (i = 0; i < qconf->n_rx_queue; ++i) {
-
-			portid = qconf->rx_queue_list[i].port_id;
-			queueid = qconf->rx_queue_list[i].queue_id;
-			nb_rx = rte_eth_rx_burst(portid, queueid, pkts_burst, MAX_PKT_BURST);
-			rx_time = rte_get_timer_cycles();
-
-			/* Prefetch first packets */
-			for (j = 0; j < PREFETCH_OFFSET && j < nb_rx; j++) {
-				rte_prefetch0(rte_pktmbuf_mtod(
-						pkts_burst[j], void *));
-			}
-
-			/* Prefetch and handle already prefetched packets */
-			for (j = 0; j < (nb_rx - PREFETCH_OFFSET); j++) {
-				rte_prefetch0(rte_pktmbuf_mtod(pkts_burst[
-						j + PREFETCH_OFFSET], void *));
-				comm_rx(pkts_burst[j], portid);
-			}
-
-			/* handle remaining prefetched packets */
-			for (; j < nb_rx; j++) {
-				comm_rx(pkts_burst[j], portid);
-			}
-
-			comm_log_processed_batch(nb_rx, rx_time);
-		}
+		/* read packets from RX queues */
+		do_rx_burst(qconf);
 
 		/* Process newly allocated timeslots */
-		rc = rte_ring_dequeue_burst(cmd->q_admitted,
-				(void **)&admitted[0],
-				MAX_ADMITTED_PER_LOOP);
-		if (unlikely(rc < 0)) {
-			comm_log_dequeue_admitted_failed(rc);
-		} else {
-			for (i = 0; i < rc; i++) {
-				comm_log_got_admitted_tslot(admitted[i]->size);
-				/* TODO: actually process allocations */
-			}
-			/* free memory */
-			rte_mempool_put_bulk(admitted_traffic_pool[0], (void **)admitted, rc);
-		}
+		process_allocated_traffic(cmd->q_admitted);
 
 		/* send allocation packets */
-		for (i = 0; i < MAX_PKT_BURST; i++) {
-			uint32_t node_ind;
-			struct rte_mbuf *out_pkt;
-			struct end_node_state *en;
-			struct fpproto_pktdesc *pd;
-			u64 now;
-
-			if (bigmap_empty(&triggered_nodes))
-				break;
-
-			node_ind = bigmap_find(&triggered_nodes);
-			en = &end_nodes[node_ind];
-
-
-			/* prepare to send */
-			fpproto_prepare_to_send(&en->conn);
-
-			/* allocate pktdesc */
-			pd = fpproto_pktdesc_alloc();
-			if (unlikely(pd == NULL)) {
-				comm_log_pktdesc_alloc_failed(node_ind);
-				break;
-			}
-
-			/* TODO: fill in allocated timeslots */
-
-			/* we want this packet's reliability to be tracked */
-			now = fp_get_time_ns();
-			fpproto_commit_packet(&en->conn, pd, now);
-
-			/* make the packet */
-			out_pkt = make_packet(en, pd);
-			if (unlikely(out_pkt == NULL))
-				break;
-
-			/* send on port */
-			send_packet_via_queue(out_pkt, en->dst_port);
-
-			/* log sent packet */
-			comm_log_tx_pkt(node_ind, now);
-
-			/* clear the trigger */
-			bigmap_clear(&triggered_nodes, node_ind);
-		}
-
-		/* Flush queued packets */
-		for (i = 0; i < n_enabled_port; i++)
-			send_queued_packets(enabled_port[i]);
-
+		do_tx_burst();
 	}
 }
 

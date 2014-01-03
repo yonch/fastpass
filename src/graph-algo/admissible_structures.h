@@ -32,7 +32,7 @@
 #define SMALL_BIN_SIZE (MAX_NODES * MAX_NODES) // TODO: try smaller values
 #define LARGE_BIN_SIZE (MAX_NODES * MAX_NODES) // TODO: try smaller values
 #define NUM_BINS_SHIFT 8
-#define NUM_BINS (1 << NUM_BINS_SHIFT)
+#define NUM_BINS 256 // 2^NUM_BINS_SHIFT
 #define NUM_CORES 1
 
 struct admitted_edge {

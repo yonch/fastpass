@@ -13,8 +13,6 @@
 #define NUM_COLORS 4  // if not 4, NUM_GRAPHS and related code must be modified
 #define NUM_GRAPHS 3
 #define NUM_RACKS 8  // must be at most MAX_RACKS
-#define PATH_MASK 0x3FFF  // 2^PATH_SHIFT - 1
-#define PATH_SHIFT 14
 
 // Data structure for holding all admitted edge indices
 // for a particular pair of src/dst racks
@@ -45,6 +43,22 @@ uint32_t get_rack_pair_index(uint16_t src_rack, uint16_t dst_rack) {
     assert(dst_rack < MAX_RACKS);
 
     return src_rack * MAX_RACKS + dst_rack;
+}
+
+// Print the mapping, useful for debugging
+void print_racks_to_nodes_mapping_counts(struct racks_to_nodes_mapping *map) {
+    assert(map != NULL);
+
+    uint16_t total_count = 0;
+    uint16_t src, dst;
+    for (src = 0; src < NUM_RACKS; src++) {
+        for (dst = 0; dst < NUM_RACKS; dst++) {
+            uint32_t index = get_rack_pair_index(src, dst);
+            printf("src %d dst %d: %d\n", src, dst, map->mappings[index].size);
+            total_count += map->mappings[index].size;
+        }
+    }
+    printf("total count: %d\n", total_count);
 }
 
 // Populate the mapping from rack ids to node ids for the given
@@ -93,7 +107,9 @@ void construct_graph(struct admitted_traffic *admitted,
         uint16_t src_rack = get_rack_from_id(edge->src);
         uint16_t dst_rack = get_rack_from_id(edge->dst);
 
-        add_edge(structure, edges, src_rack, dst_rack);
+        // Note: graph.h assumes that sources and destinations
+        // use different numbers, so we must map carefully
+        add_edge(structure, edges, src_rack, dst_rack + NUM_RACKS);
         src_rack_counts[src_rack]++;
         dst_rack_counts[dst_rack]++;
         num_edges++;
@@ -123,7 +139,7 @@ void construct_graph(struct admitted_traffic *admitted,
         while (dst_rack_counts[dst] == max_degree)
             dst++;
 
-        add_edge(structure, edges, src, dst);
+        add_edge(structure, edges, src, dst + NUM_RACKS);
         num_edges++;
     }
 }
@@ -147,7 +163,7 @@ void assign_to_path(struct racks_to_nodes_mapping *map,
         struct admitted_edge *edge = &admitted->edges[admitted_index];
         edge->dst = (edge->dst & PATH_MASK) + (path << PATH_SHIFT);
         rack_pair->size--;
-    }  
+    }
 } 
 
 // Split the edges into two sets of edges and set the path information
@@ -175,12 +191,17 @@ void split_and_populate_paths(struct graph_structure *structure,
         while (has_neighbor(edges, node)) {
             // Peel off two edges and assign them to path_0 and path_1
             new_node = remove_edge_to_neighbor(structure, edges, cur_node);
-            assign_to_path(map, admitted, cur_node, new_node, path_0);
+
+            // Map back to system where src/dst racks use same indices
+            assign_to_path(map, admitted, cur_node, new_node - NUM_RACKS, path_0);
             cur_node = new_node;       
             assert(is_consistent(structure, edges));
  
             new_node = remove_edge_to_neighbor(structure, edges, cur_node);
-            assign_to_path(map, admitted, cur_node, new_node, path_1);
+
+            // Map back to system where src/dst racks use same indices and be sure
+            // to get the src rack and dst rack correct
+            assign_to_path(map, admitted, new_node, cur_node - NUM_RACKS, path_1);
             cur_node = new_node;       
             assert(is_consistent(structure, edges));
         }

@@ -40,5 +40,6 @@ void comm_init_core(uint16_t lcore_id);
 
 void exec_comm_core(struct comm_core_cmd * cmd);
 
+void benchmark_cost_of_get_time(void);
 
 #endif /* CONTROLLER_H_ */

@@ -47,7 +47,6 @@ int control_do_queue_allocation(void)
 	return 0;
 }
 
-
 /**
  * Enqueues commands for allocation network experiments
  *
@@ -64,6 +63,8 @@ void launch_cores(void)
 	struct admission_core_cmd admission_cmd;
 	uint64_t first_time_slot = 0;
 	struct rte_ring *q_admitted;
+
+	benchmark_cost_of_get_time();
 
 	/* TODO: decide what the first time slot to be output is */
 

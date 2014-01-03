@@ -142,6 +142,32 @@ void comm_init_core(uint16_t lcore_id)
 	}
 }
 
+void benchmark_cost_of_get_time(void)
+{
+	uint32_t i;
+	uint64_t a,b,c,d;
+
+	/** Timer tests */
+	a = fp_get_time_ns();
+	c = rte_rdtsc();
+	for(i = 0; i < 1000; i++) {
+		b = fp_get_time_ns();
+		rte_pause();
+	}
+	d = rte_rdtsc();
+	RTE_LOG(INFO, BENCHAPP, "1000 fp_get_time_ns caused %"PRIu64" difference"
+			" which is %"PRIu64" TSC cycles\n",
+			b - a, d - c);
+
+	a = rte_rdtsc();
+	for(i = 0; i < 1000; i++) {
+		b = rte_rdtsc();
+		rte_pause();
+	}
+	RTE_LOG(INFO, BENCHAPP, "1000 rte_rdtsc caused %"PRIu64" difference\n",
+			b - a);
+}
+
 static void handle_areq(void *param, u16 *dst_and_count, int n)
 {
 	int i;
@@ -168,6 +194,7 @@ static void handle_areq(void *param, u16 *dst_and_count, int n)
 		if (demand_diff > 0) {
 			comm_log_demand_increased(node_id, dst, orig_demand, demand, demand_diff);
 			add_backlog(&g_admissible_status, node_id, dst, demand_diff);
+			en->demands[dst] = demand;
 			num_increases++;
 		} else {
 			comm_log_demand_remained(node_id, dst, orig_demand, demand);
@@ -389,7 +416,7 @@ static inline void process_allocated_traffic(struct comm_core_state *core,
 	struct fp_window *wnd;
 	uint16_t src;
 	uint16_t dst;
-	uint64_t tslot;
+	u64 tslot;
 	int32_t gap;
 
 	/* Process newly allocated timeslots */
@@ -415,6 +442,7 @@ static inline void process_allocated_traffic(struct comm_core_state *core,
 
 			/* are there timeslots sliding out of the window? */
 			tslot = current_timeslot - FASTPASS_WND_LEN;
+			tslot = time_before64(wnd_head(wnd), tslot) ? wnd_head(wnd) : tslot;
 			while ((gap = wnd_at_or_before(wnd, tslot)) >= 0) {
 				tslot -= gap;
 				uint16_t thrown_alloc = en->allocs[wnd_pos(tslot)];
@@ -430,6 +458,8 @@ static inline void process_allocated_traffic(struct comm_core_state *core,
 
 			/* advance the window */
 			wnd_advance(wnd, current_timeslot - wnd_head(wnd));
+			COMM_DEBUG("advanced window flow %lu. current %lu head %llu\n",
+					en - end_nodes, current_timeslot, wnd_head(wnd));
 
 			/* add the allocation */
 			wnd_mark(wnd, current_timeslot);
@@ -443,7 +473,97 @@ static inline void process_allocated_traffic(struct comm_core_state *core,
 	rte_mempool_put_bulk(admitted_traffic_pool[0], (void **) admitted, rc);
 }
 
-static inline void do_tx_burst(void)
+/* check statically that the window is not too long, because fill_packet_alloc
+ * cannot handle gaps larger than 256 */
+struct __static_check_wnd_size {
+	uint8_t check_FASTPASS_WND_is_not_too_big_for__fill_packet_alloc[256 - FASTPASS_WND_LEN];
+};
+
+/**
+ * Extracts allocations from the end-node @en into the packet desc @pd
+ */
+static inline void fill_packet_alloc(struct comm_core_state *core,
+		struct fpproto_pktdesc *pd, struct end_node_state *en)
+{
+	uint16_t n_dsts = 0;
+	uint16_t n_tslot = 0;
+	struct fp_window *wnd = &en->pending;
+	uint64_t prev_tslot;
+	uint64_t cur_tslot;
+	uint16_t gap;
+	uint16_t skip16;
+	uint16_t index;
+	uint16_t dst;
+	uint16_t i;
+
+	if (wnd_empty(wnd))
+		goto out;
+
+	cur_tslot = wnd_earliest_marked(wnd);
+	prev_tslot = (cur_tslot - 1) & (~0ULL << 4);
+	pd->base_tslot = (prev_tslot >> 4) & 0xFFFF;
+
+next_alloc:
+	gap = cur_tslot - prev_tslot;
+
+	/* do we need to insert a skip byte? */
+	if (gap > 16) {
+		skip16 = (gap - 1) / 16;
+		pd->tslot_desc[n_tslot++] = skip16  - 1;
+		gap -= 16 * skip16;
+	}
+
+	/* find the destination for this flow */
+	dst = en->allocs[wnd_pos(cur_tslot)];
+	index = (dst % NUM_NODES) + NUM_NODES * (dst >> 14);
+
+	if (core->alloc_enc_space[index] == 0) {
+		/* this is the first time seeing dst, need to add it to pd->dsts */
+		if (n_dsts == 15) {
+			/* too many destinations already, we're done */
+			goto cleanup;
+		} else {
+			/* get the next slot in the pd->dsts array */
+			pd->dsts[n_dsts] = dst;
+			pd->dst_counts[n_dsts] = 0;
+			core->alloc_enc_space[index] = n_dsts;
+			n_dsts++;
+		}
+	}
+
+	/* encode the allocation byte */
+	pd->tslot_desc[n_tslot++] =
+			((core->alloc_enc_space[index] + 1) << 4) | (gap - 1);
+	pd->dst_counts[core->alloc_enc_space[index]]++;
+
+	/* unmark the timeslot */
+	wnd_clear(wnd, cur_tslot);
+
+	if (likely(!wnd_empty(wnd)
+				&& (n_tslot <= FASTPASS_PKT_MAX_ALLOC_TSLOTS - 2))) {
+		prev_tslot = cur_tslot;
+		cur_tslot = wnd_earliest_marked(wnd);
+		goto next_alloc;
+	}
+cleanup:
+	/* we set core->alloc_enc_space back to zeros */
+	for (i = 0; i < n_dsts; i++) {
+		dst = pd->dsts[i];
+		index = (dst % NUM_NODES) + NUM_NODES * (dst >> 14);
+		core->alloc_enc_space[index] = 0;
+	}
+
+	/* pad to even n_tslot */
+	if (n_tslot & 1)
+		pd->tslot_desc[n_tslot++] = 0;
+
+out:
+	pd->n_dsts = n_dsts;
+	pd->alloc_tslot = n_tslot;
+	assert((pd->alloc_tslot & 1) == 0);
+}
+
+static inline void do_tx_burst(struct comm_core_state *core)
 {
 	int i;
 	const unsigned lcore_id = rte_lcore_id();
@@ -472,7 +592,8 @@ static inline void do_tx_burst(void)
 			break;
 		}
 
-		/* TODO: fill in allocated timeslots */
+		/* fill in allocated timeslots */
+		fill_packet_alloc(core, pd, en);
 
 		/* we want this packet's reliability to be tracked */
 		now = fp_get_time_ns();
@@ -541,7 +662,7 @@ void exec_comm_core(struct comm_core_cmd * cmd)
 				cmd->q_admitted);
 
 		/* send allocation packets */
-		do_tx_burst();
+		do_tx_burst(&core_state[cmd->comm_core_index]);
 	}
 }
 

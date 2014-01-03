@@ -4,6 +4,7 @@
 #include <rte_mempool.h>
 #include <rte_errno.h>
 #include <rte_string_fns.h>
+#include <string.h>
 
 #include "main.h"
 #include "admission_log.h"

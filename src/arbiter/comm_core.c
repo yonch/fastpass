@@ -46,7 +46,7 @@ struct end_node_state {
 
 	/* pending allocations */
 	struct fp_window pending;
-	uint16_t allocs;
+	uint16_t allocs[MAX_NODES];
 
 	/* demands */
 	uint32_t demands[MAX_NODES];
@@ -81,7 +81,8 @@ static struct comm_core_state core_state[N_COMM_CORES];
 struct rte_mempool* pktdesc_pool[NB_SOCKETS];
 
 static void handle_reset(void *param);
-static void trigger_request(void *param, u64 when);
+static void trigger_request(struct end_node_state *en, u64 when);
+static void trigger_request_voidp(void *param, u64 when);
 static void handle_areq(void *param, u16 *dst_and_count, int n);
 
 struct fpproto_ops proto_ops = {
@@ -89,7 +90,7 @@ struct fpproto_ops proto_ops = {
 	.handle_areq	= &handle_areq,
 	//.handle_ack		= &handle_ack,
 	//.handle_neg_ack	= &handle_neg_ack,
-	.trigger_request= &trigger_request,
+	.trigger_request= &trigger_request_voidp,
 };
 
 void comm_init_global_structs(uint64_t first_time_slot)
@@ -183,9 +184,15 @@ static void handle_reset(void *param)
 	COMM_DEBUG("got reset in_sync=%d\n", en->conn.in_sync);
 }
 
-static void trigger_request(void *param, u64 when)
+static void trigger_request_voidp(void *param, u64 when) 
 {
 	struct end_node_state *en = (struct end_node_state *)param;
+	trigger_request(en, when);
+}
+
+
+static void trigger_request(struct end_node_state *en, u64 when)
+{
 	(void)when;
 
 	u32 node_id = en - end_nodes;
@@ -378,6 +385,12 @@ static inline void process_allocated_traffic(struct comm_core_state *core,
 	int i, j;
 	struct admitted_traffic* admitted[MAX_ADMITTED_PER_LOOP];
 	uint64_t current_timeslot;
+	struct end_node_state *en;
+	struct fp_window *wnd;
+	uint16_t src;
+	uint16_t dst;
+	uint64_t tslot;
+	int32_t gap;
 
 	/* Process newly allocated timeslots */
 	rc = rte_ring_dequeue_burst(q_admitted, (void **) &admitted[0],
@@ -393,17 +406,37 @@ static inline void process_allocated_traffic(struct comm_core_state *core,
 		comm_log_got_admitted_tslot(admitted[i]->size, current_timeslot);
 		for (j = 0; j < admitted[i]->size; j++) {
 			/* process this node's allocation */
+			src = admitted[i]->edges[j].src;
+			dst = admitted[i]->edges[j].dst;
+
 			/* get the node's structure */
+			en = &end_nodes[src];
+			wnd = &en->pending;
 
 			/* are there timeslots sliding out of the window? */
+			tslot = current_timeslot - FASTPASS_WND_LEN;
+			while ((gap = wnd_at_or_before(wnd, tslot)) >= 0) {
+				tslot -= gap;
+				uint16_t thrown_alloc = en->allocs[wnd_pos(tslot)];
+				/* throw away that timeslot, but make sure we reallocate */
+				add_backlog(&g_admissible_status, src,
+						thrown_alloc % MAX_NODES, 1);
+				wnd_clear(wnd, tslot);
 
-				/* yes, nack them */
-				/* TODO: also log them */
+				/* also log them */
+				comm_log_alloc_fell_off_window(tslot, current_timeslot, src,
+						thrown_alloc);
+			}
 
 			/* advance the window */
+			wnd_advance(wnd, current_timeslot - wnd_head(wnd));
 
 			/* add the allocation */
+			wnd_mark(wnd, current_timeslot);
+			en->allocs[wnd_pos(current_timeslot)] = dst;
 
+			/* trigger a packet */
+			trigger_request(en, -1);
 		}
 	}
 	/* free memory */

@@ -36,6 +36,7 @@ struct comm_log {
 	uint64_t processed_tslots;
 	uint64_t non_empty_tslots;
 	uint64_t occupied_node_tslots;
+	uint64_t alloc_fell_off_window;
 };
 
 extern struct comm_log comm_core_logs[RTE_MAX_LCORE];
@@ -135,6 +136,14 @@ static inline void comm_log_got_admitted_tslot(uint16_t size, uint64_t timeslot)
 				size, timeslot, CL->processed_tslots, rte_get_tsc_cycles());
 	}
 }
+
+static inline void comm_log_alloc_fell_off_window(uint64_t thrown_tslot,
+		uint64_t current_timeslot, uint16_t src, uint16_t thrown_alloc) {
+	CL->alloc_fell_off_window++;
+	COMM_DEBUG("alloc at tslot %lu from 0x%X to 0x%X still not sent at timeslot %lu\n",
+			thrown_tslot, src, thrown_alloc, current_timeslot);
+}
+
 
 
 #undef CL

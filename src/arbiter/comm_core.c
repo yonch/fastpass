@@ -52,17 +52,30 @@ struct end_node_state {
 	uint32_t demands[MAX_NODES];
 };
 
+/*
+ * Per-comm-core state
+ * @alloc_enc_space: space used to encode ALLOCs, set to zeros when not inside
+ *    the ALLOC code.
+ */
+struct comm_core_state {
+	uint8_t alloc_enc_space[MAX_NODES * MAX_PATHS];
+	uint64_t latest_timeslot;
+};
+
 /* whether we should output verbose debugging */
 bool fastpass_debug;
 
-/* bitmap of which nodes have a packet pending */
-struct bigmap triggered_nodes;
+/* bitmap of which nodes have a packet pending, per core */
+struct bigmap triggered_nodes[RTE_MAX_LCORE];
 
 /* logs */
 struct comm_log comm_core_logs[RTE_MAX_LCORE];
 
 /* per-end-node information */
 static struct end_node_state end_nodes[MAX_NODES];
+
+/* per-core information */
+static struct comm_core_state core_state[N_COMM_CORES];
 
 /* fpproto_pktdesc pool */
 struct rte_mempool* pktdesc_pool[NB_SOCKETS];
@@ -91,10 +104,14 @@ void comm_init_global_structs(uint64_t first_time_slot)
 		wnd_reset(&end_nodes[i].pending, first_time_slot - 1);
 	}
 
-	for (i = 0; i < RTE_MAX_LCORE; i++)
-		comm_log_init(&comm_core_logs[i]);
+	for (i = 0; i < N_COMM_CORES; i++) {
+		/* initialize the space for encoding ALLOCs */
+		memset(&core_state[i].alloc_enc_space, 0,
+				sizeof(core_state[i].alloc_enc_space));
 
-	bigmap_init(&triggered_nodes);
+		core_state[i].latest_timeslot = first_time_slot - 1;
+
+	}
 }
 
 /* based on init_mem in main.c */
@@ -172,7 +189,7 @@ static void trigger_request(void *param, u64 when)
 	(void)when;
 
 	u32 node_id = en - end_nodes;
-	bigmap_set(&triggered_nodes, node_id);
+	bigmap_set(&triggered_nodes[rte_lcore_id()], node_id);
 
 	comm_log_triggered_send(node_id);
 }
@@ -354,23 +371,40 @@ static inline void do_rx_burst(struct lcore_conf* qconf)
 	}
 }
 
-static inline void process_allocated_traffic(struct rte_ring *q_admitted)
+static inline void process_allocated_traffic(struct comm_core_state *core,
+		struct rte_ring *q_admitted)
 {
 	int rc;
-	int i;
+	int i, j;
 	struct admitted_traffic* admitted[MAX_ADMITTED_PER_LOOP];
+	uint64_t current_timeslot;
 
 	/* Process newly allocated timeslots */
 	rc = rte_ring_dequeue_burst(q_admitted, (void **) &admitted[0],
 								MAX_ADMITTED_PER_LOOP);
 	if (unlikely(rc < 0)) {
+		/* error in dequeuing.. should never happen?? */
 		comm_log_dequeue_admitted_failed(rc);
 		return;
 	}
 
 	for (i = 0; i < rc; i++) {
-		comm_log_got_admitted_tslot(admitted[i]->size);
-		/* TODO: actually process allocations */
+		current_timeslot = ++core->latest_timeslot;
+		comm_log_got_admitted_tslot(admitted[i]->size, current_timeslot);
+		for (j = 0; j < admitted[i]->size; j++) {
+			/* process this node's allocation */
+			/* get the node's structure */
+
+			/* are there timeslots sliding out of the window? */
+
+				/* yes, nack them */
+				/* TODO: also log them */
+
+			/* advance the window */
+
+			/* add the allocation */
+
+		}
 	}
 	/* free memory */
 	rte_mempool_put_bulk(admitted_traffic_pool[0], (void **) admitted, rc);
@@ -379,6 +413,7 @@ static inline void process_allocated_traffic(struct rte_ring *q_admitted)
 static inline void do_tx_burst(void)
 {
 	int i;
+	const unsigned lcore_id = rte_lcore_id();
 
 	/* send allocation packets */
 	for (i = 0; i < MAX_PKT_BURST; i++) {
@@ -388,10 +423,10 @@ static inline void do_tx_burst(void)
 		struct fpproto_pktdesc *pd;
 		u64 now;
 
-		if (bigmap_empty(&triggered_nodes))
+		if (bigmap_empty(&triggered_nodes[lcore_id]))
 			break;
 
-		node_ind = bigmap_find(&triggered_nodes);
+		node_ind = bigmap_find(&triggered_nodes[lcore_id]);
 		en = &end_nodes[node_ind];
 
 		/* prepare to send */
@@ -422,7 +457,7 @@ static inline void do_tx_burst(void)
 		comm_log_tx_pkt(node_ind, now);
 
 		/* clear the trigger */
-		bigmap_clear(&triggered_nodes, node_ind);
+		bigmap_clear(&triggered_nodes[lcore_id], node_ind);
 	}
 	/* Flush queued packets */
 	for (i = 0; i < n_enabled_port; i++)
@@ -434,8 +469,14 @@ void exec_comm_core(struct comm_core_cmd * cmd)
 	int i;
 	uint8_t portid, queueid;
 	struct lcore_conf *qconf;
+	const unsigned lcore_id = rte_lcore_id();
 
-	qconf = &lcore_conf[rte_lcore_id()];
+	qconf = &lcore_conf[lcore_id];
+
+	comm_log_init(&comm_core_logs[lcore_id]);
+
+	/* initialize triggered nodes */
+	bigmap_init(&triggered_nodes[lcore_id]);
 
 	if (qconf->n_rx_queue == 0) {
 		RTE_LOG(INFO, BENCHAPP, "lcore %u has nothing to do\n", rte_lcore_id());
@@ -463,7 +504,8 @@ void exec_comm_core(struct comm_core_cmd * cmd)
 		do_rx_burst(qconf);
 
 		/* Process newly allocated timeslots */
-		process_allocated_traffic(cmd->q_admitted);
+		process_allocated_traffic(&core_state[cmd->comm_core_index],
+				cmd->q_admitted);
 
 		/* send allocation packets */
 		do_tx_burst();

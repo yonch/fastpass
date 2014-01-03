@@ -125,14 +125,14 @@ static inline void comm_log_dequeue_admitted_failed(int rc) {
 	COMM_DEBUG("failed to dequeue admitted flows, got error %d\n", rc);
 }
 
-static inline void comm_log_got_admitted_tslot(uint16_t size) {
+static inline void comm_log_got_admitted_tslot(uint16_t size, uint64_t timeslot) {
 	CL->processed_tslots++;
 	if (size > 0) {
 		CL->non_empty_tslots++;
 		CL->occupied_node_tslots += size;
 
-		COMM_DEBUG("admitted_traffic for %d nodes (tslot %lu, cycle timer %lu)\n",
-				size, CL->processed_tslots, rte_get_tsc_cycles());
+		COMM_DEBUG("admitted_traffic for %d nodes (tslot %lu, counter %lu, cycle timer %lu)\n",
+				size, timeslot, CL->processed_tslots, rte_get_tsc_cycles());
 	}
 }
 

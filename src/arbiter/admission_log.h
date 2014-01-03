@@ -45,12 +45,16 @@ void admission_log_failed_to_allocate_admitted_traffic(void)
 //			rte_lcore_id(), AL->failed_admitted_traffic_alloc);
 }
 
-static inline void admission_log_allocation_begin(void) {
+static inline
+void admission_log_allocation_begin(uint64_t current_timeslot,
+		uint64_t start_time_first_timeslot) {
 	uint64_t now = rte_get_tsc_cycles();
 	AL->last_started_alloc_tsc = now;
 	AL->batches_started++;
-//	ADMISSION_DEBUG("core %d started allocation of batch %lu (cycle timer %lu)\n",
-//			rte_lcore_id(), AL->batches_started, now);
+	(void)current_timeslot; (void)start_time_first_timeslot;
+//	ADMISSION_DEBUG("core %d started allocation of batch %lu first timeslot time %lu (timeslot %lu cycle timer %lu)\n",
+//			rte_lcore_id(), AL->batches_started, start_time_first_timeslot,
+//			current_timeslot, now);
 }
 
 static inline void admission_log_allocation_end(void) {

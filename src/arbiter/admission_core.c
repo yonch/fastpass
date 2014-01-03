@@ -140,7 +140,8 @@ int exec_admission_core(void *void_cmd_p)
 				current_timeslot * cmd->timeslot_len - cmd->prealloc_gap_ns;
 
 		/* perform allocation */
-		admission_log_allocation_begin();
+		admission_log_allocation_begin(current_timeslot,
+				start_time_first_timeslot);
 		get_admissible_traffic(&core, &g_admissible_status, &admitted[0],
 				start_time_first_timeslot, cmd->timeslot_len);
 		admission_log_allocation_end();

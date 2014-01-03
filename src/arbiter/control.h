@@ -26,6 +26,10 @@
 /* give the controller some time to initialize before starting allocation */
 #define		INIT_MAX_TIME_NS		(20*1000*1000)
 
+#define RTE_LOGTYPE_CONTROL RTE_LOGTYPE_USER1
+#define CONTROL_DEBUG(a...) RTE_LOG(DEBUG, CONTROL, ##a)
+#define CONTROL_INFO(a...) RTE_LOG(INFO, CONTROL, ##a)
+
 /**
  * Allocate queues to lcores
  */

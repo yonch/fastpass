@@ -62,12 +62,15 @@ void launch_cores(void)
 	struct comm_core_cmd comm_cmd;
 	struct admission_core_cmd admission_cmd;
 	uint64_t first_time_slot;
+	uint64_t now;
 	struct rte_ring *q_admitted;
 
 	benchmark_cost_of_get_time();
 
 	/* decide what the first time slot to be output is */
-	first_time_slot = (fp_get_time_ns() + INIT_MAX_TIME_NS) / TIMESLOT_LENGTH_NS;
+	now = fp_get_time_ns();
+	first_time_slot = (now + INIT_MAX_TIME_NS) / TIMESLOT_LENGTH_NS;
+	CONTROL_INFO("now %lu first time slot will be %lu\n", now, first_time_slot);
 
 	/*** GLOBAL INIT ***/
 	/* initialize comm core global data */
@@ -107,6 +110,7 @@ void launch_cores(void)
 	comm_cmd.start_time = start_time;
 	comm_cmd.end_time = end_time;
 	comm_cmd.q_admitted = q_admitted;
+	comm_cmd.comm_core_index = 0;
 
 	/* initialize comm core on this core */
 	comm_init_core(rte_lcore_id());

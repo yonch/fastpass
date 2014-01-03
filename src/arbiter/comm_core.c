@@ -386,7 +386,7 @@ static inline void do_rx_burst(struct lcore_conf* qconf)
 		portid = qconf->rx_queue_list[i].port_id;
 		queueid = qconf->rx_queue_list[i].queue_id;
 		nb_rx = rte_eth_rx_burst(portid, queueid, pkts_burst, MAX_PKT_BURST);
-		rx_time = rte_get_timer_cycles();
+		rx_time = fp_get_time_ns();
 
 		/* Prefetch first packets */
 		for (j = 0; j < PREFETCH_OFFSET && j < nb_rx; j++) {
@@ -628,6 +628,7 @@ void exec_comm_core(struct comm_core_cmd * cmd)
 	uint8_t portid, queueid;
 	struct lcore_conf *qconf;
 	const unsigned lcore_id = rte_lcore_id();
+	struct comm_core_state *core = &core_state[cmd->comm_core_index];
 
 	qconf = &lcore_conf[lcore_id];
 
@@ -640,6 +641,8 @@ void exec_comm_core(struct comm_core_cmd * cmd)
 		RTE_LOG(INFO, BENCHAPP, "lcore %u has nothing to do\n", rte_lcore_id());
 		while(1);
 	}
+
+	COMM_DEBUG("starting, current timeslot %lu\n", core->latest_timeslot);
 
 	for (i = 0; i < qconf->n_rx_queue; i++) {
 		portid = qconf->rx_queue_list[i].port_id;
@@ -662,11 +665,10 @@ void exec_comm_core(struct comm_core_cmd * cmd)
 		do_rx_burst(qconf);
 
 		/* Process newly allocated timeslots */
-		process_allocated_traffic(&core_state[cmd->comm_core_index],
-				cmd->q_admitted);
+		process_allocated_traffic(core, cmd->q_admitted);
 
 		/* send allocation packets */
-		do_tx_burst(&core_state[cmd->comm_core_index]);
+		do_tx_burst(core);
 	}
 }
 

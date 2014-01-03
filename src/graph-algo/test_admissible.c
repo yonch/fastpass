@@ -193,7 +193,7 @@ uint32_t run_experiment(struct request_info *requests, uint32_t start_time, uint
         }
  
         // Get admissible traffic
-        get_admissible_traffic(core, status, admitted_batch);
+        get_admissible_traffic(core, status, admitted_batch, 0, 1);
 
         for (i = 0; i < BATCH_SIZE; i++) {
         	/* get admitted traffic */

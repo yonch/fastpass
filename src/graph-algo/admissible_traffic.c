@@ -151,7 +151,9 @@ process_head:
 // Allocate BATCH_SIZE timeslots at once
 void get_admissible_traffic(struct admission_core_state *core,
 								struct admissible_status *status,
-								struct admitted_traffic **admitted)
+								struct admitted_traffic **admitted,
+								uint64_t start_time_first_timeslot,
+								uint64_t timeslot_len)
 {
     assert(status != NULL);
 
@@ -170,20 +172,27 @@ void get_admissible_traffic(struct admission_core_state *core,
     bin_out = core->temporary_bins[0];
     assert(is_empty_bin(bin_out) && (bin_out->head == 0));
 
-    for (bin = 0; bin < NUM_BINS + BATCH_SIZE - 1; bin++) {
+    process_new_requests(status, core, 0);
 
-//    	process_new_requests(status, core, bin);
+    for (bin = 0; bin < NUM_BINS + BATCH_SIZE - 1; bin++) {
 
     	if (likely(bin < NUM_BINS)) {
 			while (fp_ring_dequeue(queue_in, (void **)&bin_in) != 0)
 				process_new_requests(status, core, bin);
 			try_allocation_bin(bin_in, core, bin_out, status);
     	} else {
-    	    do
-    	    	/* process requests */
-    	    	process_new_requests(status, core, bin);
-    	    	/* at least until the next core had finished allocating */
-    	    while (!core->is_head);
+    	    /* wait for start time */
+    	    if (bin % 4 == 0) {
+    	    	uint64_t start_time = start_time_first_timeslot
+    	    							+ (bin - NUM_BINS) * timeslot_len;
+        	    do
+        	    	/* process requests */
+        	    	process_new_requests(status, core, bin);
+        	    	/* at least until the next core had finished allocating */
+        	    	/*  and we reach the start time */
+        	    while (!core->is_head || (fp_get_time_ns() < start_time));
+    	    }
+
     	    /* enqueue the allocated traffic for this timeslot */
     	    fp_ring_enqueue(status->q_admitted_out, core->admitted[bin - NUM_BINS]);
     	    /* disallow further allocations to that timeslot */

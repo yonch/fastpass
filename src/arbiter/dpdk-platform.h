@@ -7,6 +7,7 @@
 #include "../kernel-mod/linux-compat.h"
 #include "comm_log.h"
 #include "main.h"
+#include "dpdk-time.h"
 
 extern struct rte_mempool* pktdesc_pool[NB_SOCKETS];
 
@@ -14,16 +15,6 @@ extern struct rte_mempool* pktdesc_pool[NB_SOCKETS];
 #define FASTPASS_PR_DEBUG(enable, fmt, a...)	do { if (enable)	     \
 							COMM_DEBUG("%s: " fmt, __func__, ##a); \
 						} while(0)
-
-static inline u64 fp_get_time_ns(void)
-{
-	struct timespec tp;
-
-	if (unlikely(clock_gettime(CLOCK_REALTIME, &tp) != 0))
-		return -1;
-
-	return (1000*1000*1000) * (u64)tp.tv_sec + tp.tv_nsec;
-}
 
 static inline
 struct fpproto_pktdesc *fpproto_pktdesc_alloc(void)

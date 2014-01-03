@@ -86,8 +86,10 @@ struct fpproto_pktdesc {
 #ifdef FASTPASS_CONTROLLER
 	u16							n_dsts;
 	u16							dsts[15];
+	u16							dst_counts[15];
 	u16							alloc_tslot;
 	u8							tslot_desc[FASTPASS_PKT_MAX_ALLOC_TSLOTS];
+	u16							base_tslot;
 #endif
 
 	u64							sent_timestamp;

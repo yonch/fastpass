@@ -11,6 +11,7 @@
 #include <rte_log.h>
 #include <rte_lcore.h>
 #include <rte_byteorder.h>
+#include <rte_cycles.h>
 
 #include "control.h"
 
@@ -31,9 +32,14 @@ struct comm_log {
 	uint64_t demand_increased;
 	uint64_t demand_remained;
 	uint64_t triggered_send;
+	uint64_t dequeue_admitted_failed;
+	uint64_t processed_tslots;
+	uint64_t non_empty_tslots;
+	uint64_t occupied_node_tslots;
+	uint64_t alloc_fell_off_window;
 };
 
-extern struct comm_log comm_core_logs[N_COMM_CORES];
+extern struct comm_log comm_core_logs[RTE_MAX_LCORE];
 
 #define RTE_LOGTYPE_COMM RTE_LOGTYPE_USER1
 #define COMM_DEBUG(a...) RTE_LOG(DEBUG, COMM, ##a)
@@ -114,6 +120,32 @@ static inline void comm_log_triggered_send(uint32_t node_id) {
 	CL->triggered_send++;
 	COMM_DEBUG("triggered send to node %u\n", node_id);
 }
+
+static inline void comm_log_dequeue_admitted_failed(int rc) {
+	CL->dequeue_admitted_failed++;
+	COMM_DEBUG("failed to dequeue admitted flows, got error %d\n", rc);
+}
+
+static inline void comm_log_got_admitted_tslot(uint16_t size, uint64_t timeslot) {
+	CL->processed_tslots++;
+	if (size > 0) {
+		CL->non_empty_tslots++;
+		CL->occupied_node_tslots += size;
+
+		COMM_DEBUG("admitted_traffic for %d nodes (tslot %lu, counter %lu, cycle timer %lu)\n",
+				size, timeslot, CL->processed_tslots, rte_get_tsc_cycles());
+	}
+}
+
+static inline void comm_log_alloc_fell_off_window(uint64_t thrown_tslot,
+		uint64_t current_timeslot, uint16_t src, uint16_t thrown_alloc) {
+	CL->alloc_fell_off_window++;
+	COMM_DEBUG("alloc at tslot %lu from 0x%X to 0x%X still not sent at timeslot %lu\n",
+			thrown_tslot, src, thrown_alloc, current_timeslot);
+}
+
+
+
 #undef CL
 
 #endif /* COMM_LOG_H_ */

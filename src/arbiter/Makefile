@@ -5,7 +5,12 @@ include $(RTE_SDK)/mk/rte.vars.mk
 # binary name
 APP = fast
 
-SRCS-y := main.c control.c comm_core.c ../kernel-mod/fpproto.c alloc_core.c
+SRCS-y := main.c \
+          control.c \
+          comm_core.c \
+          admission_core.c \
+          ../kernel-mod/fpproto.c \
+          ../graph-algo/admissible_traffic.c
 
 CFLAGS += -O3 
 CFLAGS += $(WERROR_FLAGS)

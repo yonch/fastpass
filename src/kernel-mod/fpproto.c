@@ -442,7 +442,7 @@ static int process_alloc(struct fpproto_conn *conn, u8 *data, u8 *data_end)
 		conn->ops->handle_alloc(conn->ops_param, alloc_base_tslot, alloc_dst, alloc_n_dst,
 			curp, alloc_n_tslots);
 
-	return curp - data;
+	return 4 + 2 * alloc_n_dst + alloc_n_tslots;
 
 incomplete_alloc_payload_one_byte:
 	conn->stat.rx_incomplete_alloc++;
@@ -762,6 +762,21 @@ int fpproto_encode_packet(struct fpproto_conn *conn,
 		curp += 4;
 	}
 #else
+	if (pd->alloc_tslot > 0) {
+		/* ALLOC type short */
+		*(__be16 *)curp = htons((FASTPASS_PTYPE_ALLOC << 12)
+								| (pd->n_dsts << 8)
+								|  ((pd->alloc_tslot + 1) / 2));
+		curp += 2;
+		*(__be16 *)curp = htons(pd->base_tslot);
+		curp += 2;
+		for (i = 0; i < pd->n_dsts; i++) {
+			*(__be16 *)curp = htons(pd->dsts[i]);
+			curp += 2;
+		}
+		memcpy(curp, pd->tslot_desc, pd->alloc_tslot);
+		curp += pd->alloc_tslot;
+	}
 	(void) i; (void) areq; (void)conn; (void)max_len; /* TODO, fix this better */
 #endif
 

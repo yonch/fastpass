@@ -19,7 +19,7 @@ typedef uint32_t atomic32_t;
 #else
 #include <rte_atomic.h>
 
-typedef struct rte_atomic32_t atomic32_t;
+typedef rte_atomic32_t atomic32_t;
 #define atomic32_init(xptr)				rte_atomic32_init(xptr)
 #define atomic32_clear(xptr)			rte_atomic32_clear(xptr)
 #define atomic32_read(xptr)				rte_atomic32_read(xptr)

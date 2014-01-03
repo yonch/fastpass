@@ -4,4 +4,5 @@ allocator/
 out*.txt
 results/
 kernel-mod/
+graph-algo/
 

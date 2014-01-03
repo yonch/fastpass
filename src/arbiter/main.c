@@ -950,7 +950,7 @@ int main(int argc, char **argv)
 		rte_exit(EXIT_FAILURE, "setup_cores() failed\n");
 
 	/* execute experiments */
-	launch_controller_cores();
+	launch_cores();
 
 	return 0;
 }

@@ -24,6 +24,9 @@
 							<tool id="cdt.managedbuild.tool.gnu.archiver.base.2029349368" name="GCC Archiver" superClass="cdt.managedbuild.tool.gnu.archiver.base"/>
 							<tool id="cdt.managedbuild.tool.gnu.cpp.compiler.base.486647733" name="GCC C++ Compiler" superClass="cdt.managedbuild.tool.gnu.cpp.compiler.base"/>
 							<tool id="cdt.managedbuild.tool.gnu.c.compiler.base.559111878" name="GCC C Compiler" superClass="cdt.managedbuild.tool.gnu.c.compiler.base">
+								<option id="gnu.c.compiler.option.preprocessor.def.symbols.887128958" superClass="gnu.c.compiler.option.preprocessor.def.symbols" valueType="definedSymbols">
+									<listOptionValue builtIn="false" value="FASTPASS_CONTROLLER"/>
+								</option>
 								<inputType id="cdt.managedbuild.tool.gnu.c.compiler.input.1788871055" superClass="cdt.managedbuild.tool.gnu.c.compiler.input"/>
 							</tool>
 							<tool id="cdt.managedbuild.tool.gnu.c.linker.base.1761417496" name="GCC C Linker" superClass="cdt.managedbuild.tool.gnu.c.linker.base">
@@ -46,13 +49,16 @@
 	<storageModule moduleId="cdtBuildSystem" version="4.0.0">
 		<project id="controller.null.1885673881" name="controller"/>
 	</storageModule>
-	<storageModule moduleId="scannerConfiguration">
-		<autodiscovery enabled="true" problemReportingEnabled="true" selectedProfileId=""/>
-	</storageModule>
 	<storageModule moduleId="org.eclipse.cdt.core.LanguageSettingsProviders"/>
 	<storageModule moduleId="refreshScope" versionNumber="2">
 		<configuration configurationName="Default">
 			<resource resourceType="PROJECT" workspacePath="/controller"/>
 		</configuration>
+	</storageModule>
+	<storageModule moduleId="scannerConfiguration">
+		<autodiscovery enabled="true" problemReportingEnabled="true" selectedProfileId=""/>
+		<scannerConfigBuildInfo instanceId="cdt.managedbuild.toolchain.gnu.base.1874601474;cdt.managedbuild.toolchain.gnu.base.1874601474.619602292;cdt.managedbuild.tool.gnu.c.compiler.base.559111878;cdt.managedbuild.tool.gnu.c.compiler.input.1788871055">
+			<autodiscovery enabled="true" problemReportingEnabled="true" selectedProfileId=""/>
+		</scannerConfigBuildInfo>
 	</storageModule>
 </cproject>

@@ -568,7 +568,7 @@ static inline
 void destroy_admissible_status(struct admissible_status *status) {
     assert(status != NULL);
 
-    uint8_t i, j;
+    uint16_t i, j;
     struct allocation_core *core;
     for (i = 0; i < NUM_CORES; i++) {
         core = &status->cores[i];

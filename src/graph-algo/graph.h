@@ -16,11 +16,11 @@
 
 #define MAX(X, Y) ((X) > (Y) ? (X) : (Y))
 #define MAX_DEGREE 64  // This cannot exceed 64, the width of the bitmaps
-#define MAX_NODES 64
+#define MAX_GRAPH_NODES 64
 
 // The active edges in this graph
 struct graph_edges {
-    uint64_t neighbor_bitmaps[2 * MAX_NODES];
+    uint64_t neighbor_bitmaps[2 * MAX_GRAPH_NODES];
 } __attribute__((__packed__));
 
 // This tracks the id and index of a neighbor
@@ -39,7 +39,7 @@ struct vertex_info {
 // n is the number of nodes on each side of the bipartite graph
 struct graph_structure {
     uint8_t n;
-    struct vertex_info vertices[2 * MAX_NODES];
+    struct vertex_info vertices[2 * MAX_GRAPH_NODES];
 } __attribute__((__packed__));
 
 // Helper method for debugging
@@ -49,7 +49,7 @@ static void print_graph(struct graph_structure *structure, struct graph_edges *e
 static inline
 void graph_structure_init(struct graph_structure *structure, uint8_t n) {
     assert(structure != NULL);
-    assert(n <= MAX_NODES);
+    assert(n <= MAX_GRAPH_NODES);
 
     structure->n = n;
 }
@@ -58,7 +58,7 @@ void graph_structure_init(struct graph_structure *structure, uint8_t n) {
 static inline
 void graph_edges_init(struct graph_edges *edges, uint8_t n) {
     assert(edges != NULL);
-    assert(n <= MAX_NODES);
+    assert(n <= MAX_GRAPH_NODES);
     
     int i;
     for (i = 0; i < 2 * n; i++)
@@ -69,7 +69,7 @@ void graph_edges_init(struct graph_edges *edges, uint8_t n) {
 static inline
 bool has_neighbor(struct graph_edges *edges, uint8_t vertex) {
     assert(edges != NULL);
-    assert(vertex < 2 * MAX_NODES);
+    assert(vertex < 2 * MAX_GRAPH_NODES);
 
     return (edges->neighbor_bitmaps[vertex] != 0);
 }
@@ -78,7 +78,7 @@ bool has_neighbor(struct graph_edges *edges, uint8_t vertex) {
 static inline
 uint8_t get_degree(struct graph_edges *edges, uint8_t vertex) {
     assert(edges != NULL);
-    assert(vertex < 2 * MAX_NODES);
+    assert(vertex < 2 * MAX_GRAPH_NODES);
 
     uint8_t degree = 0;
     int i;
@@ -95,7 +95,7 @@ uint8_t get_degree(struct graph_edges *edges, uint8_t vertex) {
 static inline
 uint8_t get_max_degree(struct graph_edges *edges, uint8_t n) {
     assert(edges != NULL);
-    assert(n <= MAX_NODES);
+    assert(n <= MAX_GRAPH_NODES);
 
     uint8_t max_degree = 0;
     int i;
@@ -105,7 +105,7 @@ uint8_t get_max_degree(struct graph_edges *edges, uint8_t n) {
     return max_degree;
 }
 
-// Splits an edge off from vertex in src and adds it to dst
+// Splits an edge off from u in src_edges and adds it to dst_edges
 // Returns the other vertex of the split off edge
 static inline
 uint8_t split_edge(struct graph_structure *structure, struct graph_edges *src_edges,
@@ -136,6 +136,34 @@ uint8_t split_edge(struct graph_structure *structure, struct graph_edges *src_ed
     dst_edges->neighbor_bitmaps[u] = u_bitmap | (0x1ULL << edge_index_u);
     dst_edges->neighbor_bitmaps[v] = v_bitmap | (0x1ULL << edge_index_v);
 
+    return v;
+}
+
+// Removes an edge from u in src_edges
+// Returns the other vertex of the removed edge
+static inline
+uint8_t remove_edge_to_neighbor(struct graph_structure *structure,
+                                struct graph_edges *src_edges,
+                                uint8_t u) {
+    assert(structure != NULL);
+    assert(src_edges != NULL);
+    assert(u < 2 * structure->n);
+
+    // Find a neighbor
+    uint64_t u_bitmap = src_edges->neighbor_bitmaps[u];
+    assert(u_bitmap != 0);  // otherwise, results of bsfq are undefined
+    uint64_t result;
+    asm("bsfq %1,%0" : "=r"(result) : "r"(u_bitmap));
+    uint8_t edge_index_u = (uint8_t) result;
+
+    uint8_t v = structure->vertices[u].neighbors[edge_index_u].id;
+    uint8_t edge_index_v = structure->vertices[u].neighbors[edge_index_u].index;
+    uint64_t v_bitmap = src_edges->neighbor_bitmaps[v];
+    
+    // Remove the edge in both source bitmaps
+    src_edges->neighbor_bitmaps[u] = u_bitmap & ~(0x1ULL << edge_index_u);
+    src_edges->neighbor_bitmaps[v] = v_bitmap & ~(0x1ULL << edge_index_v);
+ 
     return v;
 }
 

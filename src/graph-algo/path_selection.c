@@ -1,7 +1,7 @@
 /*
  * path_selection.c
  *
- *  Created on: January 2, 2013
+ *  Created on: January 2, 2014
  *      Author: aousterh
  */
 
@@ -10,9 +10,7 @@
 #include "graph.h"
 #include "path_selection.h"
 
-#define NUM_COLORS 4  // if not 4, NUM_GRAPHS and related code must be modified
 #define NUM_GRAPHS 3
-#define NUM_RACKS 8  // must be at most MAX_RACKS
 
 // Data structure for holding all admitted edge indices
 // for a particular pair of src/dst racks
@@ -124,9 +122,9 @@ void construct_graph(struct admitted_traffic *admitted,
             max_degree = dst_rack_counts[i];
     }
 
-    // Enforce that max degree is a multiple of NUM_COLORS
-    if (max_degree % NUM_COLORS != 0) {
-        max_degree = (max_degree / NUM_COLORS + 1) * NUM_COLORS;
+    // Enforce that max degree is a multiple of NUM_PATHS
+    if (max_degree % NUM_PATHS != 0) {
+        max_degree = (max_degree / NUM_PATHS + 1) * NUM_PATHS;
     }
 
     // Add dummy edges so that all racks have max_degree
@@ -140,6 +138,8 @@ void construct_graph(struct admitted_traffic *admitted,
             dst++;
 
         add_edge(structure, edges, src, dst + NUM_RACKS);
+        src_rack_counts[src]++;
+        dst_rack_counts[dst]++;
         num_edges++;
     }
 }
@@ -151,7 +151,7 @@ void assign_to_path(struct racks_to_nodes_mapping *map,
                     uint8_t src_rack, uint8_t dst_rack, uint8_t path) {
     assert(map != NULL);
     assert(admitted != NULL);
-    assert(path < NUM_COLORS);
+    assert(path < NUM_PATHS);
 
     uint32_t rack_pair_index = get_rack_pair_index(src_rack, dst_rack);
     struct racks_to_nodes *rack_pair = &map->mappings[rack_pair_index];
@@ -179,8 +179,8 @@ void split_and_populate_paths(struct graph_structure *structure,
     assert(edges != NULL);
     assert(map != NULL);
     assert(admitted != NULL);
-    assert(path_0 < NUM_COLORS);
-    assert(path_1 < NUM_COLORS);
+    assert(path_0 < NUM_PATHS);
+    assert(path_1 < NUM_PATHS);
 
     uint8_t n = structure->n;
 

@@ -15,9 +15,9 @@ LDFLAGS = -lm
 	$(CC) $(CCFLAGS) -c $<
 
 # Dependency rules for non-file targets
-all: test_euler_split test_admissible test_bin_computation
+all: test_euler_split test_admissible test_bin_computation test_path_selection
 clean:
-	rm -f test_euler_split test_admissible test_bin_computation *.o *~
+	rm -f test_euler_split test_admissible test_bin_computation test_path_selection *.o *~
 
 # Dependency rules for file target
 test_euler_split: test_euler_split.o euler_split.o
@@ -28,4 +28,6 @@ test_admissible: test_admissible.o admissible_traffic.o
 
 test_bin_computation: test_bin_computation.o
 	$(CC) $< -o $@ $(LDFLAGS)
-	
+
+test_path_selection: test_path_selection.o path_selection.o euler_split.o
+	$(CC) $< path_selection.o euler_split.o -o $@ $(LDFLAGS)	

@@ -2,14 +2,15 @@
 CC = gcc
 CCFLAGS += -g
 #CCFLAGS += -DNDEBUG
-#CCFLAGS += -O3
+CCFLAGS += -O3
+CCFLAGS += -DNO_DPDK
 
 # Pattern rule
 %.o: ../../src/graph-algo/%.c
 	$(CC) $(CCFLAGS) -c $< -fPIC
 
 # Dependency rules for non-file targets
-all: swig_graph swig_eulersplit swig_kapoorrizzi swig_structures swig_admissible
+all: swig_graph swig_eulersplit swig_kapoorrizzi swig_structures swig_admissible swig_path_selection
 clean:
 	rm -f *.o *.so *_wrap.c *~ *.py *.pyc
 
@@ -38,4 +39,11 @@ swig_admissible: admissible_traffic.o
 	swig -python admissible.i
 	gcc $(CCFLAGS) -fPIC -c admissible_wrap.c -o admissible_wrap.o -I/usr/include/python2.7
 	g++ -shared admissible_wrap.o -o _admissible.so admissible_traffic.o -lpython2.7 -fPIC
+
+swig_path_selection: path_selection.o
+	swig -python path_selection.i
+	gcc $(CCFLAGS) -fPIC -c path_selection_wrap.c -o path_selection_wrap.o -I/usr/include/python2.7
+	g++ -shared path_selection_wrap.o -o _pathselection.so path_selection.o euler_split.o -lpython2.7 -fPIC
+
+
 

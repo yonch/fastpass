@@ -6,7 +6,7 @@
 #define SPECIAL_START		(NUM_BINS-BATCH_SIZE)
 #define BASE				1024
 
-void main()
+int main()
 {
 	int i, batch_head;
 

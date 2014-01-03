@@ -37,6 +37,7 @@ struct comm_log {
 	uint64_t non_empty_tslots;
 	uint64_t occupied_node_tslots;
 	uint64_t alloc_fell_off_window;
+	uint64_t handle_reset;
 };
 
 extern struct comm_log comm_core_logs[RTE_MAX_LCORE];
@@ -144,7 +145,10 @@ static inline void comm_log_alloc_fell_off_window(uint64_t thrown_tslot,
 			thrown_tslot, src, thrown_alloc, current_timeslot);
 }
 
-
+static inline void comm_log_handle_reset(uint16_t node_id, int in_sync) {
+	CL->handle_reset++;
+	COMM_DEBUG("applying reset for node %d in_sync=%d\n", node_id, in_sync);
+}
 
 #undef CL
 

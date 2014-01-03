@@ -32,7 +32,7 @@
 
 #include "fastpass_proto.h"
 #include "fp_statistics.h"
-#include "platform.h"
+#include "../protocol/platform.h"
 
 /*
  * FastPass client qdisc

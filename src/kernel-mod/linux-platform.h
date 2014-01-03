@@ -8,7 +8,7 @@
 #ifndef FASTPASS_LINUX_PLATFORM_H_
 #define FASTPASS_LINUX_PLATFORM_H_
 
-#include "fpproto.h"
+#include "../protocol/fpproto.h"
 #include "fastpass_proto.h"
 
 #define FASTPASS_PR_DEBUG(enable, fmt, a...)	do { if (enable)	     \

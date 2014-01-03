@@ -1,7 +1,7 @@
 ifneq ($(KERNELRELEASE),)
 # kbuild part of makefile
 obj-m  := fastpass.o
-fastpass-y := sch_fastpass.o fastpass_proto.o fpproto.o
+fastpass-y := sch_fastpass.o fastpass_proto.o ../protocol/fpproto.o
 
 
 else

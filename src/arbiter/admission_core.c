@@ -107,6 +107,8 @@ int exec_admission_core(void *void_cmd_p)
 	struct admitted_traffic *admitted[BATCH_SIZE];
 	int rc;
 	uint32_t core_ind = cmd->admission_core_index;
+	uint64_t current_timeslot = cmd->start_timeslot;
+	uint64_t start_time_first_timeslot;
 
 	/* initialize core */
 	rc = alloc_core_init(&core,
@@ -133,10 +135,17 @@ int exec_admission_core(void *void_cmd_p)
 			continue; /* we try again */
 		}
 
+		/* decide when the first timeslot should start processing */
+		start_time_first_timeslot =
+				current_timeslot * cmd->timeslot_len - cmd->prealloc_gap_ns;
+
 		/* perform allocation */
 		admission_log_allocation_begin();
-		get_admissible_traffic(&core, &g_admissible_status, &admitted[0]);
+		get_admissible_traffic(&core, &g_admissible_status, &admitted[0],
+				start_time_first_timeslot, cmd->timeslot_len);
 		admission_log_allocation_end();
+
+		current_timeslot += BATCH_SIZE * N_ADMISSION_CORES;
 	}
 
 	return 0;

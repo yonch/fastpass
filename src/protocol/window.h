@@ -8,7 +8,7 @@
 #ifndef WINDOW_H_
 #define WINDOW_H_
 
-#include <linux/types.h>
+#include "platform/generic.h"
 
 /**
  * The log of the size of outgoing packet window waiting for ACKs or timeout

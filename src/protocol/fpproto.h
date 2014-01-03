@@ -12,8 +12,16 @@
 #error "Neither FASTPASS_CONTROLLER or FASTPASS_ENDPOINT is defined"
 #endif
 
-#include "fp_statistics.h"
+#include "platform/generic.h"
 #include "window.h"
+
+/* FASTPASS_PR_DEBUG defined in platform.h */
+#ifdef CONFIG_IP_FASTPASS_DEBUG
+extern bool fastpass_debug;
+#define fp_debug(format, a...)	  FASTPASS_PR_DEBUG(fastpass_debug, format, ##a)
+#else
+#define fp_debug(format, a...)
+#endif
 
 #define IPPROTO_FASTPASS 222
 
@@ -139,6 +147,47 @@ struct fpproto_ops {
 	void	(*handle_areq)(void *param, u16 *dst_and_count, int n);
 };
 
+/* Control socket statistics */
+struct fp_proto_stat {
+	/* ACK/NACK-related */
+	__u64 tasklet_runs;
+	__u64 ack_payloads;
+	__u64 too_early_ack;
+	__u64 acked_packets;
+	__u64 timeout_pkts;
+	__u64 informative_ack_payloads;
+	__u64 reprogrammed_timer;
+
+	/* send-related */
+	__u64 fall_off_outwnd;
+
+	/* rx-related */
+	__u64 rx_pkts;
+	__u64 rx_too_short;
+	__u64 rx_unknown_payload;
+	__u64 rx_incomplete_reset;
+	__u64 rx_incomplete_alloc;
+	__u64 rx_incomplete_ack;
+	__u64 rx_incomplete_areq;
+	__u64 rx_dup_pkt;
+	__u64 rx_out_of_order;
+	__u64 rx_checksum_error;
+	__u64 inwnd_jumped;
+	__u64 seqno_before_inwnd;
+
+	/* reset */
+	__u64 reset_payloads;
+	__u64 proto_resets;
+	__u64 redundant_reset;
+	__u64 reset_both_recent_last_reset_wins;
+	__u64 reset_both_recent_payload_wins;
+	__u64 reset_last_recent_payload_old;
+	__u64 reset_last_old_payload_recent;
+	__u64 reset_both_old;
+	__u64 no_reset_because_recent;
+	__u64 reset_from_bad_pkts;
+};
+
 /**
  * @last_reset_time: the time used in the last sent reset
  * @rst_win_ns: time window within which resets are accepted, in nanoseconds
@@ -193,7 +242,6 @@ void fpproto_handle_rx_packet(struct fpproto_conn *conn, u8 *data, u32 len,
 void fpproto_prepare_to_send(struct fpproto_conn *conn);
 void fpproto_commit_packet(struct fpproto_conn *conn,
 		struct fpproto_pktdesc *pkt, u64 timestamp);
-
 
 /**
  * Encodes @pd into the buffer @data.

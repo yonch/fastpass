@@ -29,8 +29,9 @@ struct admission_core_cmd {
 	uint64_t start_time;
 	uint64_t end_time;
 
-	uint64_t tslot_len; /**< Length of a time slot */
-	uint32_t tslot_offset; /**< How many offsets in the future the controller allocates */
+	uint64_t timeslot_len; /**< Length of a time slot */
+	uint32_t start_timeslot;
+	uint64_t prealloc_gap_ns; /* how much time before the timeslot to start processing it */
 
 	uint32_t admission_core_index; /* the index among admission cores of this one */
 };

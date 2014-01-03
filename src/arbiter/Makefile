@@ -9,7 +9,7 @@ SRCS-y := main.c \
           control.c \
           comm_core.c \
           admission_core.c \
-          ../kernel-mod/fpproto.c \
+          ../protocol/fpproto.c \
           ../graph-algo/admissible_traffic.c
 
 CFLAGS += -O3 

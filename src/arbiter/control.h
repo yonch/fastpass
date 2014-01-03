@@ -17,6 +17,15 @@
 #define N_COMM_CORES			1
 #define N_LOG_CORES				0
 
+/* how many nanoseconds before the timeslot to start processing it */
+#define		PREALLOC_DURATION_NS	(5*1000*1000)
+
+/* length of a timeslot in nanoseconds */
+#define		TIMESLOT_LENGTH_NS		(1000*1000);
+
+/* give the controller some time to initialize before starting allocation */
+#define		INIT_MAX_TIME_NS		(20*1000*1000)
+
 /**
  * Allocate queues to lcores
  */

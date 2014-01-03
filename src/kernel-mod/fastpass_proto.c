@@ -19,8 +19,7 @@
 
 #include "fastpass_proto.h"
 #include "debug.h"
-#include "platform.h"
-#include "outwnd.h"
+#include "../protocol/platform.h"
 
 struct inet_hashinfo fastpass_hashinfo;
 EXPORT_SYMBOL_GPL(fastpass_hashinfo);

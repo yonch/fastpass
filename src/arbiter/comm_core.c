@@ -14,8 +14,7 @@
 #include "main.h"
 #include "arp.h"
 #include "node.h"
-#include "../kernel-mod/linux-compat.h"
-#include "../kernel-mod/fpproto.h"
+#include "../protocol/fpproto.h"
 #include "../graph-algo/admissible_structures.h"
 #include "../graph-algo/admissible_traffic.h"
 #include "dpdk-platform.h"
@@ -208,7 +207,12 @@ static void handle_areq(void *param, u16 *dst_and_count, int n)
 static void handle_reset(void *param)
 {
 	struct end_node_state *en = (struct end_node_state *)param;
-	COMM_DEBUG("got reset in_sync=%d\n", en->conn.in_sync);
+	uint16_t node_id = en - end_nodes;
+
+	comm_log_handle_reset(node_id, en->conn.in_sync);
+
+	reset_sender(&g_admissible_status, node_id);
+	memset(&en->demands[0], 0, MAX_NODES * sizeof(uint32_t));
 }
 
 static void trigger_request_voidp(void *param, u64 when) 

@@ -9,7 +9,7 @@
 
 /** DPDK **/
 #include <rte_malloc.h>
-#include "../kernel-mod/linux-compat.h"
+#include "../protocol/platform/generic.h"
 #include "../controller/dpdk-time.h"
 #define fp_malloc(typestr, size)		rte_malloc(typestr, size, 0)
 

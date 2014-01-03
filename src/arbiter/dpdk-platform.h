@@ -4,7 +4,6 @@
 
 #include <time.h>
 #include <rte_mempool.h>
-#include "../kernel-mod/linux-compat.h"
 #include "comm_log.h"
 #include "main.h"
 #include "dpdk-time.h"

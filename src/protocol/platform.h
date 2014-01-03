@@ -5,8 +5,10 @@
 #ifndef PLATFORM_H_
 #define PLATFORM_H_
 
+#include "platform/generic.h"
+
 #ifdef __KERNEL__
-#include "linux-platform.h"
+#include "../kernel-mod/linux-platform.h"
 #else
 #include "../controller/dpdk-platform.h"
 #endif

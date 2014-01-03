@@ -13,8 +13,8 @@
 #include <linux/hrtimer.h>
 
 #include "debug.h"
-#include "fpproto.h"
-#include "window.h"
+#include "../protocol/fpproto.h"
+#include "fp_statistics.h"
 
 #define FASTPASS_DEFAULT_PORT_NETORDER 1
 

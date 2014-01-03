@@ -5,13 +5,22 @@
  *      Author: yonch
  */
 
-#ifndef LINUX_COMPAT_H_
-#define LINUX_COMPAT_H_
+#ifndef FP_PROTO_PLATFORM_GENERIC_H_
+#define FP_PROTO_PLATFORM_GENERIC_H_
+
+#ifdef __KERNEL__
+
+#include <linux/jhash.h>
+#include <net/ip.h>
+#include <linux/types.h>
+
+#else
 
 #include <stdio.h>
 #include <string.h>
 #include <stdlib.h>
 #include <stdint.h>
+#include <stdbool.h>
 
 #ifdef _RTE_IP_H_
 #define ntohs(x) rte_be_to_cpu_16(x)
@@ -20,8 +29,6 @@
 #endif
 
 #define CONFIG_64BIT
-
-typedef _Bool			bool;
 
 static inline void panic(void) {
 	exit(-1);
@@ -73,15 +80,14 @@ typedef unsigned long long u64;
 typedef unsigned long long __u64;
 typedef long long s64;
 typedef long long __s64;
-typedef unsigned int u32;
-typedef int s32;
-typedef unsigned short u16;
-typedef unsigned char u8;
-
-enum {
-	false	= 0,
-	true	= 1
-};
+typedef uint32_t u32;
+typedef uint32_t __be32;
+typedef uint32_t __wsum;
+typedef int32_t s32;
+typedef uint16_t u16;
+typedef uint16_t __be16;
+typedef uint16_t __sum16;
+typedef uint8_t u8;
 
 #ifndef unlikely
 #define unlikely
@@ -213,4 +219,6 @@ static inline uint16_t fp_csum_tcpudp_magic(uint32_t saddr, uint32_t daddr,
 	return ~((u16)sum32 + (u16)(sum32 >> 16)); /* add the overflow */
 }
 
-#endif /* LINUX_COMPAT_H_ */
+#endif /* __KERNEL__ */
+
+#endif /* FP_PROTO_PLATFORM_GENERIC_H_ */

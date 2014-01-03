@@ -61,12 +61,13 @@ void launch_cores(void)
 	int i; (void)i;
 	struct comm_core_cmd comm_cmd;
 	struct admission_core_cmd admission_cmd;
-	uint64_t first_time_slot = 0;
+	uint64_t first_time_slot;
 	struct rte_ring *q_admitted;
 
 	benchmark_cost_of_get_time();
 
-	/* TODO: decide what the first time slot to be output is */
+	/* decide what the first time slot to be output is */
+	first_time_slot = (fp_get_time_ns() + INIT_MAX_TIME_NS) / TIMESLOT_LENGTH_NS;
 
 	/*** GLOBAL INIT ***/
 	/* initialize comm core global data */
@@ -91,6 +92,9 @@ void launch_cores(void)
 	admission_cmd.start_time = start_time;
 	admission_cmd.end_time = end_time;
 	admission_cmd.admission_core_index = 0;
+	admission_cmd.start_timeslot = first_time_slot;
+	admission_cmd.timeslot_len = TIMESLOT_LENGTH_NS;
+	admission_cmd.prealloc_gap_ns = PREALLOC_DURATION_NS;
 
 	/* initialize core structures */
 	admission_init_core(enabled_lcore[1]);

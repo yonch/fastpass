@@ -2,15 +2,8 @@
  * Platform independent FastPass protocol implementation
  */
 
-#ifdef __KERNEL__
-#include <linux/jhash.h>
-#include <net/ip.h>
-#else
-#include "linux-compat.h"
-#endif
-
-#include "debug.h"
 #include "fpproto.h"
+
 #include "platform.h"
 #include "outwnd.h"
 

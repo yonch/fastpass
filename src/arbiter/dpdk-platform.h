@@ -1,6 +1,6 @@
 
-#ifndef DPDK_PLATFORM_H_
-#define DPDK_PLATFORM_H_
+#ifndef CONTROLLER_DPDK_PLATFORM_H_
+#define CONTROLLER_DPDK_PLATFORM_H_
 
 #include <time.h>
 #include <rte_mempool.h>
@@ -34,4 +34,4 @@ void fpproto_pktdesc_free(struct fpproto_pktdesc *pd)
 	rte_mempool_put(pktdesc_pool[socketid], pd);
 }
 
-#endif /* DPDK_PLATFORM_H_ */
+#endif /* CONTROLLER_DPDK_PLATFORM_H_ */

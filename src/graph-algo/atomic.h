@@ -5,8 +5,8 @@
  *      Author: yonch
  */
 
-#ifndef ATOMIC_H_
-#define ATOMIC_H_
+#ifndef GRAPH_ALGO_ATOMIC_H_
+#define GRAPH_ALGO_ATOMIC_H_
 
 #ifdef NO_DPDK
 typedef uint32_t atomic32_t;
@@ -29,4 +29,4 @@ typedef rte_atomic32_t atomic32_t;
 #endif
 
 
-#endif /* ATOMIC_H_ */
+#endif /* GRAPH_ALGO_ATOMIC_H_ */

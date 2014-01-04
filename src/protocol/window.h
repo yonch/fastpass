@@ -5,8 +5,8 @@
  *      Author: yonch
  */
 
-#ifndef WINDOW_H_
-#define WINDOW_H_
+#ifndef FP_WINDOW_H_
+#define FP_WINDOW_H_
 
 #include "platform/generic.h"
 
@@ -306,5 +306,5 @@ static inline u64 wnd_get_mask(struct fp_window *wnd, u64 pos)
 	return wnd_get_mask_unsafe(wnd, pos);
 }
 
-#endif /* WINDOW_H_ */
+#endif /* FP_WINDOW_H_ */
 

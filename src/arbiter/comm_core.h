@@ -13,6 +13,12 @@
 /* maximum number of paths possible */
 #define MAX_PATHS					4
 
+#define NODE_MAX_PKTS_PER_SEC		10000
+/* maximum burst of egress packets to a single node (must be >1, can be fraction) */
+#define NODE_MAX_BURST				1.5
+/* minimum time between packets */
+#define NODE_MIN_TRIGGER_GAP_SEC	1e-6
+
 /**
  * Specifications for controller thread
  * @comm_core_index: the index of the core among the comm cores
@@ -24,7 +30,6 @@ struct comm_core_cmd {
 	uint64_t tslot_len; /**< Length of a time slot */
 	uint32_t tslot_offset; /**< How many offsets in the future the controller allocates */
 
-	uint8_t comm_core_index;
 	struct rte_ring *q_admitted;
 };
 
@@ -36,7 +41,7 @@ void comm_init_global_structs(uint64_t first_time_slot);
 /**
  * Initializes a single core to be a comm core
  */
-void comm_init_core(uint16_t lcore_id);
+void comm_init_core(uint16_t lcore_id, uint64_t first_time_slot);
 
 void exec_comm_core(struct comm_core_cmd * cmd);
 

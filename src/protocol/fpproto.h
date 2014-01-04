@@ -130,7 +130,7 @@ struct fpproto_ops {
 	 * The protocol needs to send information to the controller -- the user
 	 *    should send a packet, so that information can piggy back.
 	 */
-	void	(*trigger_request)(void *param, u64 when);
+	void	(*trigger_request)(void *param);
 
 	/**
 	 * Called for an ALLOC payload

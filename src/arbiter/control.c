@@ -113,10 +113,9 @@ void launch_cores(void)
 	comm_cmd.start_time = start_time;
 	comm_cmd.end_time = end_time;
 	comm_cmd.q_admitted = q_admitted;
-	comm_cmd.comm_core_index = 0;
 
 	/* initialize comm core on this core */
-	comm_init_core(rte_lcore_id());
+	comm_init_core(rte_lcore_id(), first_time_slot);
 
 	/** Run the controller on this core */
 	exec_comm_core(&comm_cmd);

@@ -5,8 +5,8 @@
  *      Author: yonch
  */
 
-#ifndef OUTWND_H_
-#define OUTWND_H_
+#ifndef FP_OUTWND_H_
+#define FP_OUTWND_H_
 
 #include "window.h"
 
@@ -114,4 +114,4 @@ clear_next_unacked:
 		BUG_ON(conn->unacked_pkts[i] != NULL);
 }
 
-#endif /* OUTWND_H_ */
+#endif /* FP_OUTWND_H_ */

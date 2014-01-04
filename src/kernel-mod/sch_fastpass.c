@@ -33,6 +33,7 @@
 #include "fastpass_proto.h"
 #include "fp_statistics.h"
 #include "../protocol/platform.h"
+#include "../protocol/pacer.h"
 
 /*
  * FastPass client qdisc
@@ -55,8 +56,6 @@
  *   to the number of request packets.
  */
 #define FASTPASS_REQUEST_LOW_WATERMARK (1 << 9)
-
-#define NO_NEXT_REQUEST			(~0ULL)
 
 enum {
 	FLOW_UNQUEUED,
@@ -120,8 +119,7 @@ struct fp_sched_data {
 	u64		schedule[FASTPASS_HORIZON];	/* flows scheduled in the next time slots: */
 										/* slot x at [x % FASTPASS_HORIZON] */
 
-	u64		req_t;						/* time when request credits = zero */
-	u64		time_next_req;				/* time to send next request */
+	struct fp_pacer request_pacer;
 	struct socket	*ctrl_sock;			/* socket to the controller */
 
 	struct qdisc_watchdog 	watchdog;
@@ -201,23 +199,27 @@ static void horizon_set(struct fp_sched_data* q, u64 timeslot, u64 src_dst_key)
 	q->schedule[timeslot % FASTPASS_HORIZON] = src_dst_key;
 }
 
-/* computes the time when next request should go out */
-void set_request_timer(struct fp_sched_data* q, u64 when)
+/**
+ *  computes the time when next request should go out
+ *  @returns true if the timer was set, false if it was already set
+ */
+static inline bool set_request_timer(struct fp_sched_data* q, u64 when)
 {
 	/* rate limit sending of requests */
-	q->time_next_req = max_t(u64, q->req_t + q->req_cost, when + q->req_min_gap);
-
-	hrtimer_start(&q->request_timer,
-			      ns_to_ktime(q->time_next_req),
-			      HRTIMER_MODE_ABS);
+	if (pacer_trigger(&q->request_pacer, when)) {
+		hrtimer_start(&q->request_timer,
+					  ns_to_ktime(pacer_next_event(&q->request_pacer)),
+					  HRTIMER_MODE_ABS);
+		return true;
+	}
+	return false;
 }
 
-void trigger_request(void *param, u64 when)
+void trigger_request(void *param)
 {
 	struct Qdisc *sch = (struct Qdisc *)param;
 	struct fp_sched_data *q = qdisc_priv(sch);
-	if (q->time_next_req == NO_NEXT_REQUEST)
-		set_request_timer(q, when);
+	set_request_timer(q, fp_get_time_ns());
 }
 
 static int cancel_retrans_timer(void *param)
@@ -285,28 +287,23 @@ qdisc_destroyed:
 void req_timer_flowqueue_enqueue(struct fp_sched_data* q)
 {
 	/* if enqueued first flow in q->unreq_flows, set request timer */
-	if (q->time_next_req == NO_NEXT_REQUEST) {
-		set_request_timer(q, fp_get_time_ns());
-		fp_debug("set request timer to %llu\n", q->time_next_req);
-	}
+	if (set_request_timer(q, fp_get_time_ns()))
+		fp_debug("set request timer to %llu\n", pacer_next_event(&q->request_pacer));
 }
 
 /**
  * Called when just about to send a request.
  * Caller should hold the qdisc lock.
  */
-void req_timer_sending_request(struct fp_sched_data* q, u64 now)
+void req_timer_sending_request(struct fp_sched_data *q, u64 now)
 {
 	/* update request credits */
-	q->req_t = max_t(u64, q->req_t, now - q->req_bucketlen) + q->req_cost;
+	pacer_reset(&q->request_pacer);
 
 	/* set timer for next request, if a request would be required */
 	if (q->n_unreq_flows)
 		/* have more requests to send */
 		set_request_timer(q, now);
-	else
-		q->time_next_req = NO_NEXT_REQUEST;
-
 }
 
 static bool flow_in_flowqueue(struct fp_flow *f)
@@ -1014,12 +1011,14 @@ static void send_request(struct Qdisc *sch, u64 now)
 	fp_debug(
 			"start: unreq_flows=%u, unreq_tslots=%llu, now=%llu, scheduled=%llu, diff=%lld, next_seq=%08llX\n",
 			q->n_unreq_flows, q->demand_tslots - q->requested_tslots, now,
-			q->time_next_req, (s64 )now - (s64 )q->time_next_req,
+			pacer_next_event(&q->request_pacer),
+			(s64 )now - (s64 )pacer_next_event(&q->request_pacer),
 			fpproto_conn(q)->next_seqno);
 
-	WARN(q->req_t + q->req_cost > now,
-			"send_request called too early req_t=%llu, req_cost=%u, now=%llu (diff=%lld)\n",
-			q->req_t, q->req_cost, now, (s64)now - (s64)(q->req_t + q->req_cost));
+	WARN(q->request_pacer.T + q->request_pacer.cost > now,
+			"send_request called too early T=%llu, req_cost=%u, now=%llu (diff=%lld)\n",
+			q->request_pacer.T, q->request_pacer.cost, now,
+			(s64)now - (s64)(q->request_pacer.T + q->request_pacer.cost));
 	if(flowqueue_is_empty(q)) {
 		q->stat.request_with_empty_flowqueue++;
 		fp_debug("was called with no flows pending (could be due to bad packets?)\n");
@@ -1331,6 +1330,7 @@ static int fp_tc_change(struct Qdisc *sch, struct nlattr *opt) {
 	int err, drop_count = 0;
 	u32 fp_log;
 	bool should_reconnect = false;
+	bool changed_pacer = false;
 	struct tc_ratespec data_rate_spec ={
 			.linklayer = TC_LINKLAYER_ETHERNET,
 			.overhead = 24};
@@ -1381,17 +1381,19 @@ static int fp_tc_change(struct Qdisc *sch, struct nlattr *opt) {
 		q->tslot_start_time = now - do_div(q->horizon.timeslot, q->tslot_len);
 	}
 
-	if (tb[TCA_FASTPASS_REQUEST_COST])
+	if (tb[TCA_FASTPASS_REQUEST_COST]) {
 		q->req_cost = nla_get_u32(tb[TCA_FASTPASS_REQUEST_COST]);
+		changed_pacer = true;
+	}
 
 	if (tb[TCA_FASTPASS_REQUEST_BUCKET]) {
-		u64 now = fp_get_time_ns();
 		q->req_bucketlen = nla_get_u32(tb[TCA_FASTPASS_REQUEST_BUCKET]);
-		q->req_t = now - q->req_bucketlen;	/* start with full bucket */
+		changed_pacer = true;
 	}
 
 	if (tb[TCA_FASTPASS_REQUEST_GAP]) {
 		q->req_min_gap = nla_get_u32(tb[TCA_FASTPASS_REQUEST_GAP]);
+		changed_pacer = true;
 	}
 
 	if (tb[TCA_FASTPASS_CONTROLLER_IP]) {
@@ -1411,6 +1413,16 @@ static int fp_tc_change(struct Qdisc *sch, struct nlattr *opt) {
 
 	if (!err)
 		err = fp_tc_resize(q, fp_log);
+
+	if (!err && changed_pacer) {
+		bool was_trigerred = pacer_is_triggered(&q->request_pacer);
+		u64 now = fp_get_time_ns();
+		pacer_init_full(&q->request_pacer, fp_get_time_ns(), q->req_cost,
+				q->req_bucketlen, q->req_min_gap);
+
+		if (was_trigerred)
+			pacer_trigger(&q->request_pacer, now);
+	}
 
 	while (sch->q.qlen > sch->limit) {
 		struct sk_buff *skb = fpq_dequeue(sch);
@@ -1491,14 +1503,14 @@ static int fp_tc_init(struct Qdisc *sch, struct nlattr *opt)
 	INIT_LIST_HEAD(&q->unreq_flows);
 	INIT_LIST_HEAD(&q->retrans_flows);
 	q->internal.src_dst_key = 0xD066F00DDEADBEEF;
-	q->time_next_req = NO_NEXT_REQUEST;
 
 	/* calculate timeslot from beginning of Epoch */
 	q->horizon.timeslot = now;
 	q->tslot_start_time = now - do_div(q->horizon.timeslot, q->tslot_len);
-
-	q->req_t = now - q->req_bucketlen;	/* start with full bucket */
 	q->ctrl_sock		= NULL;
+
+	pacer_init_full(&q->request_pacer, fp_get_time_ns(), q->req_cost,
+			q->req_bucketlen, q->req_min_gap);
 
 	/* initialize watchdog */
 	qdisc_watchdog_init(&tmp_watchdog, sch);
@@ -1578,6 +1590,7 @@ static int fp_tc_dump_stats(struct Qdisc *sch, struct gnet_dump *d)
 {
 	struct fp_sched_data *q = qdisc_priv(sch);
 	u64 now = fp_get_time_ns();
+	u64 time_next_req = pacer_next_event(&q->request_pacer);
 	struct tc_fastpass_qd_stats st = {
 		.version			= FASTPASS_STAT_VERSION,
 		.flows				= q->flows,
@@ -1586,7 +1599,7 @@ static int fp_tc_dump_stats(struct Qdisc *sch, struct gnet_dump *d)
 		.stat_timestamp		= now,
 		.current_timeslot	= q->horizon.timeslot,
 		.horizon_mask		= q->horizon.mask,
-		.time_next_request	= q->time_next_req - ( ~q->time_next_req ? now : 0),
+		.time_next_request	= time_next_req - ( ~time_next_req ? now : 0),
 		.demand_tslots		= q->demand_tslots,
 		.requested_tslots	= q->requested_tslots,
 		.alloc_tslots		= q->alloc_tslots,

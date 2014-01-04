@@ -41,7 +41,8 @@ struct comm_log {
 	uint64_t timer_cancel;
 	uint64_t timer_set;
 	uint64_t retrans_timer_expired;
-	uint64_t neg_acks;
+	uint64_t neg_acks_without_alloc;
+	uint64_t neg_acks_with_alloc;
 	uint64_t neg_ack_destinations;
 	uint64_t neg_ack_timeslots;
 
@@ -183,7 +184,11 @@ static inline void comm_log_neg_ack_increased_backlog(uint16_t src,
 
 static inline void comm_log_neg_ack(uint16_t src, uint16_t n_dsts,
 		uint32_t n_tslots, uint64_t seqno) {
-	CL->neg_acks++;
+	if (n_dsts == 0) {
+		CL->neg_acks_without_alloc++;
+		return;
+	}
+	CL->neg_acks_with_alloc++;
 	CL->neg_ack_destinations += n_dsts;
 	CL->neg_ack_timeslots += n_tslots;
 	COMM_DEBUG("neg ack node %d seqno %lX affected %d dsts %u timeslots\n",

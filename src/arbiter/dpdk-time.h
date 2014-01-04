@@ -1,6 +1,6 @@
 
-#ifndef DPDK_TIME_H_
-#define DPDK_TIME_H_
+#ifndef CONTROLLER_DPDK_TIME_H_
+#define CONTROLLER_DPDK_TIME_H_
 
 static inline u64 fp_get_time_ns(void)
 {
@@ -13,4 +13,4 @@ static inline u64 fp_get_time_ns(void)
 }
 
 
-#endif /* DPDK_TIME_H_ */
+#endif /* CONTROLLER_DPDK_TIME_H_ */

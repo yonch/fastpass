@@ -2,8 +2,8 @@
  * Platform-supplied API
  */
 
-#ifndef PLATFORM_H_
-#define PLATFORM_H_
+#ifndef PROTOCOL_PLATFORM_H_
+#define PROTOCOL_PLATFORM_H_
 
 #include "platform/generic.h"
 
@@ -37,4 +37,4 @@
  *
  * Frees a struct fpproto_pktdesc
  */
-#endif /* PLATFORM_H_ */
+#endif /* PROTOCOL_PLATFORM_H_ */

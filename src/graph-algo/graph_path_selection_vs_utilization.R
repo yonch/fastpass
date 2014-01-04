@@ -4,7 +4,7 @@
 #
 # This script generates a graph of network utilization vs. latency
 # for the path selection algorithm for several different
-# numbers of nodes.
+# oversubscription ratios, for a specific network topology.
 #
 # Before running this script, generate the appropriate csv file:
 # ./benchmark_graph_algo 1 > output.csv
@@ -15,26 +15,26 @@
 data <- read.csv("output.csv", sep=",")
 attach(data)
 
-min_size = min(data$nodes)
-max_size = max(data$nodes)
-num_sizes = length(unique(data$nodes))
+min_ratio = min(data$oversubscription_ratio)
+max_ratio = max(data$oversubscription_ratio)
+num_ratios = length(unique(data$oversubscription_ratio))
 
 # set up plot
 xrange <- range(observed_utilization)
-yrange <- range(data$time)
-plot(xrange, yrange, type="n", xlab="Network Utilization (%)", ylab="Latency (microseconds)")
+yrange <- range(data$time, 0)
+plot(xrange, yrange, type="n", xlab="Interrack Utilization (%)", ylab="Latency (microseconds)")
 
-colors <- rainbow(num_sizes)
-linetype <- c(1:num_sizes)
-plotchar <- seq(15, 15+num_sizes, 1)
+colors <- rainbow(num_ratios)
+linetype <- c(1:num_ratios)
+plotchar <- seq(15, 15+num_ratios, 1)
 
 # add plot lines
-num_nodes = min_size
+ratio = min_ratio
 i = 1
-while (num_nodes <= max_size) {
-	data_for_this_size <- subset(data, nodes==num_nodes)
+while (ratio <= max_ratio) {
+	data_for_this_size <- subset(data, oversubscription_ratio==ratio)
 	lines(data_for_this_size$observed_utilization, data_for_this_size$time, type="b", lwd=1.5, lty=linetype[i], col=colors[i], pch=plotchar[i])
-	num_nodes <- 2 * num_nodes
+	ratio <- 2 * ratio
 	i <- i + 1
 }
 
@@ -42,7 +42,7 @@ while (num_nodes <= max_size) {
 title("Latency of Path Selection Algorithm")
 
 # add a legend
-sizes = 2^(log(min_size, 2):log(max_size, 2))
-legend(xrange[1], yrange[2], sizes, cex=0.8, col=colors, pch=plotchar, lty=linetype, title="Number of Nodes")
+ratios = 2^(log(min_ratio, 2):log(max_ratio, 2))
+legend(xrange[1], yrange[2], ratios, cex=0.8, col=colors, pch=plotchar, lty=linetype, title="Oversubscription Ratio")
 
 detach(data)

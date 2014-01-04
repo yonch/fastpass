@@ -2,8 +2,8 @@
  * Code to support different platforms, e.g. DPDK v.s. vanilla gcc
  */
 
-#ifndef PLATFORM_H_
-#define PLATFORM_H_
+#ifndef GRAPH_ALGO_PLATFORM_H_
+#define GRAPH_ALGO_PLATFORM_H_
 
 #ifndef NO_DPDK
 
@@ -21,4 +21,4 @@
 
 #endif
 
-#endif /* PLATFORM_H_ */
+#endif /* GRAPH_ALGO_PLATFORM_H_ */

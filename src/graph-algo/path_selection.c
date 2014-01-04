@@ -44,13 +44,14 @@ uint32_t get_rack_pair_index(uint16_t src_rack, uint16_t dst_rack) {
 }
 
 // Print the mapping, useful for debugging
-void print_racks_to_nodes_mapping_counts(struct racks_to_nodes_mapping *map) {
+void print_racks_to_nodes_mapping_counts(struct racks_to_nodes_mapping *map,
+                                         uint8_t num_racks) {
     assert(map != NULL);
 
     uint16_t total_count = 0;
     uint16_t src, dst;
-    for (src = 0; src < NUM_RACKS; src++) {
-        for (dst = 0; dst < NUM_RACKS; dst++) {
+    for (src = 0; src < num_racks; src++) {
+        for (dst = 0; dst < num_racks; dst++) {
             uint32_t index = get_rack_pair_index(src, dst);
             printf("src %d dst %d: %d\n", src, dst, map->mappings[index].size);
             total_count += map->mappings[index].size;
@@ -89,10 +90,11 @@ void construct_graph(struct admitted_traffic *admitted,
     assert(edges != NULL);
 
     // Set all rack counts to zero initially
-    uint8_t src_rack_counts[NUM_RACKS];
-    uint8_t dst_rack_counts[NUM_RACKS];
+    uint8_t num_racks = structure->n;
+    uint8_t src_rack_counts[num_racks];
+    uint8_t dst_rack_counts[num_racks];
     uint16_t i;
-    for (i = 0; i < NUM_RACKS; i++) {
+    for (i = 0; i < num_racks; i++) {
         src_rack_counts[i] = 0;
         dst_rack_counts[i] = 0;
     }
@@ -107,7 +109,7 @@ void construct_graph(struct admitted_traffic *admitted,
 
         // Note: graph.h assumes that sources and destinations
         // use different numbers, so we must map carefully
-        add_edge(structure, edges, src_rack, dst_rack + NUM_RACKS);
+        add_edge(structure, edges, src_rack, dst_rack + num_racks);
         src_rack_counts[src_rack]++;
         dst_rack_counts[dst_rack]++;
         num_edges++;
@@ -115,7 +117,7 @@ void construct_graph(struct admitted_traffic *admitted,
 
     // Find maximum necessary degree
     uint8_t max_degree = 0;
-    for (i = 0; i < NUM_RACKS; i++) {
+    for (i = 0; i < num_racks; i++) {
         if (src_rack_counts[i] > max_degree)
             max_degree = src_rack_counts[i];
         if (dst_rack_counts[i] > max_degree)
@@ -131,17 +133,18 @@ void construct_graph(struct admitted_traffic *admitted,
     // TODO: implement merging approach instead?
     uint8_t src = 0;
     uint8_t dst = 0;
-    while (num_edges < max_degree * NUM_RACKS) {
+    while (num_edges < max_degree * num_racks) {
         while (src_rack_counts[src] == max_degree)
             src++;
         while (dst_rack_counts[dst] == max_degree)
             dst++;
 
-        add_edge(structure, edges, src, dst + NUM_RACKS);
+        add_edge(structure, edges, src, dst + num_racks);
         src_rack_counts[src]++;
         dst_rack_counts[dst]++;
         num_edges++;
     }
+    assert(is_consistent(structure, edges));
 }
 
 // Assign an edge from src_rack to dst_rack in the admitted traffic to path.
@@ -182,10 +185,10 @@ void split_and_populate_paths(struct graph_structure *structure,
     assert(path_0 < NUM_PATHS);
     assert(path_1 < NUM_PATHS);
 
-    uint8_t n = structure->n;
+    uint8_t num_racks = structure->n;
 
     uint8_t node, cur_node, new_node;
-    for (node = 0; node < n; node++) {
+    for (node = 0; node < num_racks; node++) {
         cur_node = node;
 
         while (has_neighbor(edges, node)) {
@@ -193,7 +196,7 @@ void split_and_populate_paths(struct graph_structure *structure,
             new_node = remove_edge_to_neighbor(structure, edges, cur_node);
 
             // Map back to system where src/dst racks use same indices
-            assign_to_path(map, admitted, cur_node, new_node - NUM_RACKS, path_0);
+            assign_to_path(map, admitted, cur_node, new_node - num_racks, path_0);
             cur_node = new_node;       
             assert(is_consistent(structure, edges));
  
@@ -201,7 +204,7 @@ void split_and_populate_paths(struct graph_structure *structure,
 
             // Map back to system where src/dst racks use same indices and be sure
             // to get the src rack and dst rack correct
-            assign_to_path(map, admitted, new_node, cur_node - NUM_RACKS, path_1);
+            assign_to_path(map, admitted, new_node, cur_node - num_racks, path_1);
             cur_node = new_node;       
             assert(is_consistent(structure, edges));
         }
@@ -210,8 +213,9 @@ void split_and_populate_paths(struct graph_structure *structure,
 
 // Selects paths for traffic in admitted. Modifies the highest two
 // bits of the destination to specify the path_id.
-void select_paths(struct admitted_traffic *admitted) {
+void select_paths(struct admitted_traffic *admitted, uint8_t num_racks) {
     assert(admitted != NULL);
+    assert(num_racks <= MAX_RACKS);
 
     // Compute the mapping from rack ids to node ids
     struct racks_to_nodes_mapping map;
@@ -220,12 +224,12 @@ void select_paths(struct admitted_traffic *admitted) {
 
     // Initialize the graphs
     struct graph_structure structure;
-    graph_structure_init(&structure, NUM_RACKS);
+    graph_structure_init(&structure, num_racks);
     struct graph_edges edges[NUM_GRAPHS];
     uint8_t i;
     for (i = 0; i < NUM_GRAPHS; i++)
-        graph_edges_init(&edges[i], NUM_RACKS);
-
+        graph_edges_init(&edges[i], num_racks);
+ 
     // Construct the input graph, make it regular
     construct_graph(admitted, &structure, &edges[0]);
 

@@ -22,6 +22,7 @@ class Test(unittest.TestCase):
         generator = graph_util()
         num_experiments = 10
         n_nodes = 256 # network with 8 racks of 32 nodes each
+        n_racks = n_nodes / structures.MAX_NODES_PER_RACK
 
         for i in range(num_experiments):
             # generate admitted traffic
@@ -34,7 +35,7 @@ class Test(unittest.TestCase):
                 structures.insert_admitted_edge(admitted_copy, edge[0], edge[1] - n_nodes)
 
             # select paths
-            pathselection.select_paths(admitted)
+            pathselection.select_paths(admitted, n_racks)
 
             # check that each edge has a valid path number and that each path
             # is used the correct number of times per src/dst rack
@@ -84,6 +85,7 @@ class Test(unittest.TestCase):
         generator = graph_util()
         num_experiments = 100
         n_nodes = 256 # network with 8 racks of 32 nodes each
+        n_racks = n_nodes / structures.MAX_NODES_PER_RACK
 
         for i in range(num_experiments):
             # generate admitted traffic
@@ -109,7 +111,7 @@ class Test(unittest.TestCase):
                 structures.insert_admitted_edge(admitted_copy, edge[0], edge[1] - n_nodes)
 
             # select paths
-            pathselection.select_paths(admitted)
+            pathselection.select_paths(admitted, n_racks)
 
             # calculate the max degree into or out of a rack
             num_paths = pathselection.NUM_PATHS

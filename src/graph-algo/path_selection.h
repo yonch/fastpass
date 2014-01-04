@@ -16,7 +16,7 @@
 #define PATH_SHIFT 14
 
 // Selects paths for traffic in admitted and writes the path ids
-// to the two most significant bits of the destination ip addrs
+// to the most significant bits of the destination ip addrs
 void select_paths(struct admitted_traffic *admitted, uint8_t num_racks);
 
 #endif /* PATH_SELECTION_H_ */

@@ -14,9 +14,20 @@
 #include "admissible_structures.h"
 #include "path_selection.h"
 
-#define NUM_FRACTIONS 11
-#define NUM_SIZES 4
+#define NUM_FRACTIONS_A 11
+#define NUM_SIZES_A 7
+#define NUM_FRACTIONS_P 11
+#define NUM_SIZES_P 4
 #define PROCESSOR_SPEED 2.8
+
+const double admissible_fractions [NUM_FRACTIONS_A] =
+    {0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9, 0.95, 0.99};
+const uint32_t admissible_sizes [NUM_SIZES_A] =
+    {1024, 512, 256, 128, 64, 32, 16};
+const double path_fractions [NUM_FRACTIONS_P] =
+    {0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9, 0.95, 0.99};
+const uint32_t path_sizes [NUM_SIZES_P] =
+    {512, 256, 128, 64};
 
 enum benchmark_type {
     ADMISSIBLE,
@@ -300,10 +311,27 @@ int main(int argc, char **argv)
 
     // Each experiment tries out a different combination of target network utilization
     // and number of nodes
-    double fractions [NUM_FRACTIONS] = {0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9, 0.95, 0.99};
-    //double fractions [NUM_FRACTIONS] = {0.7, 0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.8, 0.9, 0.95, 0.99};
-    //uint32_t sizes [NUM_SIZES] = {1024, 512, 256, 128, 64, 32, 16};
-    uint32_t sizes [NUM_SIZES] = {512, 256, 128, 64};
+    const double *fractions;
+    const uint32_t *sizes;
+    uint8_t num_fractions;
+    uint8_t num_sizes;
+    if (benchmark_type == ADMISSIBLE) {
+        // init fractions
+        num_fractions = NUM_FRACTIONS_A;
+        fractions = admissible_fractions;
+
+        // init sizes
+        num_sizes = NUM_SIZES_A;
+        sizes = admissible_sizes;
+    } else {
+        // init fractions
+        num_fractions = NUM_FRACTIONS_P;
+        fractions = path_fractions;
+
+        // init sizes
+        num_sizes = NUM_SIZES_P;
+        sizes = path_sizes;
+    }
 
     // Data structures
     struct admissible_status *status;
@@ -367,11 +395,11 @@ int main(int argc, char **argv)
 
     printf("target_utilization, nodes, time, observed_utilization, time/utilzn\n");
 
-    for (i = 0; i < NUM_FRACTIONS; i++) {
+    for (i = 0; i < num_fractions; i++) {
 
         double fraction = fractions[i];
 
-        for (j = 0; j < NUM_SIZES; j++) {
+        for (j = 0; j < num_sizes; j++) {
             uint32_t num_nodes = sizes[j];
 
             // Initialize data structures

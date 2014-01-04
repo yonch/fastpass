@@ -1,13 +1,13 @@
 # 
-# Created on: December 26, 2013
+# Created on: January 4, 2013
 # Author: aousterh
 #
 # This script generates a graph of network utilization vs. latency
-# for the admissible traffic algorithm for several different
+# for the path selection algorithm for several different
 # numbers of nodes.
 #
 # Before running this script, generate the appropriate csv file:
-# ./benchmark_graph_algo 0 > output.csv
+# ./benchmark_graph_algo 1 > output.csv
 #
 # This script can be run using:
 # R < ./graph_path_selection_vs_utilization.R --save
@@ -39,7 +39,7 @@ while (num_nodes <= max_size) {
 }
 
 # add a title
-title("Latency of Admissible Traffic Algorithm")
+title("Latency of Path Selection Algorithm")
 
 # add a legend
 sizes = 2^(log(min_size, 2):log(max_size, 2))

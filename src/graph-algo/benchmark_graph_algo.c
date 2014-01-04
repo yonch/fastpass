@@ -1,5 +1,5 @@
 /*
- * test_admissible.c
+ * benchmark_graph_algo.c
  *
  *  Created on: December 4, 2013
  *      Author: aousterh
@@ -16,6 +16,11 @@
 #define NUM_FRACTIONS 11
 #define NUM_SIZES 7
 #define PROCESSOR_SPEED 2.8
+
+enum benchmark_type {
+    ADMISSIBLE,
+    PATH_SELECTION
+};
 
 // Info about incoming requests
 struct request_info {
@@ -211,9 +216,30 @@ uint32_t run_experiment(struct request_info *requests, uint32_t start_time, uint
 	return num_admitted;
 }
 
-// Simple experiment with Poisson arrivals and exponentially distributed request sizes
-int main(void)
+void print_usage(char **argv) {
+    printf("usage: %s benchmark_type\n", argv[0]);
+    printf("\tbenchmark_type=0 for admissible traffic benchmark, benchmark_type=1 for path selection benchmark\n");
+}
+
+int main(int argc, char **argv)
 {
+    if (argc != 2) {
+        print_usage(argv);
+        return -1;
+    }
+
+    int type;
+    sscanf(argv[1], "%d", &type);
+    enum benchmark_type benchmark_type;
+    if (type == 0)
+        benchmark_type = ADMISSIBLE;
+    else if (type == 1)
+        benchmark_type = PATH_SELECTION;
+    else {
+        print_usage(argv);
+        return -1;
+    }
+
     uint16_t i, j, k;
 
     // keep duration less than 65536 or else Poisson wont work correctly due to sorting
@@ -224,8 +250,8 @@ int main(void)
 
     // Each experiment tries out a different combination of target network utilization
     // and number of nodes
-    //double fractions [NUM_FRACTIONS] = {0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9, 0.95, 0.99};
-    double fractions [NUM_FRACTIONS] = {0.7, 0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.8, 0.9, 0.95, 0.99};
+    double fractions [NUM_FRACTIONS] = {0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9, 0.95, 0.99};
+    //double fractions [NUM_FRACTIONS] = {0.7, 0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.8, 0.9, 0.95, 0.99};
     uint32_t sizes [NUM_SIZES] = {1024, 512, 256, 128, 64, 32, 16};
 
     // Data structures
@@ -306,21 +332,27 @@ int main(void)
             run_experiment(requests, 0, warm_up_duration, num_requests,
                            status, &next_request, &core, admitted);
    
-            // Start timining
-            uint64_t start_time = current_time();
+            if (benchmark_type == ADMISSIBLE) {
+                // Start timining
+                uint64_t start_time = current_time();
 
-            // Run the experiment
-            uint32_t num_admitted = run_experiment(next_request, warm_up_duration, duration,
-                                                   num_requests - (next_request - requests),
-                                                   status, &next_request, &core, admitted);
-            uint64_t end_time = current_time();
-            double time_per_experiment = (end_time - start_time) / (PROCESSOR_SPEED * 1000 * (duration - warm_up_duration));
+                // Run the experiment
+                uint32_t num_admitted = run_experiment(next_request, warm_up_duration, duration,
+                                                       num_requests - (next_request - requests),
+                                                       status, &next_request, &core, admitted);
+                uint64_t end_time = current_time();
+                double time_per_experiment = (end_time - start_time) / (PROCESSOR_SPEED * 1000 *
+                                                                        (duration - warm_up_duration));
 
-            double utilzn = ((double) num_admitted) / ((duration - warm_up_duration) * num_nodes);
+                double utilzn = ((double) num_admitted) / ((duration - warm_up_duration) * num_nodes);
 
-            // Print stats - percent of network capacity utilized and computation time
-            // per admitted timeslot (in microseconds) for different numbers of nodes
-            printf("%f, %d, %f, %f, %f\n", fraction, num_nodes, time_per_experiment, utilzn, time_per_experiment / utilzn);
+                // Print stats - percent of network capacity utilized and computation time
+                // per admitted timeslot (in microseconds) for different numbers of nodes
+                printf("%f, %d, %f, %f, %f\n", fraction, num_nodes, time_per_experiment, utilzn, time_per_experiment / utilzn);
+            }
+            else {
+                // TODO
+            }
         }
     }
 

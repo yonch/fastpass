@@ -1,5 +1,4 @@
 test_euler_split
-test_admissible
+benchmark_graph_algo
 test_bin_computation
-test_path_selection
 .settings/language.settings.xml

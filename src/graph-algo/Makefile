@@ -23,8 +23,8 @@ clean:
 test_euler_split: test_euler_split.o euler_split.o
 	$(CC) $< euler_split.o -o $@ $(LDFLAGS)
 
-benchmark_graph_algo: benchmark_graph_algo.o admissible_traffic.o
-	$(CC) $< admissible_traffic.o -o $@ $(LDFLAGS)
+benchmark_graph_algo: benchmark_graph_algo.o admissible_traffic.o path_selection.o euler_split.o
+	$(CC) $< admissible_traffic.o path_selection.o euler_split.o -o $@ $(LDFLAGS)
 
 test_bin_computation: test_bin_computation.o
 	$(CC) $< -o $@ $(LDFLAGS)

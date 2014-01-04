@@ -9,12 +9,13 @@
 #include <math.h>
 #include <stdio.h>
 
+#include "../linux-test/common.h"  // For timing
 #include "admissible_traffic.h"
 #include "admissible_structures.h"
-#include "../linux-test/common.h"  // For timing
+#include "path_selection.h"
 
 #define NUM_FRACTIONS 11
-#define NUM_SIZES 7
+#define NUM_SIZES 4
 #define PROCESSOR_SPEED 2.8
 
 enum benchmark_type {
@@ -216,6 +217,55 @@ uint32_t run_experiment(struct request_info *requests, uint32_t start_time, uint
 	return num_admitted;
 }
 
+// Runs the admissible algorithm for many timeslots, saving the admitted traffic for
+// further benchmarking
+uint32_t run_admissible(struct request_info *requests, uint32_t start_time, uint32_t end_time,
+                        uint32_t num_requests, struct admissible_status *status,
+                        struct request_info **next_request,
+                        struct admission_core_state *core,
+                        struct admitted_traffic **admitted_batch,
+                        struct admitted_traffic **all_admitted)
+{
+    struct admitted_traffic *admitted;
+    struct fp_ring *queue_tmp;
+
+    uint32_t b;
+    uint8_t i;
+    uint32_t num_admitted = 0;
+    struct request_info *current_request = requests;
+    uint32_t admitted_index = BATCH_SIZE;  // already BATCH_SIZE admitted structs in admitted_batch
+
+    assert(requests != NULL);
+    assert(core->q_bin_in->tail == core->q_bin_in->head + NUM_BINS);
+
+    for (b = (start_time >> BATCH_SHIFT); b < (end_time >> BATCH_SHIFT); b++) {
+        // Issue all new requests for this batch
+        while ((current_request->timeslot >> BATCH_SHIFT) == (b % (65536 >> BATCH_SHIFT)) &&
+               current_request < requests + num_requests) {
+            add_backlog(status, current_request->src,
+                              current_request->dst, current_request->backlog);
+            current_request++;
+        }
+ 
+        // Get admissible traffic
+        get_admissible_traffic(core, status, admitted_batch, 0, 1);
+
+        for (i = 0; i < BATCH_SIZE; i++) { 
+            /* get admitted traffic */
+            fp_ring_dequeue(status->q_admitted_out, (void **)&admitted);
+            /* update statistics */
+            num_admitted += admitted->size;
+            /* supply a new admitted traffic to core */
+            admitted_batch[i] = all_admitted[admitted_index++];
+        }
+    }
+
+    *next_request = current_request;
+
+    assert(core->q_bin_in->tail == core->q_bin_in->head + NUM_BINS);
+    return num_admitted;
+}
+
 void print_usage(char **argv) {
     printf("usage: %s benchmark_type\n", argv[0]);
     printf("\tbenchmark_type=0 for admissible traffic benchmark, benchmark_type=1 for path selection benchmark\n");
@@ -243,7 +293,7 @@ int main(int argc, char **argv)
     uint16_t i, j, k;
 
     // keep duration less than 65536 or else Poisson wont work correctly due to sorting
-	// also keep both durations an even number of batches so that bin pointers return to queue_0
+    // also keep both durations an even number of batches so that bin pointers return to queue_0
     uint32_t warm_up_duration = ((10000 + 127) / 128) * 128;
     uint32_t duration = warm_up_duration + ((50000 + 127) / 128) * 128;
     double mean = 10; // Mean request size and inter-arrival time
@@ -252,44 +302,65 @@ int main(int argc, char **argv)
     // and number of nodes
     double fractions [NUM_FRACTIONS] = {0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9, 0.95, 0.99};
     //double fractions [NUM_FRACTIONS] = {0.7, 0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.8, 0.9, 0.95, 0.99};
-    uint32_t sizes [NUM_SIZES] = {1024, 512, 256, 128, 64, 32, 16};
+    //uint32_t sizes [NUM_SIZES] = {1024, 512, 256, 128, 64, 32, 16};
+    uint32_t sizes [NUM_SIZES] = {512, 256, 128, 64};
 
     // Data structures
     struct admissible_status *status;
-	struct admission_core_state core;
-	struct fp_ring *q_bin;
-	struct fp_ring *q_urgent;
-	struct fp_ring *q_head;
-	struct fp_ring *q_admitted_out;
-    struct admitted_traffic *admitted[BATCH_SIZE];
+    struct admission_core_state core;
+    struct fp_ring *q_bin;
+    struct fp_ring *q_urgent;
+    struct fp_ring *q_head;
+    struct fp_ring *q_admitted_out;
+    struct admitted_traffic **admitted_batch;
+    struct admitted_traffic **all_admitted;
 
-	/* init queues */
-	q_bin = fp_ring_create(NUM_BINS_SHIFT);
-	q_urgent = fp_ring_create(2 * NODES_SHIFT + 1);
-	q_head = fp_ring_create(2 * NODES_SHIFT);
-	q_admitted_out = fp_ring_create(BATCH_SHIFT);
-	if (!q_bin) exit(-1);
-	if (!q_urgent) exit(-1);
-	if (!q_head) exit(-1);
-	if (!q_admitted_out) exit(-1);
+    /* init queues */
+    q_bin = fp_ring_create(NUM_BINS_SHIFT);
+    q_urgent = fp_ring_create(2 * NODES_SHIFT + 1);
+    q_head = fp_ring_create(2 * NODES_SHIFT);
+    q_admitted_out = fp_ring_create(BATCH_SHIFT);
+    if (!q_bin) exit(-1);
+    if (!q_urgent) exit(-1);
+    if (!q_head) exit(-1);
+    if (!q_admitted_out) exit(-1);
 
-	/* init core */
-	if (alloc_core_init(&core, q_bin, q_bin, q_urgent, q_urgent) != 0) {
-		printf("Error initializing alloc core!\n");
-		exit(-1);
-	}
+    /* init core */
+    if (alloc_core_init(&core, q_bin, q_bin, q_urgent, q_urgent) != 0) {
+        printf("Error initializing alloc core!\n");
+	exit(-1);
+    }
 
-	/* init global status */
-	status = create_admissible_status(false, 0, 0, q_head, q_admitted_out);
+    /* init global status */
+    status = create_admissible_status(false, 0, 0, q_head, q_admitted_out);
 
-	/* make allocated_traffic containers */
-	for (j = 0; j < BATCH_SIZE; j++) {
-		admitted[j] = create_admitted_traffic();
-		if (admitted[j] == NULL)
-			return -1;
-	}
+    /* make allocated_traffic containers */
+    admitted_batch = malloc(sizeof(struct admitted_traffic *) * BATCH_SIZE);
+    if (!admitted_batch) exit(-1);
 
-	/* fill bin_queue with empty bins */
+    if (benchmark_type == ADMISSIBLE) {
+        for (i = 0; i < BATCH_SIZE; i++) {
+            admitted_batch[i] = create_admitted_traffic();
+            if (!admitted_batch[i]) exit(-1);
+            if (admitted_batch[i] == NULL)
+                return -1;
+        }
+    }
+    else {
+        /* make containers for all admitted traffic in the experiment */
+        all_admitted = malloc(sizeof(struct admitted_traffic *) * (duration - warm_up_duration));
+        if (!all_admitted) exit(-1);
+
+        // Initialize all admitted structs
+        for (i = 0; i < duration - warm_up_duration; i++) {
+            all_admitted[i] = create_admitted_traffic();
+            if (!all_admitted[i]) exit(-1);
+            if (all_admitted[i] == NULL)
+                return -1;
+        }
+    }
+
+    /* fill bin_queue with empty bins */
     for (i = 0; i < NUM_BINS; i++) {
         fp_ring_enqueue(q_bin, create_bin(LARGE_BIN_SIZE));
     }
@@ -326,11 +397,17 @@ int main(int argc, char **argv)
             uint32_t num_requests = generate_requests_poisson(requests, max_requests, num_nodes,
                                                               duration, fraction, mean);
 
+            if (benchmark_type == PATH_SELECTION) {
+                // Re-initialize admitted_batch pointers
+                for (k = 0; k < BATCH_SIZE; k++)
+                    admitted_batch[k] = all_admitted[k];            
+            }
+
             // Issue/process some requests. This is a warm-up period so that there are pending
             // requests once we start timing
             struct request_info *next_request;
             run_experiment(requests, 0, warm_up_duration, num_requests,
-                           status, &next_request, &core, admitted);
+                           status, &next_request, &core, admitted_batch);
    
             if (benchmark_type == ADMISSIBLE) {
                 // Start timining
@@ -339,7 +416,7 @@ int main(int argc, char **argv)
                 // Run the experiment
                 uint32_t num_admitted = run_experiment(next_request, warm_up_duration, duration,
                                                        num_requests - (next_request - requests),
-                                                       status, &next_request, &core, admitted);
+                                                       status, &next_request, &core, admitted_batch);
                 uint64_t end_time = current_time();
                 double time_per_experiment = (end_time - start_time) / (PROCESSOR_SPEED * 1000 *
                                                                         (duration - warm_up_duration));
@@ -348,10 +425,34 @@ int main(int argc, char **argv)
 
                 // Print stats - percent of network capacity utilized and computation time
                 // per admitted timeslot (in microseconds) for different numbers of nodes
-                printf("%f, %d, %f, %f, %f\n", fraction, num_nodes, time_per_experiment, utilzn, time_per_experiment / utilzn);
+                printf("%f, %d, %f, %f, %f\n", fraction, num_nodes, time_per_experiment,
+                       utilzn, time_per_experiment / utilzn);
             }
             else {
-                // TODO
+                // Run the admissible algorithm to generate admitted traffic
+                uint32_t num_admitted = run_admissible(next_request, warm_up_duration, duration,
+                                                       num_requests - (next_request - requests),
+                                                       status, &next_request, &core, admitted_batch,
+                                                       all_admitted);
+
+                // Start timining
+                uint64_t start_time = current_time();
+
+                for (k = 0; k < duration - warm_up_duration; k++) {
+                    struct admitted_traffic *admitted = all_admitted[k];
+
+                    select_paths(admitted, num_nodes / MAX_NODES_PER_RACK);
+                }
+
+                uint64_t end_time = current_time();
+                double time_per_experiment = (end_time - start_time) / (PROCESSOR_SPEED * 1000 *
+                                                                        (duration - warm_up_duration));
+                double utilzn = ((double) num_admitted) / ((duration - warm_up_duration) * num_nodes);
+
+                // Print stats - percent of network capacity utilized and computation time
+                // per admitted timeslot (in microseconds) for different numbers of nodes
+                printf("%f, %d, %f, %f, %f\n", fraction, num_nodes, time_per_experiment,
+                       utilzn, time_per_experiment / utilzn);
             }
         }
     }

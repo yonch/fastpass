@@ -145,6 +145,17 @@ struct fpproto_ops {
 	 * @n: the number of dst+count pairs
 	 */
 	void	(*handle_areq)(void *param, u16 *dst_and_count, int n);
+
+	/**
+	 * Sets a timer for the connection
+	 */
+	void	(*set_timer)(void *param, u64 when);
+
+	/**
+	 * Cancels the timer for the connection
+	 */
+	int		(*cancel_timer)(void *param);
+
 };
 
 /* Control socket statistics */
@@ -206,7 +217,7 @@ struct fpproto_conn {
 	void 					*ops_param;
 
 	u64 					rst_win_ns;
-	u32						send_timeout_us;
+	u32						send_timeout;
 	u32						consecutive_bad_pkts;
 
 	/* outwnd */

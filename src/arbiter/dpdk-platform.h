@@ -34,21 +34,4 @@ void fpproto_pktdesc_free(struct fpproto_pktdesc *pd)
 	rte_mempool_put(pktdesc_pool[socketid], pd);
 }
 
-static inline
-int cancel_timer(struct fpproto_conn *proto)
-{
-//	struct fastpass_sock *fp = container_of(proto, struct fastpass_sock, conn);
-	(void)proto;
-	COMM_DEBUG("cancel_timer\n");
-	return 0;
-}
-
-static inline
-void set_timer(struct fpproto_conn *proto, u64 when)
-{
-	(void)proto;
-	COMM_DEBUG("set_timer requested for %llu\n", when);
-}
-
-
 #endif /* DPDK_PLATFORM_H_ */

@@ -38,6 +38,13 @@ struct comm_log {
 	uint64_t occupied_node_tslots;
 	uint64_t alloc_fell_off_window;
 	uint64_t handle_reset;
+	uint64_t timer_cancel;
+	uint64_t timer_set;
+	uint64_t retrans_timer_expired;
+	uint64_t neg_acks;
+	uint64_t neg_ack_destinations;
+	uint64_t neg_ack_timeslots;
+
 };
 
 extern struct comm_log comm_core_logs[RTE_MAX_LCORE];
@@ -148,6 +155,39 @@ static inline void comm_log_alloc_fell_off_window(uint64_t thrown_tslot,
 static inline void comm_log_handle_reset(uint16_t node_id, int in_sync) {
 	CL->handle_reset++;
 	COMM_DEBUG("applying reset for node %d in_sync=%d\n", node_id, in_sync);
+}
+
+static inline void comm_log_cancel_timer(uint16_t node_id) {
+	CL->timer_cancel++;
+	COMM_DEBUG("cancel_timer node %d\n", node_id);
+}
+
+static inline void comm_log_set_timer(uint16_t node_id, uint64_t when,
+		uint64_t gap) {
+	CL->timer_set++;
+	COMM_DEBUG("set_timer node %d at %lu (in %lu cycles)\n", node_id, when, gap);
+}
+
+static inline void comm_log_retrans_timer_expired(uint16_t node_id,
+		uint64_t now) {
+	CL->retrans_timer_expired++;
+	COMM_DEBUG("retrans_timer for node %d expired at %lu\n", node_id, now);
+}
+
+static inline void comm_log_neg_ack_increased_backlog(uint16_t src,
+		uint16_t dst, uint16_t amount, uint64_t seqno)
+{
+	COMM_DEBUG("increased backlog from node %d to %d by %d due to neg ack of seqno 0x%lX\n",
+			src, dst, amount, seqno);
+}
+
+static inline void comm_log_neg_ack(uint16_t src, uint16_t n_dsts,
+		uint32_t n_tslots, uint64_t seqno) {
+	CL->neg_acks++;
+	CL->neg_ack_destinations += n_dsts;
+	CL->neg_ack_timeslots += n_tslots;
+	COMM_DEBUG("neg ack node %d seqno %lX affected %d dsts %u timeslots\n",
+			src, seqno, n_dsts, n_tslots);
 }
 
 #undef CL

@@ -3,6 +3,7 @@
 
 #include <rte_cycles.h>
 #include <rte_errno.h>
+#include <rte_timer.h>
 #include "port_alloc.h"
 #include "main.h"
 #include "comm_core.h"
@@ -64,6 +65,8 @@ void launch_cores(void)
 	uint64_t first_time_slot;
 	uint64_t now;
 	struct rte_ring *q_admitted;
+
+	rte_timer_subsystem_init();
 
 	benchmark_cost_of_get_time();
 

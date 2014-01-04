@@ -87,40 +87,6 @@ void fpproto_set_qdisc(struct sock *sk, struct Qdisc *new_qdisc)
 	rcu_assign_pointer(fp->qdisc, new_qdisc);
 }
 
-static enum hrtimer_restart retrans_timer_func(struct hrtimer *timer)
-{
-	struct fastpass_sock *fp =
-			container_of(timer, struct fastpass_sock, retrans_timer);
-
-	/* schedule tasklet to write request */
-	tasklet_schedule(&fp->retrans_tasklet);
-
-	return HRTIMER_NORESTART;
-}
-
-static void retrans_tasklet(unsigned long int param)
-{
-	struct fastpass_sock *fp = (struct fastpass_sock *)param;
-	u64 now = fp_get_time_ns();
-	struct Qdisc *sch;
-
-	/* Lock the qdisc */
-	sch = fpproto_lock_qdisc((struct sock *)fp);
-	if (unlikely(sch == NULL))
-		goto qdisc_destroyed;
-
-	fpproto_handle_timeout(&fp->conn, now);
-
-	fpproto_unlock_qdisc(sch);
-	return;
-
-qdisc_destroyed:
-	fp_debug("qdisc seems to have been destroyed\n");
-	return;
-}
-
-
-
 int fpproto_rcv(struct sk_buff *skb)
 {
 	struct sock *sk;
@@ -281,12 +247,6 @@ static void fpproto_destroy_sock(struct sock *sk)
 
 	/* free up memory in conn */
 	fpproto_destroy_conn(&fp->conn);
-
-	/* eliminate the retransmission timer */
-	hrtimer_cancel(&fp->retrans_timer);
-
-	/* kill tasklet */
-	tasklet_kill(&fp->retrans_tasklet);
 }
 
 /**
@@ -354,14 +314,6 @@ static int fpproto_sk_init(struct sock *sk)
 	fp->mss_cache = 536;
 
 	fpproto_set_qdisc(sk, NULL);
-
-	/* initialize retransmission timer */
-	hrtimer_init(&fp->retrans_timer, CLOCK_REALTIME, HRTIMER_MODE_ABS);
-	fp->retrans_timer.function = retrans_timer_func;
-
-	/* initialize tasklet */
-	tasklet_init(&fp->retrans_tasklet, &retrans_tasklet,
-			(unsigned long int)fp);
 
 	/* set socket priority */
 	sk->sk_priority = TC_PRIO_CONTROL;

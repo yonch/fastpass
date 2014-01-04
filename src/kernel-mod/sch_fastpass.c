@@ -128,6 +128,8 @@ struct fp_sched_data {
 	struct hrtimer 			request_timer;
 	struct tasklet_struct 	request_tasklet;
 
+	struct hrtimer			retrans_timer;
+	struct tasklet_struct 	retrans_tasklet;
 
 	/* counters */
 	u32		flows;
@@ -216,6 +218,64 @@ void trigger_request(void *param, u64 when)
 	struct fp_sched_data *q = qdisc_priv(sch);
 	if (q->time_next_req == NO_NEXT_REQUEST)
 		set_request_timer(q, when);
+}
+
+static int cancel_retrans_timer(void *param)
+{
+	struct Qdisc *sch = (struct Qdisc *)param;
+	struct fp_sched_data *q = qdisc_priv(sch);
+
+	if (unlikely(hrtimer_try_to_cancel(&q->retrans_timer) == -1)) {
+		fp_debug("could not cancel timer. tasklet will reset timer\n");
+		return -1;
+	}
+
+	return 0;
+}
+
+static void set_retrans_timer(void *param, u64 when)
+{
+	struct Qdisc *sch = (struct Qdisc *)param;
+	struct fp_sched_data *q = qdisc_priv(sch);
+
+	hrtimer_start(&q->retrans_timer, ns_to_ktime(when), HRTIMER_MODE_ABS);
+}
+
+static enum hrtimer_restart retrans_timer_func(struct hrtimer *timer)
+{
+	struct fp_sched_data *q =
+			container_of(timer, struct fp_sched_data, retrans_timer);
+
+	/* schedule tasklet to write request */
+	tasklet_schedule(&q->retrans_tasklet);
+
+	return HRTIMER_NORESTART;
+}
+
+static void retrans_tasklet(unsigned long int param)
+{
+	struct Qdisc *sch = (struct Qdisc *)param;
+	struct fp_sched_data *q = qdisc_priv(sch);
+	u64 now = fp_get_time_ns();
+
+	/* Lock the qdisc */
+	spinlock_t *root_lock = qdisc_lock(qdisc_root(sch));
+
+	spin_lock_bh(root_lock);
+
+	/* Check that the qdisc destroy func didn't race ahead of us */
+	if (unlikely(sch->limit == 0))
+		goto qdisc_destroyed;
+
+	fpproto_handle_timeout(fpproto_conn(q), now);
+
+cleanup:
+	spin_unlock_bh(root_lock);
+	return;
+
+qdisc_destroyed:
+	fp_debug("qdisc seems to have been destroyed\n");
+	goto cleanup;
 }
 
 /**
@@ -1078,6 +1138,8 @@ struct fpproto_ops fastpass_sch_proto_ops = {
 	.handle_ack		= &handle_ack,
 	.handle_neg_ack	= &handle_neg_ack,
 	.trigger_request= &trigger_request,
+	.set_timer		= &set_retrans_timer,
+	.cancel_timer	= &cancel_retrans_timer,
 };
 
 /* reconnects the control socket to the controller */
@@ -1389,6 +1451,12 @@ static void fp_tc_destroy(struct Qdisc *sch)
 	 */
 	tasklet_kill(&q->request_tasklet);
 
+	/* eliminate the retransmission timer */
+	hrtimer_cancel(&q->retrans_timer);
+
+	/* kill tasklet */
+	tasklet_kill(&q->retrans_tasklet);
+
 	spin_lock_bh(root_lock);
 	fp_tc_reset(sch);
 	kfree(q->flow_hash_tbl);
@@ -1442,6 +1510,14 @@ static int fp_tc_init(struct Qdisc *sch, struct nlattr *opt)
 	/* initialize request timer */
 	hrtimer_init(&q->request_timer, CLOCK_REALTIME, HRTIMER_MODE_ABS);
 	q->request_timer.function = send_request_timer_func;
+
+	/* initialize retransmission timer */
+	hrtimer_init(&q->retrans_timer, CLOCK_REALTIME, HRTIMER_MODE_ABS);
+	q->retrans_timer.function = retrans_timer_func;
+
+	/* initialize retransmission tasklet */
+	tasklet_init(&q->retrans_tasklet, &retrans_tasklet,
+			(unsigned long int)sch);
 
 	/* initialize tasklet */
 	tasklet_init(&q->request_tasklet, &send_request_tasklet,

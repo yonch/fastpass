@@ -4,7 +4,7 @@
 
 #include <stdint.h>
 
-#define CONTROLLER_SEND_TIMEOUT_NS (4*1000*1000)
+#define CONTROLLER_SEND_TIMEOUT_SECS 	0.004
 
 /* The maximum number of admitted time-slots to process in a batch before
  *   sending and receiving packets */

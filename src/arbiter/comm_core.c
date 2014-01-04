@@ -9,6 +9,7 @@
 #include <rte_string_fns.h>
 #include <rte_errno.h>
 #include <rte_mempool.h>
+#include <rte_timer.h>
 #include "control.h"
 #include "comm_log.h"
 #include "main.h"
@@ -49,6 +50,9 @@ struct end_node_state {
 
 	/* demands */
 	uint32_t demands[MAX_NODES];
+
+	/* timeout timer */
+	struct rte_timer timer;
 };
 
 /*
@@ -83,13 +87,18 @@ static void handle_reset(void *param);
 static void trigger_request(struct end_node_state *en, u64 when);
 static void trigger_request_voidp(void *param, u64 when);
 static void handle_areq(void *param, u16 *dst_and_count, int n);
+static void set_retrans_timer(void *param, u64 when);
+static int cancel_retrans_timer(void *param);
+static void handle_neg_ack(void *param, struct fpproto_pktdesc *pd);
 
 struct fpproto_ops proto_ops = {
 	.handle_reset	= &handle_reset,
 	.handle_areq	= &handle_areq,
 	//.handle_ack		= &handle_ack,
-	//.handle_neg_ack	= &handle_neg_ack,
+	.handle_neg_ack	= &handle_neg_ack,
 	.trigger_request= &trigger_request_voidp,
+	.set_timer		= &set_retrans_timer,
+	.cancel_timer	= &cancel_retrans_timer,
 };
 
 void comm_init_global_structs(uint64_t first_time_slot)
@@ -97,11 +106,17 @@ void comm_init_global_structs(uint64_t first_time_slot)
 	u32 i;
 
 	fastpass_debug = true;
+	uint64_t send_timeout =
+			(uint64_t)((double)rte_get_timer_hz() * CONTROLLER_SEND_TIMEOUT_SECS);
+
+	COMM_DEBUG("Configuring send timeout to %f seconds: %lu TSC cycles\n",
+			CONTROLLER_SEND_TIMEOUT_SECS, send_timeout);
 
 	for (i = 0; i < MAX_NODES; i++) {
 		fpproto_init_conn(&end_nodes[i].conn, &proto_ops,&end_nodes[i],
-						FASTPASS_RESET_WINDOW_NS, CONTROLLER_SEND_TIMEOUT_NS);
+						FASTPASS_RESET_WINDOW_NS, send_timeout);
 		wnd_reset(&end_nodes[i].pending, first_time_slot - 1);
+		rte_timer_init(&end_nodes[i].timer);
 	}
 
 	for (i = 0; i < N_COMM_CORES; i++) {
@@ -167,6 +182,38 @@ void benchmark_cost_of_get_time(void)
 			b - a);
 }
 
+static int cancel_retrans_timer(void *param)
+{
+	struct end_node_state *en = (struct end_node_state *)param;
+	uint16_t node_id = en - end_nodes;
+
+	comm_log_cancel_timer(node_id);
+	rte_timer_stop(&en->timer);
+	return 0;
+}
+
+static void retrans_timer_func(struct rte_timer *timer, void *param) {
+	struct end_node_state *en = (struct end_node_state *)param;
+	uint16_t node_id = en - end_nodes;
+	uint64_t now = rte_get_timer_cycles();
+	(void)timer;
+
+	comm_log_retrans_timer_expired(node_id, now);
+	fpproto_handle_timeout(&en->conn, now);
+}
+
+static void set_retrans_timer(void *param, u64 when)
+{
+	struct end_node_state *en = (struct end_node_state *)param;
+	uint16_t node_id = en - end_nodes;
+	uint64_t now = rte_get_timer_cycles();
+
+	rte_timer_reset_sync(&en->timer, when - now, SINGLE, rte_lcore_id(),
+			retrans_timer_func, param);
+
+	comm_log_set_timer(node_id, when, when - now);
+}
+
 static void handle_areq(void *param, u16 *dst_and_count, int n)
 {
 	int i;
@@ -213,6 +260,28 @@ static void handle_reset(void *param)
 
 	reset_sender(&g_admissible_status, node_id);
 	memset(&en->demands[0], 0, MAX_NODES * sizeof(uint32_t));
+}
+
+static void handle_neg_ack(void *param, struct fpproto_pktdesc *pd)
+{
+	struct end_node_state *en = (struct end_node_state *)param;
+	uint16_t node_id = en - end_nodes;
+	uint32_t total_timeslots = 0;
+	uint16_t dst;
+	uint16_t dst_count;
+	int i;
+
+	for (i = 0; i < pd->n_dsts; i++) {
+		dst = pd->dsts[i] % NUM_NODES;
+		dst_count = pd->dst_counts[i];
+		add_backlog(&g_admissible_status, node_id, dst, dst_count);
+		total_timeslots += dst_count;
+		comm_log_neg_ack_increased_backlog(node_id, dst, dst_count, pd->seqno);
+	}
+
+	comm_log_neg_ack(node_id, pd->n_dsts, total_timeslots, pd->seqno);
+
+	fpproto_pktdesc_free(pd);
 }
 
 static void trigger_request_voidp(void *param, u64 when) 
@@ -600,7 +669,7 @@ static inline void do_tx_burst(struct comm_core_state *core)
 		fill_packet_alloc(core, pd, en);
 
 		/* we want this packet's reliability to be tracked */
-		now = fp_get_time_ns();
+		now = rte_get_timer_cycles();
 		fpproto_commit_packet(&en->conn, pd, now);
 
 		/* make the packet */
@@ -669,6 +738,9 @@ void exec_comm_core(struct comm_core_cmd * cmd)
 
 		/* send allocation packets */
 		do_tx_burst(core);
+
+		/* process timers */
+		rte_timer_manage();
 	}
 }
 

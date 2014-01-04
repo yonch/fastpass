@@ -33,8 +33,6 @@ struct fastpass_sock {
 	struct inet_sock 		inet;
 	__u32 					mss_cache;
 	struct Qdisc			*qdisc;
-	struct hrtimer			retrans_timer;
-	struct tasklet_struct 	retrans_tasklet;
 	struct fpproto_conn conn;
 
 	struct fp_socket_stat stat;

@@ -12,7 +12,7 @@ default:
 	$(MAKE) -C $(KDIR) M=$$PWD KCPPFLAGS="-DFASTPASS_ENDPOINT"
 
 clean:
-	rm fastpass.o sch_fastpass.o fastpass_proto.o fpproto.o fastpass.ko
+	rm fastpass.o sch_fastpass.o fastpass_proto.o ../protocol/fpproto.o fastpass.ko
 
 test:
 	gcc -g -O0 -o tests/window_test tests/window_test.c

@@ -57,7 +57,7 @@ static void cancel_and_reset_retrans_timer(struct fpproto_conn *conn)
 	u64 timeout;
 	u64 seqno;
 
-	cancel_timer(conn);
+	conn->ops->cancel_timer(conn->ops_param);
 
 	if (wnd_empty(&conn->outwnd)) {
 		fp_debug("all packets acked, no need to set timer\n");
@@ -67,11 +67,11 @@ static void cancel_and_reset_retrans_timer(struct fpproto_conn *conn)
 	/* find the earliest unacked, and the timeout */
 	seqno = wnd_earliest_marked(&conn->outwnd);
 	timeout = outwnd_peek(conn, seqno)->sent_timestamp
-			+ conn->send_timeout_us;
+			+ conn->send_timeout;
 
 	/* set timer and earliest_unacked */
 	conn->earliest_unacked = seqno;
-	set_timer(conn, timeout);
+	conn->ops->set_timer(conn->ops_param, timeout);
 	conn->stat.reprogrammed_timer++;
 	fp_debug("setting timer to %llu for seq#=0x%llX\n", timeout, seqno);
 }
@@ -156,7 +156,7 @@ void fpproto_handle_timeout(struct fpproto_conn *conn, u64 now)
 		/* find seqno and timeout of next unacked packet */
 		seqno = wnd_earliest_marked(&conn->outwnd);
 		timeout = outwnd_peek(conn, seqno)->sent_timestamp
-				+ conn->send_timeout_us;
+				+ conn->send_timeout;
 
 		/* if timeout hasn't expired, we're done */
 		if (unlikely(time_after64(timeout, now)))
@@ -171,7 +171,7 @@ void fpproto_handle_timeout(struct fpproto_conn *conn, u64 now)
 set_next_timer:
 	/* seqno is the earliest unacked seqno, and timeout is its timeout */
 	conn->earliest_unacked = seqno;
-	set_timer(conn, timeout);
+	conn->ops->set_timer(conn->ops_param, timeout);
 	fp_debug("setting timer to %llu for seq#=0x%llX\n", timeout, seqno);
 }
 
@@ -705,9 +705,9 @@ void fpproto_commit_packet(struct fpproto_conn *conn, struct fpproto_pktdesc *pd
 
 	/* if first packet in outwnd, enqueue timer and set fp->earliest_unacked */
 	if (wnd_num_marked(&conn->outwnd) == 1) {
-		u64 timeout = pd->sent_timestamp + conn->send_timeout_us;
+		u64 timeout = pd->sent_timestamp + conn->send_timeout;
 		conn->earliest_unacked = pd->seqno;
-		set_timer(conn, timeout);
+		conn->ops->set_timer(conn->ops_param, timeout);
 		fp_debug("first packet in outwnd. setting timer to %llu for seq#=0x%llX\n", timeout, pd->seqno);
 	}
 }
@@ -799,7 +799,7 @@ void fpproto_init_conn(struct fpproto_conn *conn, struct fpproto_ops *ops,
 
 	/* timeouts */
 	conn->rst_win_ns = rst_win_ns;
-	conn->send_timeout_us = send_timeout_us;
+	conn->send_timeout = send_timeout_us;
 }
 
 void fpproto_destroy_conn(struct fpproto_conn *conn)

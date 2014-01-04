@@ -34,26 +34,4 @@ void fpproto_pktdesc_free(struct fpproto_pktdesc *pd)
 	kmem_cache_free(fpproto_pktdesc_cachep, pd);
 }
 
-
-static inline
-int cancel_timer(struct fpproto_conn *proto)
-{
-	struct fastpass_sock *fp = container_of(proto, struct fastpass_sock, conn);
-
-	if (unlikely(hrtimer_try_to_cancel(&fp->retrans_timer) == -1)) {
-		fp_debug("could not cancel timer. tasklet will reset timer\n");
-		return -1;
-	}
-
-	return 0;
-}
-
-static inline
-void set_timer(struct fpproto_conn *proto, u64 when)
-{
-	struct fastpass_sock *fp = container_of(proto, struct fastpass_sock, conn);
-
-	hrtimer_start(&fp->retrans_timer, ns_to_ktime(when), HRTIMER_MODE_ABS);
-}
-
 #endif /* FASTPASS_LINUX_PLATFORM_H_ */

@@ -20,20 +20,6 @@
  * Outputs debug string
  */
 
-/*
- * int cancel_timer(struct fpproto_conn *proto);
- *
- * Cancels the timer.
- * Returns 0 if timer was canceled or already completed
- * 			-1 if the timer was running concurrently and could not be canceled
- */
-
-/**
- * void set_timer(struct fpproto_conn *proto, u64 when);
- *
- * Sets timer to the given time, in nanoseconds
- */
-
 /**
  * static inline u64 fp_get_time_ns(void)
  *

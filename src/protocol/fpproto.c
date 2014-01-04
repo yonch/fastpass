@@ -200,17 +200,14 @@ static int reset_payload_handler(struct fpproto_conn *conn, u64 full_tstamp)
 
 	if (full_tstamp == conn->last_reset_time) {
 		if (IS_ENDPOINT && !conn->in_sync) {
-			conn->in_sync = 1;
 			fp_debug("Now in sync\n");
 		} else {
 			conn->stat.redundant_reset++;
 			fp_debug("received redundant reset\n");
 		}
+		conn->in_sync = IS_ENDPOINT;
 		return 0;
 	}
-
-	/* got a different reset from what we have, so assume we're not in sync */
-	conn->in_sync = 0;
 
 	/* did we accept a reset recently? */
 	last_is_recent = tstamp_in_window(conn->last_reset_time, now, conn->rst_win_ns);
@@ -554,6 +551,10 @@ void fpproto_handle_rx_packet(struct fpproto_conn *conn, u8 *pkt, u32 len,
 	}
 
 	if (unlikely(payload_type == FASTPASS_PTYPE_RESET)) {
+		/* a reset in any direction will cause RESETs to be sent until the
+		 * end-node decides it is in sync and stops sending RESETs */
+		conn->in_sync = 0;
+
 		/* a good-checksum RESET packet always triggers a controller response */
 		if (!IS_ENDPOINT && conn->ops->trigger_request)
 			conn->ops->trigger_request(conn->ops_param);
@@ -742,17 +743,19 @@ int fpproto_encode_packet(struct fpproto_conn *conn,
 	}
 
 #ifdef FASTPASS_ENDPOINT
-	/* A-REQ type short */
-	*(__be16 *)curp = htons((FASTPASS_PTYPE_AREQ << 12) |
-					  (pd->n_areq & 0x3F));
-	curp += 2;
+	if (pd->n_areq > 0) {
+		/* A-REQ type short */
+		*(__be16 *)curp = htons((FASTPASS_PTYPE_AREQ << 12) |
+						  (pd->n_areq & 0x3F));
+		curp += 2;
 
-	/* A-REQ requests */
-	for (i = 0; i < pd->n_areq; i++) {
-		areq = (struct fastpass_areq *)curp;
-		areq->dst = htons((__be16)pd->areq[i].src_dst_key);
-		areq->count = htons((u16)pd->areq[i].tslots);
-		curp += 4;
+		/* A-REQ requests */
+		for (i = 0; i < pd->n_areq; i++) {
+			areq = (struct fastpass_areq *)curp;
+			areq->dst = htons((__be16)pd->areq[i].src_dst_key);
+			areq->count = htons((u16)pd->areq[i].tslots);
+			curp += 4;
+		}
 	}
 #else
 	if (pd->alloc_tslot > 0) {

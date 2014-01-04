@@ -16,6 +16,7 @@
 #include "arp.h"
 #include "node.h"
 #include "../protocol/fpproto.h"
+#include "../protocol/pacer.h"
 #include "../graph-algo/admissible_structures.h"
 #include "../graph-algo/admissible_traffic.h"
 #include "dpdk-platform.h"
@@ -52,7 +53,11 @@ struct end_node_state {
 	uint32_t demands[MAX_NODES];
 
 	/* timeout timer */
-	struct rte_timer timer;
+	struct rte_timer timeout_timer;
+
+	/* egress packet timer and pacer */
+	struct rte_timer tx_timer;
+	struct fp_pacer tx_pacer;
 };
 
 /*
@@ -68,9 +73,6 @@ struct comm_core_state {
 /* whether we should output verbose debugging */
 bool fastpass_debug;
 
-/* bitmap of which nodes have a packet pending, per core */
-struct bigmap triggered_nodes[RTE_MAX_LCORE];
-
 /* logs */
 struct comm_log comm_core_logs[RTE_MAX_LCORE];
 
@@ -78,18 +80,19 @@ struct comm_log comm_core_logs[RTE_MAX_LCORE];
 static struct end_node_state end_nodes[MAX_NODES];
 
 /* per-core information */
-static struct comm_core_state core_state[N_COMM_CORES];
+static struct comm_core_state core_state[RTE_MAX_LCORE];
 
 /* fpproto_pktdesc pool */
 struct rte_mempool* pktdesc_pool[NB_SOCKETS];
 
 static void handle_reset(void *param);
-static void trigger_request(struct end_node_state *en, u64 when);
-static void trigger_request_voidp(void *param, u64 when);
+static void trigger_request(struct end_node_state *en);
+static void trigger_request_voidp(void *param);
 static void handle_areq(void *param, u16 *dst_and_count, int n);
 static void set_retrans_timer(void *param, u64 when);
 static int cancel_retrans_timer(void *param);
 static void handle_neg_ack(void *param, struct fpproto_pktdesc *pd);
+static inline void tx_end_node(struct rte_timer *timer, void *param);
 
 struct fpproto_ops proto_ops = {
 	.handle_reset	= &handle_reset,
@@ -106,8 +109,12 @@ void comm_init_global_structs(uint64_t first_time_slot)
 	u32 i;
 
 	fastpass_debug = true;
-	uint64_t send_timeout =
-			(uint64_t)((double)rte_get_timer_hz() * CONTROLLER_SEND_TIMEOUT_SECS);
+	uint64_t hz = rte_get_timer_hz();
+	uint64_t send_timeout = (uint64_t)((double)hz * CONTROLLER_SEND_TIMEOUT_SECS);
+	uint32_t send_cost = hz / NODE_MAX_PKTS_PER_SEC;
+	uint32_t max_burst = (uint32_t)(NODE_MAX_BURST * send_cost);
+	uint32_t min_trigger_gap = (uint32_t)((double)hz * NODE_MIN_TRIGGER_GAP_SEC);
+	uint64_t now = rte_get_timer_cycles();
 
 	COMM_DEBUG("Configuring send timeout to %f seconds: %lu TSC cycles\n",
 			CONTROLLER_SEND_TIMEOUT_SECS, send_timeout);
@@ -116,27 +123,28 @@ void comm_init_global_structs(uint64_t first_time_slot)
 		fpproto_init_conn(&end_nodes[i].conn, &proto_ops,&end_nodes[i],
 						FASTPASS_RESET_WINDOW_NS, send_timeout);
 		wnd_reset(&end_nodes[i].pending, first_time_slot - 1);
-		rte_timer_init(&end_nodes[i].timer);
-	}
-
-	for (i = 0; i < N_COMM_CORES; i++) {
-		/* initialize the space for encoding ALLOCs */
-		memset(&core_state[i].alloc_enc_space, 0,
-				sizeof(core_state[i].alloc_enc_space));
-
-		core_state[i].latest_timeslot = first_time_slot - 1;
-
+		rte_timer_init(&end_nodes[i].timeout_timer);
+		rte_timer_init(&end_nodes[i].tx_timer);
+		pacer_init_full(&end_nodes[i].tx_pacer, now, send_cost, max_burst,
+				min_trigger_gap);
 	}
 }
 
 /* based on init_mem in main.c */
-void comm_init_core(uint16_t lcore_id)
+void comm_init_core(uint16_t lcore_id, uint64_t first_time_slot)
 {
 	int socketid;
 	char s[64];
 
 	socketid = rte_lcore_to_socket_id(lcore_id);
 
+	/* initialize the space for encoding ALLOCs */
+	memset(&core_state[lcore_id].alloc_enc_space, 0,
+			sizeof(core_state[lcore_id].alloc_enc_space));
+
+	core_state[lcore_id].latest_timeslot = first_time_slot - 1;
+
+	/* initialize mempool for pktdescs */
 	if (pktdesc_pool[socketid] == NULL) {
 		rte_snprintf(s, sizeof(s), "pktdesc_pool_%d", socketid);
 		pktdesc_pool[socketid] =
@@ -188,7 +196,7 @@ static int cancel_retrans_timer(void *param)
 	uint16_t node_id = en - end_nodes;
 
 	comm_log_cancel_timer(node_id);
-	rte_timer_stop(&en->timer);
+	rte_timer_stop(&en->timeout_timer);
 	return 0;
 }
 
@@ -208,7 +216,7 @@ static void set_retrans_timer(void *param, u64 when)
 	uint16_t node_id = en - end_nodes;
 	uint64_t now = rte_get_timer_cycles();
 
-	rte_timer_reset_sync(&en->timer, when - now, SINGLE, rte_lcore_id(),
+	rte_timer_reset_sync(&en->timeout_timer, when - now, SINGLE, rte_lcore_id(),
 			retrans_timer_func, param);
 
 	comm_log_set_timer(node_id, when, when - now);
@@ -248,7 +256,7 @@ static void handle_areq(void *param, u16 *dst_and_count, int n)
 	}
 
 	if (num_increases > 0)
-		trigger_request(en, fp_get_time_ns());
+		trigger_request(en);
 }
 
 static void handle_reset(void *param)
@@ -284,21 +292,25 @@ static void handle_neg_ack(void *param, struct fpproto_pktdesc *pd)
 	fpproto_pktdesc_free(pd);
 }
 
-static void trigger_request_voidp(void *param, u64 when) 
+static void trigger_request_voidp(void *param)
 {
 	struct end_node_state *en = (struct end_node_state *)param;
-	trigger_request(en, when);
+	trigger_request(en);
 }
 
 
-static void trigger_request(struct end_node_state *en, u64 when)
+static void trigger_request(struct end_node_state *en)
 {
-	(void)when;
-
+	uint64_t now = rte_get_timer_cycles();
 	u32 node_id = en - end_nodes;
-	bigmap_set(&triggered_nodes[rte_lcore_id()], node_id);
 
-	comm_log_triggered_send(node_id);
+	if (pacer_trigger(&en->tx_pacer, now)) {
+		rte_timer_reset_sync(&en->tx_timer,
+				pacer_next_event(&en->tx_pacer) - now, SINGLE, rte_lcore_id(),
+				tx_end_node, (void *)en);
+
+		comm_log_triggered_send(node_id);
+	}
 }
 
 static inline struct rte_mbuf *
@@ -539,7 +551,7 @@ static inline void process_allocated_traffic(struct comm_core_state *core,
 			en->allocs[wnd_pos(current_timeslot)] = dst;
 
 			/* trigger a packet */
-			trigger_request(en, -1);
+			trigger_request(en);
 		}
 	}
 	/* free memory */
@@ -636,59 +648,50 @@ out:
 	assert((pd->alloc_tslot & 1) == 0);
 }
 
-static inline void do_tx_burst(struct comm_core_state *core)
+static inline void tx_end_node(struct rte_timer *timer, void *param)
 {
-	int i;
+	struct end_node_state *en = (struct end_node_state *)param;
 	const unsigned lcore_id = rte_lcore_id();
+	struct comm_core_state *core = &core_state[lcore_id];
+	uint32_t node_ind = en - end_nodes;
+	struct rte_mbuf *out_pkt;
+	struct fpproto_pktdesc *pd;
+	u64 now;
 
-	/* send allocation packets */
-	for (i = 0; i < MAX_PKT_BURST; i++) {
-		uint32_t node_ind;
-		struct rte_mbuf *out_pkt;
-		struct end_node_state *en;
-		struct fpproto_pktdesc *pd;
-		u64 now;
+	(void)timer;
 
-		if (bigmap_empty(&triggered_nodes[lcore_id]))
-			break;
+	/* clear the trigger */
+	pacer_reset(&en->tx_pacer);
 
-		node_ind = bigmap_find(&triggered_nodes[lcore_id]);
-		en = &end_nodes[node_ind];
+	/* prepare to send */
+	fpproto_prepare_to_send(&en->conn);
 
-		/* prepare to send */
-		fpproto_prepare_to_send(&en->conn);
-
-		/* allocate pktdesc */
-		pd = fpproto_pktdesc_alloc();
-		if (unlikely(pd == NULL)) {
-			comm_log_pktdesc_alloc_failed(node_ind);
-			break;
-		}
-
-		/* fill in allocated timeslots */
-		fill_packet_alloc(core, pd, en);
-
-		/* we want this packet's reliability to be tracked */
-		now = rte_get_timer_cycles();
-		fpproto_commit_packet(&en->conn, pd, now);
-
-		/* make the packet */
-		out_pkt = make_packet(en, pd);
-		if (unlikely(out_pkt == NULL))
-			break;
-
-		/* send on port */
-		send_packet_via_queue(out_pkt, en->dst_port);
-
-		/* log sent packet */
-		comm_log_tx_pkt(node_ind, now);
-
-		/* clear the trigger */
-		bigmap_clear(&triggered_nodes[lcore_id], node_ind);
+	/* allocate pktdesc */
+	pd = fpproto_pktdesc_alloc();
+	if (unlikely(pd == NULL)) {
+		comm_log_pktdesc_alloc_failed(node_ind);
+		/* retry later */
+		trigger_request(en);
+		return;
 	}
-	/* Flush queued packets */
-	for (i = 0; i < n_enabled_port; i++)
-		send_queued_packets(enabled_port[i]);
+
+	/* fill in allocated timeslots */
+	fill_packet_alloc(core, pd, en);
+
+	/* we want this packet's reliability to be tracked */
+	now = rte_get_timer_cycles();
+	fpproto_commit_packet(&en->conn, pd, now);
+
+	/* make the packet */
+	out_pkt = make_packet(en, pd);
+	if (unlikely(out_pkt == NULL))
+		return; /* pd committed, will get retransmitted on timeout */
+
+	/* send on port */
+	send_packet_via_queue(out_pkt, en->dst_port);
+
+	/* log sent packet */
+	comm_log_tx_pkt(node_ind, now);
 }
 
 void exec_comm_core(struct comm_core_cmd * cmd)
@@ -697,14 +700,11 @@ void exec_comm_core(struct comm_core_cmd * cmd)
 	uint8_t portid, queueid;
 	struct lcore_conf *qconf;
 	const unsigned lcore_id = rte_lcore_id();
-	struct comm_core_state *core = &core_state[cmd->comm_core_index];
+	struct comm_core_state *core = &core_state[lcore_id];
 
 	qconf = &lcore_conf[lcore_id];
 
 	comm_log_init(&comm_core_logs[lcore_id]);
-
-	/* initialize triggered nodes */
-	bigmap_init(&triggered_nodes[lcore_id]);
 
 	if (qconf->n_rx_queue == 0) {
 		RTE_LOG(INFO, BENCHAPP, "lcore %u has nothing to do\n", rte_lcore_id());
@@ -736,11 +736,12 @@ void exec_comm_core(struct comm_core_cmd * cmd)
 		/* Process newly allocated timeslots */
 		process_allocated_traffic(core, cmd->q_admitted);
 
-		/* send allocation packets */
-		do_tx_burst(core);
-
 		/* process timers */
 		rte_timer_manage();
+
+		/* Flush queued packets */
+		for (i = 0; i < n_enabled_port; i++)
+			send_queued_packets(enabled_port[i]);
 	}
 }
 

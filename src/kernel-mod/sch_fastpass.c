@@ -215,11 +215,11 @@ static inline bool set_request_timer(struct fp_sched_data* q, u64 when)
 	return false;
 }
 
-void trigger_request(void *param, u64 when)
+void trigger_request(void *param)
 {
 	struct Qdisc *sch = (struct Qdisc *)param;
 	struct fp_sched_data *q = qdisc_priv(sch);
-	set_request_timer(q, when);
+	set_request_timer(q, fp_get_time_ns());
 }
 
 static int cancel_retrans_timer(void *param)

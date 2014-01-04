@@ -349,7 +349,7 @@ static void got_bad_packet(struct fpproto_conn *conn)
 out:
 	/* Whatever happens, trigger an outgoing packet to make progress */
 	if (conn->ops->trigger_request)
-		conn->ops->trigger_request(conn->ops_param, now);
+		conn->ops->trigger_request(conn->ops_param);
 }
 
 /**
@@ -556,7 +556,7 @@ void fpproto_handle_rx_packet(struct fpproto_conn *conn, u8 *pkt, u32 len,
 	if (unlikely(payload_type == FASTPASS_PTYPE_RESET)) {
 		/* a good-checksum RESET packet always triggers a controller response */
 		if (!IS_ENDPOINT && conn->ops->trigger_request)
-			conn->ops->trigger_request(conn->ops_param, fp_get_time_ns());
+			conn->ops->trigger_request(conn->ops_param);
 
 		if (reset_payload_handler(conn, rst_tstamp) != 0)
 			/* reset was not applied, drop packet */

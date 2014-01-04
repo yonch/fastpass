@@ -28,6 +28,21 @@
 #include <arpa/inet.h>
 #endif
 
+#ifndef NO_DPDK
+
+#include <rte_branch_prediction.h>
+
+#else
+#ifndef unlikely
+#define unlikely
+#endif
+
+#ifndef likely
+#define likely
+#endif
+#endif
+
+
 #define CONFIG_64BIT
 
 static inline void panic(void) {
@@ -89,13 +104,11 @@ typedef uint16_t __be16;
 typedef uint16_t __sum16;
 typedef uint8_t u8;
 
-#ifndef unlikely
-#define unlikely
-#endif
-
-#ifndef likely
-#define likely
-#endif
+/* kernel.h */
+#define max_t(type, x, y) ({			\
+	type __max1 = (x);			\
+	type __max2 = (y);			\
+	__max1 > __max2 ? __max1: __max2; })
 
 /* typecheck.h */
 #define typecheck(type,x) \

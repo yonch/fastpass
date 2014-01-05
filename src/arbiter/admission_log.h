@@ -27,7 +27,12 @@ struct admission_log {
 extern struct admission_log admission_core_logs[RTE_MAX_LCORE];
 
 #define RTE_LOGTYPE_ADMISSION RTE_LOGTYPE_USER1
+
+#ifdef CONFIG_IP_FASTPASS_DEBUG
 #define ADMISSION_DEBUG(a...) RTE_LOG(DEBUG, ADMISSION, ##a)
+#else
+#define ADMISSION_DEBUG(a...)
+#endif
 
 /* current comm log */
 #define AL		(&admission_core_logs[rte_lcore_id()])
@@ -48,6 +53,7 @@ void admission_log_failed_to_allocate_admitted_traffic(void)
 static inline
 void admission_log_allocation_begin(uint64_t current_timeslot,
 		uint64_t start_time_first_timeslot) {
+	(void)current_timeslot;(void)start_time_first_timeslot;
 	uint64_t now = rte_get_tsc_cycles();
 	AL->last_started_alloc_tsc = now;
 	AL->batches_started++;

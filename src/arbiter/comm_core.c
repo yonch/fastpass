@@ -543,8 +543,8 @@ static inline void process_allocated_traffic(struct comm_core_state *core,
 
 			/* advance the window */
 			wnd_advance(wnd, current_timeslot - wnd_head(wnd));
-			COMM_DEBUG("advanced window flow %lu. current %lu head %llu\n",
-					en - end_nodes, current_timeslot, wnd_head(wnd));
+//			COMM_DEBUG("advanced window flow %lu. current %lu head %llu\n",
+//					en - end_nodes, current_timeslot, wnd_head(wnd));
 
 			/* add the allocation */
 			wnd_mark(wnd, current_timeslot);

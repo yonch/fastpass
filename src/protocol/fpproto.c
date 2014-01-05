@@ -328,8 +328,8 @@ static void got_bad_packet(struct fpproto_conn *conn)
 
 	/* was there a recent reset? */
 	if (time_in_range64(
-			now - FASTPASS_RESET_WINDOW_NS,
 			conn->last_reset_time,
+			now - FASTPASS_RESET_WINDOW_NS,
 			now + FASTPASS_RESET_WINDOW_NS)) {
 		/* will not trigger a new one */
 		conn->stat.no_reset_because_recent++;
@@ -535,9 +535,10 @@ void fpproto_handle_rx_packet(struct fpproto_conn *conn, u8 *pkt, u32 len,
 	in_seq += (ntohs(hdr->seq) - in_seq) & 0xFFFF;
 	ack_seq += (ntohs(hdr->ack_seq) - ack_seq) & 0xFFFF;
 	fp_debug("packet with in_seq 0x%04X (full 0x%llX, prev_max 0x%llX)"
-			" ack_seq 0x%04X (full 0x%llX, max_sent 0x%llX)\n",
+			" ack_seq 0x%04X (full 0x%llX, max_sent 0x%llX) checksum 0x%04X\n",
 			ntohs(hdr->seq), in_seq, conn->in_max_seqno,
-			ntohs(hdr->ack_seq), ack_seq, wnd_head(&conn->outwnd));
+			ntohs(hdr->ack_seq), ack_seq, wnd_head(&conn->outwnd),
+			hdr->checksum);
 
 	/* verify checksum */
 	expected_checksum = hdr->checksum;

@@ -1,0 +1,144 @@
+/*
+ * log.h
+ *
+ *  Created on: January 5, 2014
+ *      Author: aousterh
+ */
+
+#ifndef LOG_H_
+#define LOG_H_
+
+#include <assert.h>
+#include <inttypes.h>
+#include <stddef.h>
+#include <stdio.h>
+#include <stdlib.h>
+
+#define LATENCY_BIN_DURATION 50 // in microseconds
+#define MAX_SENDERS 1
+#define NUM_LATENCY_BINS 10
+
+// Information logged per sending node per interval
+struct node_info {
+  uint16_t node_id;
+  uint32_t num_start_packets;  // number of first packets received
+  uint32_t num_fcs;  // number of flows completed
+  uint64_t sum_of_latencies;  // sum of first packet latencies
+  uint64_t sum_of_fcs;  // sum of flow completion times
+  uint64_t bytes_received;
+};
+
+// Information logged per interval on each server
+struct interval_info {
+  uint64_t start_time;
+  uint64_t end_time;
+  struct node_info nodes[MAX_SENDERS];
+  uint32_t latency_bins[NUM_LATENCY_BINS];
+};
+
+struct log {
+  struct interval_info *current;
+  struct interval_info *log_intervals;
+};
+
+static inline
+void init_log(struct log *log, uint32_t num_intervals) {
+  assert(log != NULL);
+  
+  log->log_intervals = malloc(sizeof(struct interval_info) *
+			      num_intervals);
+  assert(log->log_intervals != NULL);
+
+  log->current = log->log_intervals;
+}
+
+static inline
+void init_interval(struct interval_info *interval) {
+  assert(interval != NULL);
+
+  uint16_t i;
+  for (i = 0; i < MAX_SENDERS; i++) {
+    interval->nodes[i].num_start_packets = 0;
+    interval->nodes[i].num_fcs = 0;
+    interval->nodes[i].sum_of_latencies = 0;
+    interval->nodes[i].sum_of_fcs = 0;
+    interval->nodes[i].bytes_received = 0;
+  }
+    
+  for (i = 0; i < NUM_LATENCY_BINS; i++)
+    interval->latency_bins[i] = 0;
+}
+
+// Logs the arrival of a packet indicating the start of a flow
+static inline
+void log_flow_start(struct log *log, uint32_t bytes, uint32_t latency) {
+  assert(log != NULL);
+
+  // TODO: support multiple senders
+  struct node_info *node = &log->current->nodes[0];
+  node->num_start_packets++;
+  node->sum_of_latencies += latency;
+  node->bytes_received += bytes;
+
+  // Tally this latency in the appropriate bin
+  uint16_t latency_bin_index = latency / LATENCY_BIN_DURATION;
+  if (latency_bin_index > NUM_LATENCY_BINS - 1)
+    latency_bin_index = NUM_LATENCY_BINS - 1;
+  log->current->latency_bins[latency_bin_index]++;
+}
+
+// Logs more bytes received
+static inline
+void log_data_received(struct log *log, uint32_t bytes) {
+  assert(log != NULL);
+
+  // TODO: support multiple senders
+  struct node_info *node = &log->current->nodes[0];
+  node->bytes_received += bytes;
+}
+
+// Logs flow completed
+static inline
+void log_flow_completed(struct log *log, uint64_t fc_time) {
+  assert(log != NULL);
+
+  // TODO: support multiple senders
+  struct node_info *node = &log->current->nodes[0];
+  node->num_fcs++;
+  node->sum_of_fcs += fc_time;
+}
+
+// Prints the log contents in CSV format to stdin to be piped to a file
+static inline
+void write_out_log(struct log *log) {
+  assert(log != NULL);
+
+  // Print column headers
+  printf("start_time, end_time, ");
+  uint16_t i;
+  for (i = 0; i < MAX_SENDERS; i++)
+    printf("node_id, num_start_packets, num_flows, latency_sum, fc_sum, bytes, ");
+
+  for (i = 0; i < NUM_LATENCY_BINS - 1; i++)
+    printf("bin_%d, ", i);
+  printf("bin_%d\n", NUM_LATENCY_BINS - 1);
+
+  // Output data
+  struct interval_info *interval;
+  for (interval = log->log_intervals; interval < log->current; interval++) {
+    printf("%"PRIu64", %"PRIu64", ", interval->start_time, interval->end_time);
+
+    for (i = 0; i < MAX_SENDERS; i++) {
+      struct node_info *node = &interval->nodes[i];
+      printf("%u, %u, %u, %"PRIu64", %"PRIu64", %"PRIu64", ",
+	     node->node_id, node->num_start_packets, node->num_fcs,
+	     node->sum_of_latencies, node->sum_of_fcs, node->bytes_received);
+    }
+
+    for (i = 0; i < NUM_LATENCY_BINS - 1; i++)
+      printf("%u, ", interval->latency_bins[i]);
+    printf("%u\n", interval->latency_bins[NUM_LATENCY_BINS - 1]);
+  }
+}
+
+#endif /* LOG_H_ */

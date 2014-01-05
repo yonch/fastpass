@@ -6,6 +6,7 @@
  */
 
 #include "common.h"
+#include "log.h"
 #include "tcp_receiver.h" 
  
 #include <sys/types.h>
@@ -23,7 +24,7 @@
 #include <fcntl.h>
 
 #define BITS_PER_BYTE 8
-#define NUM_INTERVALS 100
+#define NUM_INTERVALS 1000
 
 void tcp_receiver_init(struct tcp_receiver *receiver, uint64_t start_time,
 		       uint64_t duration, float clock_freq, uint16_t port_num)
@@ -34,6 +35,7 @@ void tcp_receiver_init(struct tcp_receiver *receiver, uint64_t start_time,
   receiver->duration = duration;
   receiver->clock_freq = clock_freq;
   receiver->port_num = port_num;
+  init_log(&receiver->log, NUM_INTERVALS);
 }
 
 void *run_tcp_receiver(void *arg)
@@ -41,10 +43,6 @@ void *run_tcp_receiver(void *arg)
   int i;
   struct sockaddr_in sock_addr;
   struct tcp_receiver *receiver = (struct tcp_receiver *) arg;
-  uint32_t flows_received = 0;
-  uint32_t bytes_received = 0;
-  uint64_t total_latency = 0;
-  uint64_t total_first_packet_latency = 0;
   struct timeval tv;
 
   tv.tv_sec = 1;
@@ -77,10 +75,11 @@ void *run_tcp_receiver(void *arg)
 
   uint64_t end_time = receiver->start_time + receiver->duration;
 
-  // Set up info to track per-interval throughputs
+  // Determine the next interval end time
   uint64_t interval_duration = receiver->duration / NUM_INTERVALS;
   uint64_t interval_end_time = receiver->start_time + interval_duration;
-  uint32_t interval_bytes_received = 0;
+  init_interval(receiver->log.current);
+  receiver->log.current->start_time = receiver->start_time;
   while(current_time() < end_time + 1*1000*1000*1000uLL)
   {
     int i;
@@ -121,7 +120,6 @@ void *run_tcp_receiver(void *arg)
 	    }
 	}
 	assert(success);  // Otherwise, we have too many connections
-
       }
       
     // Read from all ready connections
@@ -139,16 +137,17 @@ void *run_tcp_receiver(void *arg)
 	  struct packet *incoming = &packets[ready_index];
 	  int bytes = read(ready_fd, incoming, sizeof(struct packet));
 	  assert(bytes == sizeof(struct packet));
-	  interval_bytes_received += bytes;
-	  bytes_left[ready_index] = incoming->size * MTU_SIZE - sizeof(struct packet);
 	  uint64_t time_now = current_time();
-	  total_first_packet_latency += (time_now - incoming->packet_send_time);
+	  uint32_t packet_latency_micros = (time_now - incoming->packet_send_time) / 
+	    (receiver->clock_freq * 1000);
+	  log_flow_start(&receiver->log, bytes, packet_latency_micros);
+	  bytes_left[ready_index] = incoming->size * MTU_SIZE - sizeof(struct packet);
 	}
 	else {
 	  // Read in data
 	  int count = bytes_left[ready_index] < MTU_SIZE ? bytes_left[ready_index] : MTU_SIZE;
 	  int bytes = read(ready_fd, buf, count);
-	  interval_bytes_received += bytes;
+	  log_data_received(&receiver->log, bytes);
 	  bytes_left[ready_index] -= bytes;
 	  uint64_t time_now = current_time();
 
@@ -161,9 +160,9 @@ void *run_tcp_receiver(void *arg)
 		     incoming->flow_start_time, incoming->id, time_now);*/
 
 	      if (incoming->flow_start_time < end_time) {
-		total_latency += (time_now - incoming->flow_start_time);
-		flows_received++;
-		bytes_received += incoming->size * MTU_SIZE;
+		uint32_t fc_time_micros = (time_now - incoming->flow_start_time) / 
+		  (receiver->clock_freq * 1000);
+		log_flow_completed(&receiver->log, fc_time_micros);
 	      }
  
 	      assert(shutdown(ready_fd, SHUT_RDWR) != -1);
@@ -175,29 +174,21 @@ void *run_tcp_receiver(void *arg)
 	    }
 	}
       }
-
+    
     uint64_t now = current_time();
     if (now > interval_end_time && now < end_time) {
-      double interval_throughput = ((double) interval_bytes_received) *
-	BITS_PER_BYTE / (1000 * 1000 * 1000) * NUM_INTERVALS;
-      printf("throughput (Gbps): %f\n", interval_throughput);
+      receiver->log.current->end_time = now;
+
+      // Start a new interval
+      receiver->log.current++;
+      init_interval(receiver->log.current);
+      receiver->log.current->start_time = now;
       interval_end_time += interval_duration;
-      interval_bytes_received = 0;
     }
-
   }
 
-  if (flows_received == 0)
-     printf("received 0 flows\n");
-  else {
-    double avg_flow_time = total_latency / (receiver->clock_freq * 1000 * flows_received);
-    printf("received %d flows\n", flows_received);
-    printf("\taverage flow completion time (microseconds): %f\n", avg_flow_time);
-    double throughput = ((double) bytes_received) * BITS_PER_BYTE / (1000 * 1000 * 1000);
-    printf("\taverage application throughput (Gbps): %f\n", throughput);
-    double avg_first_packet_latency = total_first_packet_latency /
-      (receiver->clock_freq * 1000 * flows_received);
-    printf("\taverage packet latency (microseconds): %f\n", avg_first_packet_latency);
-  }
   close(sock_fd);
+
+  // Write log to a file
+  write_out_log(&receiver->log);
 }

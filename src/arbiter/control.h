@@ -18,13 +18,13 @@
 #define N_LOG_CORES				0
 
 /* how many nanoseconds before the timeslot to start processing it */
-#define		PREALLOC_DURATION_NS	(5*1000*1000)
+#define		PREALLOC_DURATION_NS	(10*1000*1000)
 
 /* length of a timeslot in nanoseconds */
-#define		TIMESLOT_LENGTH_NS		(1000*1000);
+#define		TIMESLOT_LENGTH_NS		(1000*1000)
 
 /* give the controller some time to initialize before starting allocation */
-#define		INIT_MAX_TIME_NS		(20*1000*1000)
+#define		INIT_MAX_TIME_NS		(200*1000*1000)
 
 #define RTE_LOGTYPE_CONTROL RTE_LOGTYPE_USER1
 #define CONTROL_DEBUG(a...) RTE_LOG(DEBUG, CONTROL, ##a)

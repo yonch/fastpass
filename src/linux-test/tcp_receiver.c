@@ -43,10 +43,10 @@ void *run_tcp_receiver(void *arg)
   int i;
   struct sockaddr_in sock_addr;
   struct tcp_receiver *receiver = (struct tcp_receiver *) arg;
-  struct timeval tv;
+  struct timeval timeout;
 
-  tv.tv_sec = 1;
-  tv.tv_usec = 0;
+  timeout.tv_sec = 1;
+  timeout.tv_usec = 0;
 
   // Create a socket
   int sock_fd = socket(PF_INET, SOCK_STREAM, IPPROTO_TCP);
@@ -98,7 +98,7 @@ void *run_tcp_receiver(void *arg)
     }
 
     // Wait for a socket to have data to read or a new connection
-    int retval = select(max + 1, &rfds, NULL, NULL, &tv);
+    int retval = select(max + 1, &rfds, NULL, NULL, &timeout);
     if (retval < 0)
       break;
     

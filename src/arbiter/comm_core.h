@@ -13,7 +13,7 @@
 /* maximum number of paths possible */
 #define MAX_PATHS					4
 
-#define NODE_MAX_PKTS_PER_SEC		10000
+#define NODE_MAX_PKTS_PER_SEC		100000
 /* maximum burst of egress packets to a single node (must be >1, can be fraction) */
 #define NODE_MAX_BURST				1.5
 /* minimum time between packets */

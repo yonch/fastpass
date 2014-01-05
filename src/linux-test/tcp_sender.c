@@ -42,13 +42,15 @@ struct connection {
  
 void tcp_sender_init(struct tcp_sender *sender, struct generator *gen,
 		     uint32_t id, uint64_t start_time, uint64_t duration,
-		     float clock_freq)
+		     float clock_freq, uint16_t port_num, const char *dest)
 {
   sender->gen = gen;
   sender->id = id;
   sender->start_time = start_time;
   sender->duration = duration;
   sender->clock_freq = clock_freq;
+  sender->port_num = port_num;
+  sender->dest = dest;
 }
 
 // Selects the IP that corresponds to the receiver id
@@ -144,8 +146,8 @@ void *run_tcp_sender(void *arg)
   next_send_time = start_time + packet.time;
 
   outgoing.sender = sender->id;
-  outgoing.receiver = packet.dest;
-  outgoing.send_time = next_send_time;
+  assert(inet_pton(AF_INET, sender->dest, &outgoing.receiver) > 0);
+  outgoing.flow_start_time = next_send_time;
   outgoing.size = packet.size;
   outgoing.id = count++;
 
@@ -204,10 +206,11 @@ void *run_tcp_sender(void *arg)
 	// Initialize destination address
 	memset(&sock_addr, 0, sizeof(sock_addr));
 	sock_addr.sin_family = AF_INET;
-	sock_addr.sin_port = htons(PORT);
+	sock_addr.sin_port = htons(sender->port_num);
 	// Choose the IP that corresponds to a randomly chosen core router
-	char ip_addr[12];
-	choose_IP(outgoing.receiver, ip_addr);
+	const char *ip_addr = sender->dest;
+	//char ip_addr[12];
+	//choose_IP(outgoing.receiver, ip_addr);
 	//printf("chosen IP %s for receiver %d\n", ip_addr, outgoing.receiver);
 	assert(inet_pton(AF_INET, ip_addr, &sock_addr.sin_addr) > 0);
  
@@ -230,8 +233,8 @@ void *run_tcp_sender(void *arg)
 	next_send_time = start_time + packet.time;
 
 	outgoing.sender = sender->id;
-	outgoing.receiver = packet.dest;
-	outgoing.send_time = next_send_time;
+	assert(inet_pton(AF_INET, sender->dest, &outgoing.receiver) > 0);
+	outgoing.flow_start_time = next_send_time;
 	outgoing.size = packet.size;
 	outgoing.id = count++;
       }
@@ -254,14 +257,15 @@ void *run_tcp_sender(void *arg)
 	    // send data
 	    struct packet *outgoing_data = (struct packet *) connections[i].buffer;
 	    connections[i].bytes_left = outgoing_data->size * MTU_SIZE;
+	    outgoing_data->packet_send_time = current_time();
 	    connections[i].return_val = send(connections[i].sock_fd,
 					     connections[i].buffer,
 					     connections[i].bytes_left, 0);
 	    connections[i].status = SENDING;
-	    printf("sent, \t\t%d, %d, %d, %"PRIu64", %d, %"PRIu64"\n",
+	    /*printf("sent, \t\t%d, %d, %d, %"PRIu64", %d, %"PRIu64"\n",
 		   outgoing_data->sender, outgoing_data->receiver,
-		   outgoing_data->size, outgoing_data->send_time,
-		   outgoing_data->id, current_time());
+		   outgoing_data->size, outgoing_data->flow_start_time,
+		   outgoing_data->id, current_time());*/
 	    flows_sent++;
 	  }
 	  else {

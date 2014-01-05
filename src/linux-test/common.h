@@ -12,13 +12,14 @@
 
 #define PORT 1100
 #define MTU_SIZE 1456
-#define MAX_CONNECTIONS 256
+#define MAX_CONNECTIONS 512
 
 // Struct for storing packet data
 struct packet {
   uint32_t sender;
   uint32_t receiver;
-  uint64_t send_time;
+  uint64_t flow_start_time;
+  uint64_t packet_send_time;
   uint32_t size;
   uint32_t id;
 };

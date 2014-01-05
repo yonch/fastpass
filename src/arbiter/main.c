@@ -850,6 +850,8 @@ init_mem(void)
 		}
 		/** RX mbuf pool */
 		if (rx_pktmbuf_pool[socketid] == NULL) {
+			printf("Trying to allocat RX mbuf pool on socket %d: %u buffers of size %lu\n",
+					socketid, NB_RX_MBUF, RX_MBUF_SIZE);
 			rte_snprintf(s, sizeof(s), "mbuf_pool_%d", socketid);
 			rx_pktmbuf_pool[socketid] =
 				rte_mempool_create(s, NB_RX_MBUF, RX_MBUF_SIZE, MEMPOOL_CACHE_SIZE,

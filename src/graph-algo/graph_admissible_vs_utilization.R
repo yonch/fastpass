@@ -7,7 +7,10 @@
 # numbers of nodes.
 #
 # Before running this script, generate the appropriate csv file:
-# ./test_admissible > output.csv
+# ./benchmark_graph_algo 0 > output.csv
+#
+# This script can be run using:
+# R < ./graph_path_selection_vs_utilization.R --save
 
 data <- read.csv("output.csv", sep=",")
 attach(data)
@@ -17,7 +20,7 @@ max_size = max(data$nodes)
 num_sizes = length(unique(data$nodes))
 
 # set up plot
-xrange <- range(target_utilization)
+xrange <- range(observed_utilization)
 yrange <- range(data$time)
 plot(xrange, yrange, type="n", xlab="Network Utilization (%)", ylab="Latency (microseconds)")
 
@@ -30,7 +33,7 @@ num_nodes = min_size
 i = 1
 while (num_nodes <= max_size) {
 	data_for_this_size <- subset(data, nodes==num_nodes)
-	lines(data_for_this_size$target_utilization, data_for_this_size$time, type="b", lwd=1.5, lty=linetype[i], col=colors[i], pch=plotchar[i])
+	lines(data_for_this_size$observed_utilization, data_for_this_size$time, type="b", lwd=1.5, lty=linetype[i], col=colors[i], pch=plotchar[i])
 	num_nodes <- 2 * num_nodes
 	i <- i + 1
 }

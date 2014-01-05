@@ -14,9 +14,21 @@
 #include "admissible_structures.h"
 #include "path_selection.h"
 
-#define NUM_FRACTIONS 11
-#define NUM_SIZES 4
+#define NUM_FRACTIONS_A 11
+#define NUM_SIZES_A 7
+#define NUM_FRACTIONS_P 11
+#define NUM_CAPACITIES_P 4
+#define NUM_NODES_P 256
 #define PROCESSOR_SPEED 2.8
+
+const double admissible_fractions [NUM_FRACTIONS_A] =
+    {0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9, 0.95, 0.99};
+const uint32_t admissible_sizes [NUM_SIZES_A] =
+    {1024, 512, 256, 128, 64, 32, 16};
+const double path_fractions [NUM_FRACTIONS_P] =
+    {0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9, 0.95, 0.99};
+const uint16_t path_capacities [NUM_CAPACITIES_P] =
+    {4, 8, 16, 32};  // inter-rack capacities (32 machines per rack)
 
 enum benchmark_type {
     ADMISSIBLE,
@@ -300,10 +312,28 @@ int main(int argc, char **argv)
 
     // Each experiment tries out a different combination of target network utilization
     // and number of nodes
-    double fractions [NUM_FRACTIONS] = {0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9, 0.95, 0.99};
-    //double fractions [NUM_FRACTIONS] = {0.7, 0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.8, 0.9, 0.95, 0.99};
-    //uint32_t sizes [NUM_SIZES] = {1024, 512, 256, 128, 64, 32, 16};
-    uint32_t sizes [NUM_SIZES] = {512, 256, 128, 64};
+    const double *fractions;
+    const uint32_t *sizes;
+    const uint16_t *capacities;
+    uint8_t num_fractions;
+    uint8_t num_parameter_2;
+    if (benchmark_type == ADMISSIBLE) {
+        // init fractions
+        num_fractions = NUM_FRACTIONS_A;
+        fractions = admissible_fractions;
+
+        // init parameter 2 - sizes
+        num_parameter_2 = NUM_SIZES_A;
+        sizes = admissible_sizes;
+    } else {
+        // init fractions
+        num_fractions = NUM_FRACTIONS_P;
+        fractions = path_fractions;
+
+        // init parameter 2 - inter-rack capacities
+        num_parameter_2 = NUM_CAPACITIES_P;
+        capacities = path_capacities;
+    }
 
     // Data structures
     struct admissible_status *status;
@@ -365,17 +395,30 @@ int main(int argc, char **argv)
         fp_ring_enqueue(q_bin, create_bin(LARGE_BIN_SIZE));
     }
 
-    printf("target_utilization, nodes, time, observed_utilization, time/utilzn\n");
+    if (benchmark_type == ADMISSIBLE)
+        printf("target_utilization, nodes, time, observed_utilization, time/utilzn\n");
+    else
+        printf("target_utilization, oversubscription_ratio, time, observed_utilization, time/utilzn\n"); 
 
-    for (i = 0; i < NUM_FRACTIONS; i++) {
+    for (i = 0; i < num_fractions; i++) {
 
-        double fraction = fractions[i];
-
-        for (j = 0; j < NUM_SIZES; j++) {
-            uint32_t num_nodes = sizes[j];
+        for (j = 0; j < num_parameter_2; j++) {
+            double fraction = fractions[i];
+            uint32_t num_nodes;
+            uint16_t inter_rack_capacity;
 
             // Initialize data structures
-            reset_admissible_status(status, false, 0, num_nodes);
+            if (benchmark_type == ADMISSIBLE) {
+                num_nodes = sizes[j];
+                reset_admissible_status(status, false, 0, num_nodes);
+            }
+            else if (benchmark_type == PATH_SELECTION) {
+                num_nodes = NUM_NODES_P;
+                inter_rack_capacity = capacities[j];
+                reset_admissible_status(status, true, inter_rack_capacity,
+                                        num_nodes);
+                fraction = fraction * ((double) inter_rack_capacity) / MAX_NODES_PER_RACK;
+            }
             for (k = 0; k < NUM_BINS; k++) {
             	struct bin *b;
             	fp_ring_dequeue(q_bin, (void **)&b);
@@ -447,12 +490,16 @@ int main(int argc, char **argv)
                 uint64_t end_time = current_time();
                 double time_per_experiment = (end_time - start_time) / (PROCESSOR_SPEED * 1000 *
                                                                         (duration - warm_up_duration));
-                double utilzn = ((double) num_admitted) / ((duration - warm_up_duration) * num_nodes);
+                // utilization of inter-rack links
+                uint16_t max_capacity_per_timeslot = inter_rack_capacity * num_nodes / MAX_NODES_PER_RACK;
+                double utilzn = ((double) num_admitted) / ((duration - warm_up_duration) * max_capacity_per_timeslot);
+
+                uint16_t oversubscription_ratio = MAX_NODES_PER_RACK / inter_rack_capacity;
 
                 // Print stats - percent of network capacity utilized and computation time
                 // per admitted timeslot (in microseconds) for different numbers of nodes
-                printf("%f, %d, %f, %f, %f\n", fraction, num_nodes, time_per_experiment,
-                       utilzn, time_per_experiment / utilzn);
+                printf("%f, %d, %f, %f, %f\n", fraction, oversubscription_ratio,
+                       time_per_experiment, utilzn, time_per_experiment / utilzn);
             }
         }
     }

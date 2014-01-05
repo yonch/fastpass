@@ -617,6 +617,11 @@ handle_payload:
 		curp += payload_length;
 		break;
 
+	case FASTPASS_PTYPE_PADDING:
+		/* okay, we're done, it's padding from now on */
+		curp = data_end;
+		break;
+
 	default:
 		goto unknown_payload_type;
 	}
@@ -716,7 +721,7 @@ void fpproto_commit_packet(struct fpproto_conn *conn, struct fpproto_pktdesc *pd
 
 int fpproto_encode_packet(struct fpproto_conn *conn,
 		struct fpproto_pktdesc *pd, u8 *pkt, u32 max_len, __be32 saddr,
-		__be32 daddr)
+		__be32 daddr, u32 min_size)
 {
 	int i;
 	struct fastpass_areq *areq;
@@ -776,6 +781,12 @@ int fpproto_encode_packet(struct fpproto_conn *conn,
 	}
 	(void) i; (void) areq; (void)conn; (void)max_len; /* TODO, fix this better */
 #endif
+
+	if (curp - pkt < min_size) {
+		/* add padding */
+		memset(curp, 0, min_size - (curp - pkt));
+		curp = pkt + min_size;
+	}
 
 	/* checksum */
 	*(__be16 *)(pkt + 6) = fastpass_checksum(pkt, curp - pkt, saddr, daddr,

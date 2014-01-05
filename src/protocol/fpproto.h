@@ -64,7 +64,7 @@ extern bool fastpass_debug;
 									FASTPASS_PKT_AREQ_LEN + \
 									FASTPASS_PKT_ALLOC_LEN)
 
-#define FASTPASS_PTYPE_RSTREQ		0x0
+#define FASTPASS_PTYPE_PADDING		0x0
 #define FASTPASS_PTYPE_RESET 		0x1
 #define FASTPASS_PTYPE_AREQ			0x2
 #define FASTPASS_PTYPE_ALLOC		0x3
@@ -260,6 +260,6 @@ void fpproto_commit_packet(struct fpproto_conn *conn,
  */
 int fpproto_encode_packet(struct fpproto_conn *conn,
 		struct fpproto_pktdesc *pd, u8 *data, u32 max_len, __be32 saddr,
-		__be32 daddr);
+		__be32 daddr, u32 min_size);
 
 #endif /* FPPROTO_H_ */

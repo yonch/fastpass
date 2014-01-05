@@ -275,7 +275,7 @@ void fpproto_send_packet(struct sock *sk, struct fpproto_pktdesc *pd)
 	/* encode the packet from the descriptor */
 	data = &skb->data[0];
 	payload_len = fpproto_encode_packet(&fp->conn, pd, data, FASTPASS_MAX_PAYLOAD,
-			inet->inet_saddr, inet->inet_daddr);
+			inet->inet_saddr, inet->inet_daddr, 26);
 	/* adjust the size of the skb based on encoded size */
 	skb_put(skb, payload_len);
 

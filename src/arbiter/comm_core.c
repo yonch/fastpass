@@ -359,7 +359,7 @@ make_packet(struct end_node_state *en, struct fpproto_pktdesc *pd)
 
 	/* encode fastpass payload */
 	data_len = fpproto_encode_packet(&en->conn, pd, payload_ptr,
-			FASTPASS_MAX_PAYLOAD, en->controller_ip, en->dst_ip);
+			FASTPASS_MAX_PAYLOAD, en->controller_ip, en->dst_ip, 26);
 
 	/* adjust packet size */
 	ipv4_length = sizeof(struct ipv4_hdr) + data_len;

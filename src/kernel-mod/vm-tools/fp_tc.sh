@@ -1,11 +1,12 @@
 #!/bin/bash
 
-#CONTROLLER_IP="192.168.122.100"
+CONTROLLER_IP="192.168.44.100"
 #DEV="eth0"
 
-CONTROLLER_IP="1.1.2.100"
+#CONTROLLER_IP="1.1.2.100"
 DEV="eth5"
 
+TC="/home/am2/yonch/tc"
 
 ./del_tc.sh
 
@@ -19,4 +20,4 @@ DATA=`cat /sys/module/fastpass/sections/.data`
 BSS=`cat /sys/module/fastpass/sections/.bss`
 echo add-symbol-file /home/yonch/fastpass/src/kernel-mod/fastpass.ko $TEXT -s .data $DATA -s .bss $BSS
 
-sudo tc qdisc add dev $DEV root fastpass timeslot 1000000 req_cost 2000000 req_bucket 6000000 ctrl $CONTROLLER_IP rate 12500Kbps
+sudo $TC qdisc add dev $DEV root fastpass timeslot 1000000 req_cost 2000000 req_bucket 6000000 ctrl $CONTROLLER_IP rate 12500Kbps

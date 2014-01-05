@@ -534,8 +534,10 @@ void flow_inc_alloc(struct fp_sched_data* q, struct fp_flow* f)
 	f->alloc_tslots++;
 	q->alloc_tslots++;
 
-	if (unlikely(f->acked_tslots < f->alloc_tslots))
+	if (unlikely(f->acked_tslots < f->alloc_tslots)) {
+		q->acked_tslots += f->alloc_tslots - f->acked_tslots;
 		f->acked_tslots = f->alloc_tslots;
+	}
 
 	if (unlikely((!flow_in_flowqueue(f))
 			&& (f->requested_tslots != f->demand_tslots)
@@ -560,13 +562,16 @@ static void flow_inc_demand(struct fp_sched_data *q, struct fp_flow *f)
 	}
 }
 
-/* add skb to flow queue */
-static void flow_enqueue_skb(struct Qdisc *sch, struct fp_flow *flow,
+/* add skb to flow queue. returns false if skb is too large*/
+static bool flow_enqueue_skb(struct Qdisc *sch, struct fp_flow *flow,
 		struct sk_buff *skb)
 {
 	struct fp_sched_data *q = qdisc_priv(sch);
 	struct sk_buff *head = flow->head;
 	s64 cost = (s64) psched_l2t_ns(&q->data_rate, qdisc_pkt_len(skb));
+
+	if (cost > q->tslot_len)
+		return false;
 
 	skb->next = NULL;
 	if (!head) {
@@ -597,6 +602,7 @@ static void flow_enqueue_skb(struct Qdisc *sch, struct fp_flow *flow,
 	flow->qlen++;
 	sch->q.qlen++;
 	sch->qstats.backlog += qdisc_pkt_len(skb);
+	return true;
 }
 
 static struct sk_buff *flow_queue_peek(struct fp_flow *f)
@@ -628,7 +634,12 @@ static int fpq_enqueue(struct sk_buff *skb, struct Qdisc *sch)
 	}
 
 	/* queue skb to flow, update statistics */
-	flow_enqueue_skb(sch, f, skb);
+	if (!flow_enqueue_skb(sch, f, skb)) {
+		fp_debug("got packet that is larger than a timeslot len=%d, flow 0x%llX\n",
+			qdisc_pkt_len(skb), f->src_dst_key);
+		q->stat.pkt_too_big++;
+		return qdisc_drop(skb, sch);
+	}
 	fp_debug("enqueued packet of len %d to flow 0x%llX, qlen=%d\n",
 			qdisc_pkt_len(skb), f->src_dst_key, f->qlen);
 

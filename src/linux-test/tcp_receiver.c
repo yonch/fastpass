@@ -80,7 +80,7 @@ void *run_tcp_receiver(void *arg)
   uint64_t interval_end_time = receiver->start_time + interval_duration;
   init_interval(receiver->log.current);
   receiver->log.current->start_time = receiver->start_time;
-  while(current_time() < end_time + 1*1000*1000*1000uLL)
+  while(current_time_nanoseconds() < end_time + 1*1000*1000*1000uLL)
   {
     int i;
     char buf[MTU_SIZE];
@@ -137,10 +137,8 @@ void *run_tcp_receiver(void *arg)
 	  struct packet *incoming = &packets[ready_index];
 	  int bytes = read(ready_fd, incoming, sizeof(struct packet));
 	  assert(bytes == sizeof(struct packet));
-	  uint64_t time_now = current_time();
-	  uint32_t packet_latency_micros = (time_now - incoming->packet_send_time) / 
-	    (receiver->clock_freq * 1000);
-	  log_flow_start(&receiver->log, bytes, packet_latency_micros);
+	  uint64_t time_now = current_time_nanoseconds();
+	  log_flow_start(&receiver->log, bytes, (time_now - incoming->packet_send_time));
 	  bytes_left[ready_index] = incoming->size * MTU_SIZE - sizeof(struct packet);
 	}
 	else {
@@ -149,7 +147,7 @@ void *run_tcp_receiver(void *arg)
 	  int bytes = read(ready_fd, buf, count);
 	  log_data_received(&receiver->log, bytes);
 	  bytes_left[ready_index] -= bytes;
-	  uint64_t time_now = current_time();
+	  uint64_t time_now = current_time_nanoseconds();
 
 	  if (bytes_left[ready_index] == 0)
 	    {
@@ -160,9 +158,7 @@ void *run_tcp_receiver(void *arg)
 		     incoming->flow_start_time, incoming->id, time_now);*/
 
 	      if (incoming->flow_start_time < end_time) {
-		uint32_t fc_time_micros = (time_now - incoming->flow_start_time) / 
-		  (receiver->clock_freq * 1000);
-		log_flow_completed(&receiver->log, fc_time_micros);
+		log_flow_completed(&receiver->log, (time_now - incoming->flow_start_time));
 	      }
  
 	      assert(shutdown(ready_fd, SHUT_RDWR) != -1);
@@ -175,7 +171,7 @@ void *run_tcp_receiver(void *arg)
 	}
       }
     
-    uint64_t now = current_time();
+    uint64_t now = current_time_nanoseconds();
     if (now > interval_end_time && now < end_time) {
       receiver->log.current->end_time = now;
 

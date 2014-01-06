@@ -1,7 +1,7 @@
 # Macros
 CC = gcc
 CCFLAGS = -g
-LDFLAGS = -lm -pthread
+LDFLAGS = -lm -pthread -lrt
 
 # Pattern rule
 %.o: %.c

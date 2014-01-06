@@ -14,11 +14,12 @@
 #include <stdio.h>
 #include <stdlib.h>
 
-#define LATENCY_BIN_DURATION 50 // in microseconds
+#define LATENCY_BIN_DURATION (50 * 1000) // in nanoseconds
 #define MAX_SENDERS 1
 #define NUM_LATENCY_BINS 10
 
 // Information logged per sending node per interval
+// All times are in nanoseconds
 struct node_info {
   uint16_t node_id;
   uint32_t num_start_packets;  // number of first packets received
@@ -29,6 +30,7 @@ struct node_info {
 };
 
 // Information logged per interval on each server
+// All times are in nanoseconds
 struct interval_info {
   uint64_t start_time;
   uint64_t end_time;
@@ -71,7 +73,7 @@ void init_interval(struct interval_info *interval) {
 
 // Logs the arrival of a packet indicating the start of a flow
 static inline
-void log_flow_start(struct log *log, uint32_t bytes, uint32_t latency) {
+void log_flow_start(struct log *log, uint32_t bytes, uint64_t latency) {
   assert(log != NULL);
 
   // TODO: support multiple senders

@@ -6,6 +6,7 @@
  */
 
 #include <stdint.h>
+#include <time.h>
 
 #ifndef COMMON_H_
 #define COMMON_H_
@@ -23,6 +24,17 @@ struct packet {
   uint32_t size;
   uint32_t id;
 };
+
+// Get the current time in nanoseconds
+static inline
+uint64_t current_time_nanoseconds(void) {
+
+  struct timespec time;
+
+  clock_gettime(CLOCK_REALTIME, &time);
+
+  return time.tv_nsec + time.tv_sec * 1000 * 1000 * 1000;
+}
 
 // Get the current time
 // Copied from www.kerrywong.com/2009/05/28/timing-methods-in-c-under-linux/

@@ -131,7 +131,7 @@ void *run_tcp_sender(void *arg)
 
   uint64_t start_time = sender->start_time;
   uint64_t end_time = start_time + sender->duration;
-  uint64_t next_send_time = start_time;
+  uint64_t next_send_time;
 
   // Info about connections
   struct connection connections[MAX_CONNECTIONS];
@@ -151,17 +151,17 @@ void *run_tcp_sender(void *arg)
   outgoing.size = packet.size;
   outgoing.id = count++;
 
-  while (current_time() < start_time);
+  while (current_time_nanoseconds() < start_time);
 
-  while (current_time() < end_time)
+  while (current_time_nanoseconds() < end_time)
     {
       // Set timeout for when next packet should be sent
-      uint64_t time_now = current_time();
+      uint64_t time_now = current_time_nanoseconds();
       uint64_t time_diff = 0;
       if (next_send_time > time_now)
 	time_diff = (next_send_time < end_time ? next_send_time : end_time) - time_now;
-      assert(time_diff / sender->clock_freq < 1000 * 1000 * 1000);
-      ts.tv_nsec = time_diff / sender->clock_freq;
+      assert(time_diff < 1000 * 1000 * 1000);
+      ts.tv_nsec = time_diff;
 
       // Add fds to set and compute max
       FD_ZERO(&wfds);
@@ -180,7 +180,7 @@ void *run_tcp_sender(void *arg)
       if (retval < 0)
 	break;
 
-      if (current_time() >= next_send_time) {
+      if (current_time_nanoseconds() >= next_send_time) {
 	// Open a new connection
 
 	// Find an index to use
@@ -219,7 +219,7 @@ void *run_tcp_sender(void *arg)
 						(struct sockaddr *)&sock_addr,
 						sizeof(sock_addr));
 	if (connections[index].return_val < 0 && errno != EINPROGRESS) {
-	  assert(current_time() > end_time);
+	  assert(current_time_nanoseconds() > end_time);
 	  return;
 	}
 
@@ -257,7 +257,7 @@ void *run_tcp_sender(void *arg)
 	    // send data
 	    struct packet *outgoing_data = (struct packet *) connections[i].buffer;
 	    connections[i].bytes_left = outgoing_data->size * MTU_SIZE;
-	    outgoing_data->packet_send_time = current_time();
+	    outgoing_data->packet_send_time = current_time_nanoseconds();
 	    connections[i].return_val = send(connections[i].sock_fd,
 					     connections[i].buffer,
 					     connections[i].bytes_left, 0);
@@ -265,7 +265,7 @@ void *run_tcp_sender(void *arg)
 	    /*printf("sent, \t\t%d, %d, %d, %"PRIu64", %d, %"PRIu64"\n",
 		   outgoing_data->sender, outgoing_data->receiver,
 		   outgoing_data->size, outgoing_data->flow_start_time,
-		   outgoing_data->id, current_time());*/
+		   outgoing_data->id, current_time_nanoseconds());*/
 	    flows_sent++;
 	  }
 	  else {

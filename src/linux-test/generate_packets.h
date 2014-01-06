@@ -25,7 +25,6 @@ struct generator {
   uint64_t time_param;
   uint32_t size_param;
   uint64_t t_last_request;
-  uint32_t id;
 };
 
 struct gen_packet {
@@ -36,7 +35,9 @@ struct gen_packet {
 // Initialize an instance of a generator.
 // Allows for different distributions of packet arrival time and
 // packet size
-void gen_init(struct generator *generator, enum time_distribution time_dist, enum size_distribution size_dist, uint64_t time_param, uint32_t size_param, uint32_t id/*, uint32_t num_machines*/);
+void gen_init(struct generator *generator, enum time_distribution time_dist,
+	      enum size_distribution size_dist, uint64_t time_param,
+	      uint32_t size_param);
 
 // Generate a packet
 void gen_next_packet(struct generator *generator, struct gen_packet *out);

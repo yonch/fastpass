@@ -150,7 +150,7 @@ int exec_admission_core(void *void_cmd_p)
 		current_timeslot += BATCH_SIZE * N_ADMISSION_CORES;
 
 		/* manage timers: timer documentation asks for this to run on all cores
-		/* there shouldn't be any timers on this core */
+		 * there shouldn't be any timers on this core */
 		rte_timer_manage();
 	}
 

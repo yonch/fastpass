@@ -15,6 +15,10 @@ int exec_path_sel_core(void *void_cmd_p)
 		select_paths(admitted, NUM_RACKS);
 
 		fp_ring_enqueue(cmd->q_path_selected, (void *)admitted);
+
+		/* manage timers: timer documentation asks for this to run on all cores
+		/* there shouldn't be any timers on this core */
+		rte_timer_manage();
 	}
 	return 0;
 }

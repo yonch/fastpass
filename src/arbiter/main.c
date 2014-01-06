@@ -121,7 +121,7 @@
 
 #define TX_PTHRESH 16 /**< Default values of TX prefetch threshold reg. */
 #define TX_HTHRESH 8  /**< Default values of TX host threshold reg. */
-#define TX_WTHRESH 8  /**< Default values of TX write-back threshold reg. */
+#define TX_WTHRESH 0  /**< Default values of TX write-back threshold reg. */
 
 #define BURST_TX_DRAIN 200000ULL /* around 100us at 2 Ghz */
 
@@ -634,9 +634,10 @@ conf_setup(void)
 		fc_conf.mode = RTE_FC_NONE;
 		fc_conf.high_water = 1024;
 		fc_conf.low_water = 512;
-		fc_conf.pause_time = 1;
+		fc_conf.pause_time = 100;
 		fc_conf.send_xon = 0;
-		ret = rte_eth_dev_flow_ctrl_set(portid, &fc_conf);
+		(void)fc_conf;
+		//ret = rte_eth_dev_flow_ctrl_set(portid, &fc_conf);
 		if (ret < 0)
 			rte_exit(EXIT_FAILURE, "rte_eth_dev_flow_ctrl_set: err=%d, port=%d\n",
 					ret, portid);
@@ -850,6 +851,8 @@ init_mem(void)
 		}
 		/** RX mbuf pool */
 		if (rx_pktmbuf_pool[socketid] == NULL) {
+			printf("Trying to allocat RX mbuf pool on socket %d: %u buffers of size %lu\n",
+					socketid, NB_RX_MBUF, RX_MBUF_SIZE);
 			rte_snprintf(s, sizeof(s), "mbuf_pool_%d", socketid);
 			rx_pktmbuf_pool[socketid] =
 				rte_mempool_create(s, NB_RX_MBUF, RX_MBUF_SIZE, MEMPOOL_CACHE_SIZE,
@@ -890,7 +893,7 @@ static int setup_cores(void)
 	int i;
 	int ret;
 	for (i = 0; i < n_enabled_lcore; i++) {
-		ret = lcore_init_power(enabled_lcore[i]);
+      		ret = lcore_init_power(enabled_lcore[i]);
 		if (ret != 0)
 			return ret;
 	}
@@ -945,7 +948,8 @@ int main(int argc, char **argv)
 	if (ret < 0)
 		rte_exit(EXIT_FAILURE, "conf_setup failed\n");
 
-	ret = setup_cores();
+	if (0)
+	  ret = setup_cores();
 	if (ret < 0)
 		rte_exit(EXIT_FAILURE, "setup_cores() failed\n");
 

@@ -203,10 +203,10 @@ static void horizon_set(struct fp_sched_data* q, u64 timeslot, u64 src_dst_key)
  *  computes the time when next request should go out
  *  @returns true if the timer was set, false if it was already set
  */
-static inline bool set_request_timer(struct fp_sched_data* q, u64 when)
+static inline bool trigger_tx(struct fp_sched_data* q)
 {
 	/* rate limit sending of requests */
-	if (pacer_trigger(&q->request_pacer, when)) {
+	if (pacer_trigger(&q->request_pacer, fp_get_time_ns())) {
 		hrtimer_start(&q->request_timer,
 					  ns_to_ktime(pacer_next_event(&q->request_pacer)),
 					  HRTIMER_MODE_ABS);
@@ -215,11 +215,11 @@ static inline bool set_request_timer(struct fp_sched_data* q, u64 when)
 	return false;
 }
 
-void trigger_request(void *param)
+void trigger_tx_voidp(void *param)
 {
 	struct Qdisc *sch = (struct Qdisc *)param;
 	struct fp_sched_data *q = qdisc_priv(sch);
-	set_request_timer(q, fp_get_time_ns());
+	trigger_tx(q);
 }
 
 static int cancel_retrans_timer(void *param)
@@ -287,7 +287,7 @@ qdisc_destroyed:
 void req_timer_flowqueue_enqueue(struct fp_sched_data* q)
 {
 	/* if enqueued first flow in q->unreq_flows, set request timer */
-	if (set_request_timer(q, fp_get_time_ns()))
+	if (trigger_tx(q))
 		fp_debug("set request timer to %llu\n", pacer_next_event(&q->request_pacer));
 }
 
@@ -303,7 +303,7 @@ void req_timer_sending_request(struct fp_sched_data *q, u64 now)
 	/* set timer for next request, if a request would be required */
 	if (q->n_unreq_flows)
 		/* have more requests to send */
-		set_request_timer(q, now);
+		trigger_tx(q);
 }
 
 static bool flow_in_flowqueue(struct fp_flow *f)
@@ -489,11 +489,9 @@ cannot_classify:
 	// ARP packets should not count as classify errors
 	if (unlikely(skb->protocol != htons(ETH_P_ARP))) {
 		q->stat.classify_errors++;
-		if (fastpass_debug) {
-			fp_debug("cannot classify packet with protocol %u:\n", skb->protocol);
-			print_hex_dump(KERN_DEBUG, "cannot classify: ", DUMP_PREFIX_OFFSET,
-					16, 1, skb->data, min_t(size_t, skb->len, 64), false);
-		}
+		fp_debug("cannot classify packet with protocol %u:\n", skb->protocol);
+		print_hex_dump(KERN_DEBUG, "cannot classify: ", DUMP_PREFIX_OFFSET,
+				16, 1, skb->data, min_t(size_t, skb->len, 64), false);
 	} else {
 		q->stat.arp_pkts++;
 	}
@@ -536,8 +534,10 @@ void flow_inc_alloc(struct fp_sched_data* q, struct fp_flow* f)
 	f->alloc_tslots++;
 	q->alloc_tslots++;
 
-	if (unlikely(f->acked_tslots < f->alloc_tslots))
+	if (unlikely(f->acked_tslots < f->alloc_tslots)) {
+		q->acked_tslots += f->alloc_tslots - f->acked_tslots;
 		f->acked_tslots = f->alloc_tslots;
+	}
 
 	if (unlikely((!flow_in_flowqueue(f))
 			&& (f->requested_tslots != f->demand_tslots)
@@ -562,13 +562,16 @@ static void flow_inc_demand(struct fp_sched_data *q, struct fp_flow *f)
 	}
 }
 
-/* add skb to flow queue */
-static void flow_enqueue_skb(struct Qdisc *sch, struct fp_flow *flow,
+/* add skb to flow queue. returns false if skb is too large*/
+static bool flow_enqueue_skb(struct Qdisc *sch, struct fp_flow *flow,
 		struct sk_buff *skb)
 {
 	struct fp_sched_data *q = qdisc_priv(sch);
 	struct sk_buff *head = flow->head;
 	s64 cost = (s64) psched_l2t_ns(&q->data_rate, qdisc_pkt_len(skb));
+
+	if (cost > q->tslot_len)
+		return false;
 
 	skb->next = NULL;
 	if (!head) {
@@ -599,6 +602,7 @@ static void flow_enqueue_skb(struct Qdisc *sch, struct fp_flow *flow,
 	flow->qlen++;
 	sch->q.qlen++;
 	sch->qstats.backlog += qdisc_pkt_len(skb);
+	return true;
 }
 
 static struct sk_buff *flow_queue_peek(struct fp_flow *f)
@@ -630,7 +634,12 @@ static int fpq_enqueue(struct sk_buff *skb, struct Qdisc *sch)
 	}
 
 	/* queue skb to flow, update statistics */
-	flow_enqueue_skb(sch, f, skb);
+	if (!flow_enqueue_skb(sch, f, skb)) {
+		fp_debug("got packet that is larger than a timeslot len=%d, flow 0x%llX\n",
+			qdisc_pkt_len(skb), f->src_dst_key);
+		q->stat.pkt_too_big++;
+		return qdisc_drop(skb, sch);
+	}
 	fp_debug("enqueued packet of len %d to flow 0x%llX, qlen=%d\n",
 			qdisc_pkt_len(skb), f->src_dst_key, f->qlen);
 
@@ -859,6 +868,9 @@ static void handle_alloc(void *param, u32 base_tslot, u16 *dst,
 	int dst_ind;
 	u64 full_tslot;
 	u64 now = fp_get_time_ns();
+
+	/* every alloc should be ACKed */
+	trigger_tx(q);
 
 	update_current_timeslot(sch, now);
 	full_tslot = q->horizon.timeslot - (1ULL << 18); /* 1/4 back, 3/4 front */
@@ -1136,7 +1148,7 @@ struct fpproto_ops fastpass_sch_proto_ops = {
 	.handle_alloc	= &handle_alloc,
 	.handle_ack		= &handle_ack,
 	.handle_neg_ack	= &handle_neg_ack,
-	.trigger_request= &trigger_request,
+	.trigger_request= &trigger_tx_voidp,
 	.set_timer		= &set_retrans_timer,
 	.cancel_timer	= &cancel_retrans_timer,
 };
@@ -1559,7 +1571,7 @@ static int fp_tc_dump(struct Qdisc *sch, struct sk_buff *skb)
 	if (nla_put_u32(skb, TCA_FASTPASS_PLIMIT, sch->limit) ||
 	    nla_put_u32(skb, TCA_FASTPASS_FLOW_PLIMIT, q->flow_plimit) ||
 	    nla_put_u32(skb, TCA_FASTPASS_BUCKETS_LOG, q->hash_tbl_log) ||
-	    nla_put_u32(skb, TCA_FASTPASS_DATA_RATE, q->data_rate.rate_bytes_ps) ||
+	    nla_put_u32(skb, TCA_FASTPASS_DATA_RATE, q->data_rate.rate_bps) ||
 	    nla_put_u32(skb, TCA_FASTPASS_TIMESLOT_NSEC, q->tslot_len) ||
 	    nla_put_u32(skb, TCA_FASTPASS_REQUEST_COST, q->req_cost) ||
 	    nla_put_u32(skb, TCA_FASTPASS_REQUEST_BUCKET, q->req_bucketlen) ||

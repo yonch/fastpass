@@ -1,0 +1,3 @@
+# Intel DPDK
+export RTE_SDK=$HOME/src/DPDK
+export RTE_TARGET=x86_64-default-linuxapp-gcc

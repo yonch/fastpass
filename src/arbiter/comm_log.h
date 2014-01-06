@@ -14,6 +14,8 @@
 #include <rte_cycles.h>
 
 #include "control.h"
+#include "../protocol/platform.h"
+#include "dpdk-time.h"
 
 /**
  * logged information for a core
@@ -51,7 +53,13 @@ struct comm_log {
 extern struct comm_log comm_core_logs[RTE_MAX_LCORE];
 
 #define RTE_LOGTYPE_COMM RTE_LOGTYPE_USER1
+
+#ifdef CONFIG_IP_FASTPASS_DEBUG
 #define COMM_DEBUG(a...) RTE_LOG(DEBUG, COMM, ##a)
+#else
+#define COMM_DEBUG(a...)
+#endif
+
 
 /* current comm log */
 #define CL		(&comm_core_logs[rte_lcore_id()])
@@ -62,6 +70,7 @@ static inline void comm_log_init(struct comm_log *cl)
 }
 
 static inline void comm_log_processed_batch(int nb_rx, uint64_t rx_time) {
+	(void)rx_time;
 	CL->rx_pkts += nb_rx;
 	CL->rx_batches++;
 	if (nb_rx > 0) {
@@ -72,33 +81,40 @@ static inline void comm_log_processed_batch(int nb_rx, uint64_t rx_time) {
 }
 
 static inline void comm_log_tx_cannot_allocate_mbuf(uint32_t dst_ip) {
+	(void)dst_ip;
 	CL->tx_cannot_alloc_mbuf++;
 	COMM_DEBUG("core %d could not allocate TX mbuf for packet to IP "
 			"0x%Xu\n",rte_lcore_id(), rte_be_to_cpu_32(dst_ip));
 }
 
 static inline void comm_log_rx_non_ipv4_packet(uint8_t portid) {
+	(void)portid;
 	CL->rx_non_ipv4_pkts++;
 	COMM_DEBUG("got non-IPv4 packet on portid %d\n", portid);
 }
 
 static inline void comm_log_rx_ip_non_fastpass_pkt(uint8_t portid) {
+	(void)portid;
 	CL->rx_ipv4_non_fastpss_pkts++;
 	COMM_DEBUG("got an IPv4 non-fastpass packet on portid %d\n", portid);
 }
 
 static inline void comm_log_tx_pkt(uint32_t node_id, uint64_t when) {
+	(void)node_id;
+	(void)when;
 	CL->tx_pkt++;
 	COMM_DEBUG("sending a packet to node ID %u at time %lu\n", node_id, when);
 }
 
 static inline void comm_log_pktdesc_alloc_failed(uint32_t node_id) {
+	(void)node_id;
 	CL->pktdesc_alloc_failed++;
 	COMM_DEBUG("failed to allocate a pktdesc for node ID %u\n", node_id);
 }
 
 static inline void comm_log_rx_truncated_pkt(uint32_t ip_total_len,
 		uint32_t mbuf_len, uint32_t src_ip) {
+	(void)ip_total_len;(void)mbuf_len;(void)src_ip;
 	CL->rx_truncated_pkt++;
 	COMM_DEBUG("packet from IP %08X is %u bytes, too short for its IP length %u\n",
 			src_ip, mbuf_len, ip_total_len);
@@ -106,6 +122,7 @@ static inline void comm_log_rx_truncated_pkt(uint32_t ip_total_len,
 
 static inline void comm_log_areq_invalid_dst(uint32_t requesting_node,
 		uint16_t dest) {
+	(void)requesting_node;(void)dest;
 	CL->areq_invalid_dst++;
 	COMM_DEBUG("received A-REQ from node %u for invalid dst %u\n",
 			requesting_node, dest);
@@ -113,6 +130,7 @@ static inline void comm_log_areq_invalid_dst(uint32_t requesting_node,
 
 static inline void comm_log_demand_increased(uint32_t node_id,
 		uint32_t dst, uint32_t orig_demand, uint32_t demand, int32_t demand_diff) {
+	(void)node_id;(void)dst;(void)orig_demand;(void)demand;(void)demand_diff;
 	CL->demand_increased++;
 	COMM_DEBUG("demand for flow src %u dst %u increased by %d (from %u to %u)\n",
 			node_id, dst, demand_diff, orig_demand, demand);
@@ -120,57 +138,71 @@ static inline void comm_log_demand_increased(uint32_t node_id,
 
 static inline void comm_log_demand_remained(uint32_t node_id, uint32_t dst,
 		uint32_t orig_demand, uint32_t demand) {
+	(void)node_id;(void)dst;(void)orig_demand;(void)demand;
 	CL->demand_remained++;
 	COMM_DEBUG("for flow src %u dst %u got demand 0x%X lower than current 0x%X\n",
 			node_id, dst, demand, orig_demand);
 }
 
 static inline void comm_log_triggered_send(uint32_t node_id) {
+	(void)node_id;
 	CL->triggered_send++;
 	COMM_DEBUG("triggered send to node %u\n", node_id);
 }
 
 static inline void comm_log_dequeue_admitted_failed(int rc) {
+	(void)rc;
 	CL->dequeue_admitted_failed++;
 	COMM_DEBUG("failed to dequeue admitted flows, got error %d\n", rc);
 }
 
 static inline void comm_log_got_admitted_tslot(uint16_t size, uint64_t timeslot) {
+	(void)size;(void)timeslot;
 	CL->processed_tslots++;
 	if (size > 0) {
 		CL->non_empty_tslots++;
 		CL->occupied_node_tslots += size;
 
-		COMM_DEBUG("admitted_traffic for %d nodes (tslot %lu, counter %lu, cycle timer %lu)\n",
-				size, timeslot, CL->processed_tslots, rte_get_tsc_cycles());
+#ifdef CONFIG_IP_FASTPASS_DEBUG
+		uint64_t now = fp_get_time_ns(); /* TODO: disable this */
+		COMM_DEBUG("admitted_traffic for %d nodes (tslot %lu, now %lu, diff %ld, counter %lu)\n",
+				size, timeslot, now,
+				(int64_t)(timeslot * TIMESLOT_LENGTH_NS - now),
+				CL->processed_tslots);
+#endif
 	}
 }
 
 static inline void comm_log_alloc_fell_off_window(uint64_t thrown_tslot,
 		uint64_t current_timeslot, uint16_t src, uint16_t thrown_alloc) {
+	(void)thrown_tslot;(void)current_timeslot;(void) src;(void)thrown_alloc;
 	CL->alloc_fell_off_window++;
 	COMM_DEBUG("alloc at tslot %lu from 0x%X to 0x%X still not sent at timeslot %lu\n",
 			thrown_tslot, src, thrown_alloc, current_timeslot);
 }
 
 static inline void comm_log_handle_reset(uint16_t node_id, int in_sync) {
+	(void)node_id;(void)in_sync;
 	CL->handle_reset++;
 	COMM_DEBUG("applying reset for node %d in_sync=%d\n", node_id, in_sync);
 }
 
 static inline void comm_log_cancel_timer(uint16_t node_id) {
+	(void)node_id;
 	CL->timer_cancel++;
 	COMM_DEBUG("cancel_timer node %d\n", node_id);
 }
 
 static inline void comm_log_set_timer(uint16_t node_id, uint64_t when,
 		uint64_t gap) {
+	(void)node_id;(void)when;(void)gap;
 	CL->timer_set++;
 	COMM_DEBUG("set_timer node %d at %lu (in %lu cycles)\n", node_id, when, gap);
 }
 
 static inline void comm_log_retrans_timer_expired(uint16_t node_id,
 		uint64_t now) {
+	(void)node_id;(void)now;
 	CL->retrans_timer_expired++;
 	COMM_DEBUG("retrans_timer for node %d expired at %lu\n", node_id, now);
 }
@@ -178,12 +210,14 @@ static inline void comm_log_retrans_timer_expired(uint16_t node_id,
 static inline void comm_log_neg_ack_increased_backlog(uint16_t src,
 		uint16_t dst, uint16_t amount, uint64_t seqno)
 {
+	(void)src;(void)dst;(void)amount;(void)seqno;
 	COMM_DEBUG("increased backlog from node %d to %d by %d due to neg ack of seqno 0x%lX\n",
 			src, dst, amount, seqno);
 }
 
 static inline void comm_log_neg_ack(uint16_t src, uint16_t n_dsts,
 		uint32_t n_tslots, uint64_t seqno) {
+	(void)src;(void)n_dsts;(void)n_tslots;(void)seqno;
 	if (n_dsts == 0) {
 		CL->neg_acks_without_alloc++;
 		return;

@@ -359,7 +359,7 @@ make_packet(struct end_node_state *en, struct fpproto_pktdesc *pd)
 
 	/* encode fastpass payload */
 	data_len = fpproto_encode_packet(&en->conn, pd, payload_ptr,
-			FASTPASS_MAX_PAYLOAD, en->controller_ip, en->dst_ip);
+			FASTPASS_MAX_PAYLOAD, en->controller_ip, en->dst_ip, 26);
 
 	/* adjust packet size */
 	ipv4_length = sizeof(struct ipv4_hdr) + data_len;
@@ -543,8 +543,8 @@ static inline void process_allocated_traffic(struct comm_core_state *core,
 
 			/* advance the window */
 			wnd_advance(wnd, current_timeslot - wnd_head(wnd));
-			COMM_DEBUG("advanced window flow %lu. current %lu head %llu\n",
-					en - end_nodes, current_timeslot, wnd_head(wnd));
+//			COMM_DEBUG("advanced window flow %lu. current %lu head %llu\n",
+//					en - end_nodes, current_timeslot, wnd_head(wnd));
 
 			/* add the allocation */
 			wnd_mark(wnd, current_timeslot);

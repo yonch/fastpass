@@ -1,7 +1,11 @@
 #!/bin/bash
 
-sudo tc qdisc del dev eth0 root
+#DEV="eth0"
+DEV="eth5"
+TC="/home/am2/yonch/tc"
+
+sudo $TC qdisc del dev $DEV root
 sudo rmmod fastpass
 echo -- lsmod empty --
-sudo lsmod
+sudo lsmod | grep fastpass
 echo -----------------

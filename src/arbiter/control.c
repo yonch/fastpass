@@ -91,7 +91,7 @@ void launch_cores(void)
 
 	// Calculate start and end times
 	start_time = rte_get_timer_cycles() + sec_to_hpet(0.2); /* start after last end */
-	end_time = start_time + sec_to_hpet(1000);
+	end_time = start_time + sec_to_hpet(100*1000*1000);
 
 	/*** ADMISSION CORES ***/
 	/* set commands */

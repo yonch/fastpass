@@ -13,6 +13,13 @@
 #include <linux/jhash.h>
 #include <net/ip.h>
 #include <linux/types.h>
+#include <linux/jiffies.h>
+
+#ifndef time_in_range64
+#define time_in_range64(a, b, c) \
+	(time_after_eq64(a, b) && \
+	 time_before_eq64(a, c))
+#endif
 
 #else
 

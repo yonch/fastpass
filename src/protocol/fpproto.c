@@ -200,17 +200,14 @@ static int reset_payload_handler(struct fpproto_conn *conn, u64 full_tstamp)
 
 	if (full_tstamp == conn->last_reset_time) {
 		if (IS_ENDPOINT && !conn->in_sync) {
-			conn->in_sync = 1;
 			fp_debug("Now in sync\n");
 		} else {
 			conn->stat.redundant_reset++;
 			fp_debug("received redundant reset\n");
 		}
+		conn->in_sync = IS_ENDPOINT;
 		return 0;
 	}
-
-	/* got a different reset from what we have, so assume we're not in sync */
-	conn->in_sync = 0;
 
 	/* did we accept a reset recently? */
 	last_is_recent = tstamp_in_window(conn->last_reset_time, now, conn->rst_win_ns);
@@ -331,8 +328,8 @@ static void got_bad_packet(struct fpproto_conn *conn)
 
 	/* was there a recent reset? */
 	if (time_in_range64(
-			now - FASTPASS_RESET_WINDOW_NS,
 			conn->last_reset_time,
+			now - FASTPASS_RESET_WINDOW_NS,
 			now + FASTPASS_RESET_WINDOW_NS)) {
 		/* will not trigger a new one */
 		conn->stat.no_reset_because_recent++;
@@ -538,9 +535,10 @@ void fpproto_handle_rx_packet(struct fpproto_conn *conn, u8 *pkt, u32 len,
 	in_seq += (ntohs(hdr->seq) - in_seq) & 0xFFFF;
 	ack_seq += (ntohs(hdr->ack_seq) - ack_seq) & 0xFFFF;
 	fp_debug("packet with in_seq 0x%04X (full 0x%llX, prev_max 0x%llX)"
-			" ack_seq 0x%04X (full 0x%llX, max_sent 0x%llX)\n",
+			" ack_seq 0x%04X (full 0x%llX, max_sent 0x%llX) checksum 0x%04X\n",
 			ntohs(hdr->seq), in_seq, conn->in_max_seqno,
-			ntohs(hdr->ack_seq), ack_seq, wnd_head(&conn->outwnd));
+			ntohs(hdr->ack_seq), ack_seq, wnd_head(&conn->outwnd),
+			hdr->checksum);
 
 	/* verify checksum */
 	expected_checksum = hdr->checksum;
@@ -554,6 +552,10 @@ void fpproto_handle_rx_packet(struct fpproto_conn *conn, u8 *pkt, u32 len,
 	}
 
 	if (unlikely(payload_type == FASTPASS_PTYPE_RESET)) {
+		/* a reset in any direction will cause RESETs to be sent until the
+		 * end-node decides it is in sync and stops sending RESETs */
+		conn->in_sync = 0;
+
 		/* a good-checksum RESET packet always triggers a controller response */
 		if (!IS_ENDPOINT && conn->ops->trigger_request)
 			conn->ops->trigger_request(conn->ops_param);
@@ -613,6 +615,11 @@ handle_payload:
 			return;
 
 		curp += payload_length;
+		break;
+
+	case FASTPASS_PTYPE_PADDING:
+		/* okay, we're done, it's padding from now on */
+		curp = data_end;
 		break;
 
 	default:
@@ -714,7 +721,7 @@ void fpproto_commit_packet(struct fpproto_conn *conn, struct fpproto_pktdesc *pd
 
 int fpproto_encode_packet(struct fpproto_conn *conn,
 		struct fpproto_pktdesc *pd, u8 *pkt, u32 max_len, __be32 saddr,
-		__be32 daddr)
+		__be32 daddr, u32 min_size)
 {
 	int i;
 	struct fastpass_areq *areq;
@@ -742,17 +749,19 @@ int fpproto_encode_packet(struct fpproto_conn *conn,
 	}
 
 #ifdef FASTPASS_ENDPOINT
-	/* A-REQ type short */
-	*(__be16 *)curp = htons((FASTPASS_PTYPE_AREQ << 12) |
-					  (pd->n_areq & 0x3F));
-	curp += 2;
+	if (pd->n_areq > 0) {
+		/* A-REQ type short */
+		*(__be16 *)curp = htons((FASTPASS_PTYPE_AREQ << 12) |
+						  (pd->n_areq & 0x3F));
+		curp += 2;
 
-	/* A-REQ requests */
-	for (i = 0; i < pd->n_areq; i++) {
-		areq = (struct fastpass_areq *)curp;
-		areq->dst = htons((__be16)pd->areq[i].src_dst_key);
-		areq->count = htons((u16)pd->areq[i].tslots);
-		curp += 4;
+		/* A-REQ requests */
+		for (i = 0; i < pd->n_areq; i++) {
+			areq = (struct fastpass_areq *)curp;
+			areq->dst = htons((__be16)pd->areq[i].src_dst_key);
+			areq->count = htons((u16)pd->areq[i].tslots);
+			curp += 4;
+		}
 	}
 #else
 	if (pd->alloc_tslot > 0) {
@@ -772,6 +781,12 @@ int fpproto_encode_packet(struct fpproto_conn *conn,
 	}
 	(void) i; (void) areq; (void)conn; (void)max_len; /* TODO, fix this better */
 #endif
+
+	if (curp - pkt < min_size) {
+		/* add padding */
+		memset(curp, 0, min_size - (curp - pkt));
+		curp = pkt + min_size;
+	}
 
 	/* checksum */
 	*(__be16 *)(pkt + 6) = fastpass_checksum(pkt, curp - pkt, saddr, daddr,

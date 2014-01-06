@@ -36,15 +36,4 @@ uint64_t current_time_nanoseconds(void) {
   return time.tv_nsec + time.tv_sec * 1000 * 1000 * 1000;
 }
 
-// Get the current time
-// Copied from www.kerrywong.com/2009/05/28/timing-methods-in-c-under-linux/
-static inline uint64_t current_time(void)
-{
-  uint32_t a, d;
-
-  __asm__ volatile("rdtsc" : "=a" (a), "=d" (d));
-
-  return ((uint64_t) a | (((uint64_t) d) << 32));
-}
-
 #endif /* COMMON_H_ */

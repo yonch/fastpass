@@ -9,7 +9,7 @@
 #include <math.h>
 #include <stdio.h>
 
-#include "../linux-test/common.h"  // For timing
+#include "rdtsc.h"  // For timing
 #include "admissible_traffic.h"
 #include "admissible_structures.h"
 #include "path_selection.h"

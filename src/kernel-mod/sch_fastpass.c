@@ -635,7 +635,7 @@ static int fpq_enqueue(struct sk_buff *skb, struct Qdisc *sch)
 
 	/* queue skb to flow, update statistics */
 	if (!flow_enqueue_skb(sch, f, skb)) {
-		fp_debug("got packet that is larger than a timeslot len=%d, flow 0x%llX\n",
+		FASTPASS_WARN("got packet that is larger than a timeslot len=%d, flow 0x%llX\n",
 			qdisc_pkt_len(skb), f->src_dst_key);
 		q->stat.pkt_too_big++;
 		return qdisc_drop(skb, sch);

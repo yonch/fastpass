@@ -301,12 +301,12 @@ void req_timer_sending_request(struct fp_sched_data *q, u64 now)
 	pacer_reset(&q->request_pacer);
 
 	/* set timer for next request, if a request would be required */
-	if (q->n_unreq_flows)
+	if (q->demand_tslots != q->alloc_tslots)
 		/* have more requests to send */
 		trigger_tx(q);
 }
 
-static bool flow_in_flowqueue(struct fp_flow *f)
+static inline bool flow_in_flowqueue(struct fp_flow *f)
 {
 	return (f->state != FLOW_UNQUEUED);
 }
@@ -516,12 +516,6 @@ static struct sk_buff *flow_dequeue_skb(struct Qdisc *sch, struct fp_flow *flow)
 	return skb;
 }
 
-static bool flow_is_below_watermark(struct fp_flow* f)
-{
-	u64 watermark = f->alloc_tslots + FASTPASS_REQUEST_LOW_WATERMARK;
-	return time_before_eq64(f->requested_tslots, watermark);
-}
-
 void flow_inc_alloc(struct fp_sched_data* q, struct fp_flow* f)
 {
 	if (unlikely(f->alloc_tslots == f->demand_tslots)) {
@@ -540,8 +534,7 @@ void flow_inc_alloc(struct fp_sched_data* q, struct fp_flow* f)
 	}
 
 	if (unlikely((!flow_in_flowqueue(f))
-			&& (f->requested_tslots != f->demand_tslots)
-			&& flow_is_below_watermark(f)))
+			&& (f->requested_tslots != f->demand_tslots)))
 		flowqueue_enqueue_request(q, f);
 }
 
@@ -554,12 +547,10 @@ static void flow_inc_demand(struct fp_sched_data *q, struct fp_flow *f)
 {
 	f->demand_tslots++;
 	q->demand_tslots++;
-	if ((f->demand_tslots == f->requested_tslots + 1)
-			&& flow_is_below_watermark(f)) {
 
+	if (!flow_in_flowqueue(f))
 		/* flow not on scheduling queue yet, enqueue */
 		flowqueue_enqueue_request(q, f);
-	}
 }
 
 /* add skb to flow queue. returns false if skb is too large*/

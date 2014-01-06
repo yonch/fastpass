@@ -42,13 +42,12 @@ struct connection {
  
 void tcp_sender_init(struct tcp_sender *sender, struct generator *gen,
 		     uint32_t id, uint64_t start_time, uint64_t duration,
-		     float clock_freq, uint16_t port_num, const char *dest)
+		     uint16_t port_num, const char *dest)
 {
   sender->gen = gen;
   sender->id = id;
   sender->start_time = start_time;
   sender->duration = duration;
-  sender->clock_freq = clock_freq;
   sender->port_num = port_num;
   sender->dest = dest;
 }

@@ -27,13 +27,12 @@
 #define NUM_INTERVALS 1000
 
 void tcp_receiver_init(struct tcp_receiver *receiver, uint64_t start_time,
-		       uint64_t duration, float clock_freq, uint16_t port_num)
+		       uint64_t duration, uint16_t port_num)
 {
   int i;
 
   receiver->start_time = start_time;
   receiver->duration = duration;
-  receiver->clock_freq = clock_freq;
   receiver->port_num = port_num;
   init_log(&receiver->log, NUM_INTERVALS);
 }

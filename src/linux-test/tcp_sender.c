@@ -24,6 +24,7 @@
 #include <sys/unistd.h>
 #include <sys/fcntl.h>
 
+#define IP_ADDR_MAX_LENGTH 20
 #define NUM_CORES 4
 
 enum state {
@@ -41,12 +42,11 @@ struct connection {
 };
  
 void tcp_sender_init(struct tcp_sender *sender, struct generator *gen,
-		     uint32_t id, uint64_t start_time, uint64_t duration,
+		     uint32_t id, uint64_t duration,
 		     uint16_t port_num, const char *dest)
 {
   sender->gen = gen;
   sender->id = id;
-  sender->start_time = start_time;
   sender->duration = duration;
   sender->port_num = port_num;
   sender->dest = dest;
@@ -116,9 +116,8 @@ void choose_IP(uint32_t receiver_id, char *ip_addr) {
   ip_addr[index++] = '\0';
 }
 
-void *run_tcp_sender(void *arg)
+void *run_tcp_sender(struct tcp_sender *sender)
 {
-  struct tcp_sender *sender = (struct tcp_sender *) arg;
   struct packet outgoing;
   struct gen_packet packet;
   int count = 0;
@@ -128,7 +127,7 @@ void *run_tcp_sender(void *arg)
 
   ts.tv_sec = 0;
 
-  uint64_t start_time = sender->start_time;
+  uint64_t start_time = current_time_nanoseconds();
   uint64_t end_time = start_time + sender->duration;
   uint64_t next_send_time;
 
@@ -149,8 +148,6 @@ void *run_tcp_sender(void *arg)
   outgoing.flow_start_time = next_send_time;
   outgoing.size = packet.size;
   outgoing.id = count++;
-
-  while (current_time_nanoseconds() < start_time);
 
   while (current_time_nanoseconds() < end_time)
     {
@@ -284,4 +281,35 @@ void *run_tcp_sender(void *arg)
 
   printf("sent %d flows\n", flows_sent);
 
+}
+
+int main(int argc, char **argv) {
+  uint32_t my_id;
+  uint32_t port_num = PORT;
+  char *dest_ip = malloc(sizeof(char) * IP_ADDR_MAX_LENGTH);
+  if (!dest_ip) return -1;
+
+  uint32_t mean_t_btwn_flows = 10000;
+  if (argc > 3) {
+	sscanf(argv[1], "%u", &mean_t_btwn_flows);
+	sscanf(argv[2], "%u", &my_id);
+	sscanf(argv[3], "%s", dest_ip);
+	if (argc > 4)
+	  sscanf(argv[4], "%u", &port_num);
+  } else {
+	  printf("usage: %s mean_t my_id dest_ip port_num (optional)\n", argv[0]);
+	  return -1;
+  }
+
+  uint64_t duration = 1ull * 1000 * 1000 * 1000;  // 1 second
+
+  printf("mean t between flows (microseconds): %d\n", mean_t_btwn_flows);
+  mean_t_btwn_flows *= 1000; // get it in nanoseconds
+
+  // Initialize the sender
+  struct generator gen;
+  struct tcp_sender sender;
+  gen_init(&gen, POISSON, UNIFORM, mean_t_btwn_flows, 20);
+  tcp_sender_init(&sender, &gen, my_id, duration, port_num, dest_ip);
+  run_tcp_sender(&sender);
 }

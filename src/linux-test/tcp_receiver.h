@@ -20,10 +20,10 @@ struct tcp_receiver {
 };
 
 // Inits a tcp receiver.
-void tcp_receiver_init(struct tcp_receiver *receiver, uint64_t start_time,
-		       uint64_t duration, uint16_t port_num);
+void tcp_receiver_init(struct tcp_receiver *receiver, uint64_t duration,
+		       uint16_t port_num);
 
 // Runs one TCP receiver.
-void *run_tcp_receiver(void *);
+void *run_tcp_receiver(struct tcp_receiver *receiver);
 
 #endif /* TCP_RECEIVER_H_ */

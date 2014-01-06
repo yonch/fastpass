@@ -26,22 +26,18 @@
 #define BITS_PER_BYTE 8
 #define NUM_INTERVALS 1000
 
-void tcp_receiver_init(struct tcp_receiver *receiver, uint64_t start_time,
-		       uint64_t duration, uint16_t port_num)
+void tcp_receiver_init(struct tcp_receiver *receiver, uint64_t duration,
+		       uint16_t port_num)
 {
-  int i;
-
-  receiver->start_time = start_time;
   receiver->duration = duration;
   receiver->port_num = port_num;
   init_log(&receiver->log, NUM_INTERVALS);
 }
 
-void *run_tcp_receiver(void *arg)
+void *run_tcp_receiver(struct tcp_receiver *receiver)
 {
   int i;
   struct sockaddr_in sock_addr;
-  struct tcp_receiver *receiver = (struct tcp_receiver *) arg;
   struct timeval timeout;
 
   timeout.tv_sec = 1;
@@ -72,13 +68,14 @@ void *run_tcp_receiver(void *arg)
   fd_set rfds;
   FD_ZERO(&rfds);
 
-  uint64_t end_time = receiver->start_time + receiver->duration;
+  uint64_t start_time = current_time_nanoseconds();
+  uint64_t end_time = start_time + receiver->duration;
 
   // Determine the next interval end time
   uint64_t interval_duration = receiver->duration / NUM_INTERVALS;
-  uint64_t interval_end_time = receiver->start_time + interval_duration;
+  uint64_t interval_end_time = start_time + interval_duration;
   init_interval(receiver->log.current);
-  receiver->log.current->start_time = receiver->start_time;
+  receiver->log.current->start_time = start_time;
   while(current_time_nanoseconds() < end_time + 1*1000*1000*1000uLL)
   {
     int i;
@@ -135,7 +132,6 @@ void *run_tcp_receiver(void *arg)
 	  // Read first part of flow
 	  struct packet *incoming = &packets[ready_index];
 	  int bytes = read(ready_fd, incoming, sizeof(struct packet));
-	  assert(bytes == sizeof(struct packet));
 	  uint64_t time_now = current_time_nanoseconds();
 	  log_flow_start(&receiver->log, incoming->sender, bytes,
 			 (time_now - incoming->packet_send_time));
@@ -188,4 +184,19 @@ void *run_tcp_receiver(void *arg)
 
   // Write log to a file
   write_out_log(&receiver->log);
+}
+
+int main(int argc, char **argv) {
+  uint32_t port_num = PORT;
+
+  if (argc > 1) {
+    sscanf(argv[1], "%u", &port_num);  // optional port number
+  }
+
+  uint64_t duration = 10ull * 1000 * 1000 * 1000;  // 10 seconds
+
+  // Initialize the receiver
+  struct tcp_receiver receiver;
+  tcp_receiver_init(&receiver, duration, port_num);
+  run_tcp_receiver(&receiver);
 }

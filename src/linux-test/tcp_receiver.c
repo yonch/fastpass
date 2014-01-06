@@ -25,6 +25,7 @@
 
 #define BITS_PER_BYTE 8
 #define NUM_INTERVALS 1000
+#define RECEIVE_DURATION 10 // in seconds
 
 void tcp_receiver_init(struct tcp_receiver *receiver, uint64_t duration,
 		       uint16_t port_num)
@@ -201,7 +202,7 @@ int main(int argc, char **argv) {
     sscanf(argv[1], "%u", &port_num);  // optional port number
   }
 
-  uint64_t duration = 10ull * 1000 * 1000 * 1000;  // 10 seconds
+  uint64_t duration = (RECEIVE_DURATION * 1ull) * 1000 * 1000 * 1000;
 
   // Initialize the receiver
   struct tcp_receiver receiver;

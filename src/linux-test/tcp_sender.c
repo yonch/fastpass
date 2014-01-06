@@ -26,6 +26,7 @@
 
 #define IP_ADDR_MAX_LENGTH 20
 #define NUM_CORES 4
+#define SEND_DURATION 1 // in seconds
 
 enum state {
   INVALID,
@@ -301,7 +302,7 @@ int main(int argc, char **argv) {
 	  return -1;
   }
 
-  uint64_t duration = 1ull * 1000 * 1000 * 1000;  // 1 second
+  uint64_t duration = (SEND_DURATION * 1ull) * 1000 * 1000 * 1000;
 
   printf("mean t between flows (microseconds): %d\n", mean_t_btwn_flows);
   mean_t_btwn_flows *= 1000; // get it in nanoseconds

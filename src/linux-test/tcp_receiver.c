@@ -38,10 +38,10 @@ void *run_tcp_receiver(struct tcp_receiver *receiver)
 {
   int i;
   struct sockaddr_in sock_addr;
-  struct timeval timeout;
+  struct timespec timeout;
 
-  timeout.tv_sec = 1;
-  timeout.tv_usec = 0;
+  timeout.tv_sec = 0;
+  timeout.tv_nsec = 0;
 
   // Create a socket
   int sock_fd = socket(PF_INET, SOCK_STREAM, IPPROTO_TCP);
@@ -76,7 +76,8 @@ void *run_tcp_receiver(struct tcp_receiver *receiver)
   uint64_t interval_end_time = start_time + interval_duration;
   init_interval(receiver->log.current);
   receiver->log.current->start_time = start_time;
-  while(current_time_nanoseconds() < end_time + 1*1000*1000*1000uLL)
+  uint64_t time_now;
+  while((time_now = current_time_nanoseconds()) < end_time + 1*1000*1000*1000uLL)
   {
     int i;
     char buf[MTU_SIZE];
@@ -94,7 +95,14 @@ void *run_tcp_receiver(struct tcp_receiver *receiver)
     }
 
     // Wait for a socket to have data to read or a new connection
-    int retval = select(max + 1, &rfds, NULL, NULL, &timeout);
+    // or the end of this interval
+    uint64_t time_diff;
+    if (interval_end_time > time_now)
+      time_diff = interval_end_time - time_now;
+    assert(time_diff < 1000 * 1000 * 1000);
+    timeout.tv_nsec = time_diff;
+
+    int retval = pselect(max + 1, &rfds, NULL, NULL, &timeout, NULL);
     if (retval < 0)
       break;
     
@@ -132,7 +140,7 @@ void *run_tcp_receiver(struct tcp_receiver *receiver)
 	  // Read first part of flow
 	  struct packet *incoming = &packets[ready_index];
 	  int bytes = read(ready_fd, incoming, sizeof(struct packet));
-	  uint64_t time_now = current_time_nanoseconds();
+	  time_now = current_time_nanoseconds();
 	  log_flow_start(&receiver->log, incoming->sender, bytes,
 			 (time_now - incoming->packet_send_time));
 	  bytes_left[ready_index] = incoming->size * MTU_SIZE - sizeof(struct packet);
@@ -143,7 +151,7 @@ void *run_tcp_receiver(struct tcp_receiver *receiver)
 	  int bytes = read(ready_fd, buf, count);
 	  log_data_received(&receiver->log, packets[ready_index].sender, bytes);
 	  bytes_left[ready_index] -= bytes;
-	  uint64_t time_now = current_time_nanoseconds();
+	  time_now = current_time_nanoseconds();
 
 	  if (bytes_left[ready_index] == 0)
 	    {

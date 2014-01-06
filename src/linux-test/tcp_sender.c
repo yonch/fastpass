@@ -117,8 +117,17 @@ void choose_IP(uint32_t receiver_id, char *ip_addr) {
   ip_addr[index++] = '\0';
 }
 
-void *run_tcp_sender(struct tcp_sender *sender)
+// Run a tcp_sender with a persistent connection
+void run_tcp_sender_persistent(struct tcp_sender *sender) {
+  assert(sender != NULL);
+
+  printf("persistent sender not yet implemented\n");
+}
+
+// Run a tcp_sender with short-lived connections
+void run_tcp_sender_short_lived(struct tcp_sender *sender)
 {
+  assert(sender != NULL);
   struct packet outgoing;
   struct gen_packet packet;
   int count = 0;
@@ -289,16 +298,18 @@ int main(int argc, char **argv) {
   uint32_t port_num = PORT;
   char *dest_ip = malloc(sizeof(char) * IP_ADDR_MAX_LENGTH);
   if (!dest_ip) return -1;
+  uint32_t persistent;
 
   uint32_t mean_t_btwn_flows = 10000;
-  if (argc > 3) {
+  if (argc > 4) {
 	sscanf(argv[1], "%u", &mean_t_btwn_flows);
 	sscanf(argv[2], "%u", &my_id);
 	sscanf(argv[3], "%s", dest_ip);
-	if (argc > 4)
-	  sscanf(argv[4], "%u", &port_num);
+	sscanf(argv[4], "%u", &persistent);
+	if (argc > 5)
+	  sscanf(argv[5], "%u", &port_num);
   } else {
-	  printf("usage: %s mean_t my_id dest_ip port_num (optional)\n", argv[0]);
+	  printf("usage: %s mean_t my_id dest_ip persistent port_num (optional)\n", argv[0]);
 	  return -1;
   }
 
@@ -312,5 +323,9 @@ int main(int argc, char **argv) {
   struct tcp_sender sender;
   gen_init(&gen, POISSON, UNIFORM, mean_t_btwn_flows, 20);
   tcp_sender_init(&sender, &gen, my_id, duration, port_num, dest_ip);
-  run_tcp_sender(&sender);
+
+  if (persistent == 0)
+    run_tcp_sender_short_lived(&sender);
+  else
+    run_tcp_sender_persistent(&sender);
 }

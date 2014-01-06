@@ -14,7 +14,6 @@
 #include "comm_log.h"
 #include "main.h"
 #include "arp.h"
-#include "node.h"
 #include "../protocol/fpproto.h"
 #include "../protocol/pacer.h"
 #include "../graph-algo/admissible_structures.h"
@@ -734,7 +733,7 @@ void exec_comm_core(struct comm_core_cmd * cmd)
 		do_rx_burst(qconf);
 
 		/* Process newly allocated timeslots */
-		process_allocated_traffic(core, cmd->q_admitted);
+		process_allocated_traffic(core, cmd->q_allocated);
 
 		/* process timers */
 		rte_timer_manage();

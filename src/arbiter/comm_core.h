@@ -31,7 +31,7 @@ struct comm_core_cmd {
 	uint64_t tslot_len; /**< Length of a time slot */
 	uint32_t tslot_offset; /**< How many offsets in the future the controller allocates */
 
-	struct rte_ring *q_admitted;
+	struct rte_ring *q_allocated;
 };
 
 static inline uint32_t controller_ip(void)

@@ -641,7 +641,7 @@ static int fpq_enqueue(struct sk_buff *skb, struct Qdisc *sch)
  *    packets follow 'rate' rate.
  */
 static void move_timeslot_from_flow(struct Qdisc *sch, struct psched_ratecfg *rate,
-		struct fp_flow *src, struct fp_flow *dst)
+		struct fp_flow *src, struct fp_flow *dst, u16 path)
 {
 	struct fp_sched_data *q = qdisc_priv(sch);
 	s64 credit = q->tslot_len;
@@ -664,9 +664,9 @@ static void move_timeslot_from_flow(struct Qdisc *sch, struct psched_ratecfg *ra
 		count++;
 	}
 
-	fp_debug("@%llu moved %u out of %u packets from %llu (0x%04llx)\n",
+	fp_debug("@%llu moved %u out of %u packets from %llu (0x%04llx) path %d\n",
 			q->horizon.timeslot, count, src->qlen + count, src->src_dst_key,
-			src->src_dst_key);
+			src->src_dst_key, path);
 }
 
 /**
@@ -739,19 +739,20 @@ begin:
 		q->stat.missed_timeslots++;
 		fp_debug("missed timeslot %llu by %llu ns, rescheduling\n",
 				q->horizon.timeslot, now - (q->tslot_start_time + q->tslot_len));
-		handle_out_of_bounds_allocation(q, horizon_current_key(q));
+		handle_out_of_bounds_allocation(q, fp_alloc_node(horizon_current_key(q)));
 		horizon_unmark_current(&q->horizon);
 		goto begin;
 	}
 
 move_current:
-	f = fpq_lookup(q, horizon_current_key(q), false);
+	f = fpq_lookup(q, fp_alloc_node(horizon_current_key(q)), false);
 	if (unlikely(f == NULL)) {
 		q->stat.flow_not_found_update++;
 		return;
 	}
 
-	move_timeslot_from_flow(sch, &q->data_rate, f, &q->internal);
+	move_timeslot_from_flow(sch, &q->data_rate, f, &q->internal,
+			fp_alloc_path(horizon_current_key(q)));
 	horizon_unmark_current(&q->horizon);
 	q->stat.used_timeslots++;
 	flow_inc_alloc(q,f);

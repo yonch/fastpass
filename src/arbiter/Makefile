@@ -9,8 +9,11 @@ SRCS-y := main.c \
           control.c \
           comm_core.c \
           admission_core.c \
+          path_sel_core.c \
           ../protocol/fpproto.c \
-          ../graph-algo/admissible_traffic.c
+          ../graph-algo/admissible_traffic.c \
+          ../graph-algo/path_selection.c \
+          ../graph-algo/euler_split.c
 
 CFLAGS += -O3 
 CFLAGS += $(WERROR_FLAGS)

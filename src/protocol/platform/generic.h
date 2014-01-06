@@ -31,6 +31,7 @@
 
 #ifdef _RTE_IP_H_
 #define ntohs(x) rte_be_to_cpu_16(x)
+#define ntohl(x) rte_be_to_cpu_32(x)
 #else
 #include <arpa/inet.h>
 #endif

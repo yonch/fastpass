@@ -150,11 +150,6 @@ static inline struct fpproto_conn *fpproto_conn(struct fp_sched_data *q)
 	return &fp->conn;
 }
 
-/* translates IP address to short FastPass ID */
-u16 ip_to_id(__be32 ipaddr) {
-	return (u16)(ntohl(ipaddr) & ((1 << 8) - 1));
-}
-
 /* hashes a flow key into a u32, for lookup in the hash tables */
 static inline u32 src_dst_key_hash(u64 src_dst_key) {
 	return jhash_2words((__be32)(src_dst_key >> 32),
@@ -301,12 +296,12 @@ void req_timer_sending_request(struct fp_sched_data *q, u64 now)
 	pacer_reset(&q->request_pacer);
 
 	/* set timer for next request, if a request would be required */
-	if (q->n_unreq_flows)
+	if (q->demand_tslots != q->alloc_tslots)
 		/* have more requests to send */
 		trigger_tx(q);
 }
 
-static bool flow_in_flowqueue(struct fp_flow *f)
+static inline bool flow_in_flowqueue(struct fp_flow *f)
 {
 	return (f->state != FLOW_UNQUEUED);
 }
@@ -480,7 +475,7 @@ static struct fp_flow *fpq_classify(struct sk_buff *skb, struct fp_sched_data *q
 	}
 
 	/* get the skb's key (src_dst_key) */
-	src_dst_key = ip_to_id(keys.dst);
+	src_dst_key = fp_map_ip_to_id(keys.dst);
 
 	q->stat.data_pkts++;
 	return fpq_lookup(q, src_dst_key, true);
@@ -516,12 +511,6 @@ static struct sk_buff *flow_dequeue_skb(struct Qdisc *sch, struct fp_flow *flow)
 	return skb;
 }
 
-static bool flow_is_below_watermark(struct fp_flow* f)
-{
-	u64 watermark = f->alloc_tslots + FASTPASS_REQUEST_LOW_WATERMARK;
-	return time_before_eq64(f->requested_tslots, watermark);
-}
-
 void flow_inc_alloc(struct fp_sched_data* q, struct fp_flow* f)
 {
 	if (unlikely(f->alloc_tslots == f->demand_tslots)) {
@@ -540,8 +529,7 @@ void flow_inc_alloc(struct fp_sched_data* q, struct fp_flow* f)
 	}
 
 	if (unlikely((!flow_in_flowqueue(f))
-			&& (f->requested_tslots != f->demand_tslots)
-			&& flow_is_below_watermark(f)))
+			&& (f->requested_tslots != f->demand_tslots)))
 		flowqueue_enqueue_request(q, f);
 }
 
@@ -554,12 +542,10 @@ static void flow_inc_demand(struct fp_sched_data *q, struct fp_flow *f)
 {
 	f->demand_tslots++;
 	q->demand_tslots++;
-	if ((f->demand_tslots == f->requested_tslots + 1)
-			&& flow_is_below_watermark(f)) {
 
+	if (!flow_in_flowqueue(f))
 		/* flow not on scheduling queue yet, enqueue */
 		flowqueue_enqueue_request(q, f);
-	}
 }
 
 /* add skb to flow queue. returns false if skb is too large*/
@@ -635,7 +621,7 @@ static int fpq_enqueue(struct sk_buff *skb, struct Qdisc *sch)
 
 	/* queue skb to flow, update statistics */
 	if (!flow_enqueue_skb(sch, f, skb)) {
-		fp_debug("got packet that is larger than a timeslot len=%d, flow 0x%llX\n",
+		FASTPASS_WARN("got packet that is larger than a timeslot len=%d, flow 0x%llX\n",
 			qdisc_pkt_len(skb), f->src_dst_key);
 		q->stat.pkt_too_big++;
 		return qdisc_drop(skb, sch);
@@ -655,7 +641,7 @@ static int fpq_enqueue(struct sk_buff *skb, struct Qdisc *sch)
  *    packets follow 'rate' rate.
  */
 static void move_timeslot_from_flow(struct Qdisc *sch, struct psched_ratecfg *rate,
-		struct fp_flow *src, struct fp_flow *dst)
+		struct fp_flow *src, struct fp_flow *dst, u16 path)
 {
 	struct fp_sched_data *q = qdisc_priv(sch);
 	s64 credit = q->tslot_len;
@@ -678,9 +664,9 @@ static void move_timeslot_from_flow(struct Qdisc *sch, struct psched_ratecfg *ra
 		count++;
 	}
 
-	fp_debug("@%llu moved %u out of %u packets from %llu (0x%04llx)\n",
+	fp_debug("@%llu moved %u out of %u packets from %llu (0x%04llx) path %d\n",
 			q->horizon.timeslot, count, src->qlen + count, src->src_dst_key,
-			src->src_dst_key);
+			src->src_dst_key, path);
 }
 
 /**
@@ -753,19 +739,20 @@ begin:
 		q->stat.missed_timeslots++;
 		fp_debug("missed timeslot %llu by %llu ns, rescheduling\n",
 				q->horizon.timeslot, now - (q->tslot_start_time + q->tslot_len));
-		handle_out_of_bounds_allocation(q, horizon_current_key(q));
+		handle_out_of_bounds_allocation(q, fp_alloc_node(horizon_current_key(q)));
 		horizon_unmark_current(&q->horizon);
 		goto begin;
 	}
 
 move_current:
-	f = fpq_lookup(q, horizon_current_key(q), false);
+	f = fpq_lookup(q, fp_alloc_node(horizon_current_key(q)), false);
 	if (unlikely(f == NULL)) {
 		q->stat.flow_not_found_update++;
 		return;
 	}
 
-	move_timeslot_from_flow(sch, &q->data_rate, f, &q->internal);
+	move_timeslot_from_flow(sch, &q->data_rate, f, &q->internal,
+			fp_alloc_path(horizon_current_key(q)));
 	horizon_unmark_current(&q->horizon);
 	q->stat.used_timeslots++;
 	flow_inc_alloc(q,f);

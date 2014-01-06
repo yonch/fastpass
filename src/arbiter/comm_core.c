@@ -14,7 +14,6 @@
 #include "comm_log.h"
 #include "main.h"
 #include "arp.h"
-#include "node.h"
 #include "../protocol/fpproto.h"
 #include "../protocol/pacer.h"
 #include "../graph-algo/admissible_structures.h"
@@ -404,7 +403,7 @@ comm_rx(struct rte_mbuf *m, uint8_t portid)
 
 	if (unlikely(ether_type == ETHER_TYPE_ARP)) {
 		print_arp(m, portid);
-		send_gratuitous_arp(portid, controller_ip(portid));
+		send_gratuitous_arp(portid, controller_ip());
 		goto cleanup; // Disregard ARP
 	}
 
@@ -427,7 +426,7 @@ comm_rx(struct rte_mbuf *m, uint8_t portid)
 	}
 
 
-	req_src = node_from_node_ip(rte_be_to_cpu_32(ipv4_hdr->src_addr));
+	req_src = fp_map_ip_to_id(ipv4_hdr->src_addr);
 	en = &end_nodes[req_src];
 
 	/* copy most recent ethernet and IP addresses, for return packets */
@@ -718,14 +717,14 @@ void exec_comm_core(struct comm_core_cmd * cmd)
 		queueid = qconf->rx_queue_list[i].queue_id;
 		RTE_LOG(INFO, BENCHAPP, "comm_core -- lcoreid=%u portid=%hhu rxqueueid=%hhu\n",
 				rte_lcore_id(), portid, queueid);
-		send_gratuitous_arp(portid, controller_ip(i));
+		send_gratuitous_arp(portid, controller_ip());
 	}
 
 	while (rte_get_timer_cycles() < cmd->start_time);
 
 	for (i = 0; i < qconf->n_rx_queue; i++) {
 		portid = qconf->rx_queue_list[i].port_id;
-		send_gratuitous_arp(portid, controller_ip(i));
+		send_gratuitous_arp(portid, controller_ip());
 	}
 
 	/* MAIN LOOP */
@@ -734,7 +733,7 @@ void exec_comm_core(struct comm_core_cmd * cmd)
 		do_rx_burst(qconf);
 
 		/* Process newly allocated timeslots */
-		process_allocated_traffic(core, cmd->q_admitted);
+		process_allocated_traffic(core, cmd->q_allocated);
 
 		/* process timers */
 		rte_timer_manage();

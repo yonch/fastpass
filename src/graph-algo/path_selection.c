@@ -26,7 +26,7 @@ struct racks_to_nodes_mapping {
 };
 
 // Initialize a rack to nodes mapping as empty
-void init_racks_to_nodes_mapping(struct racks_to_nodes_mapping *map) {
+static void init_racks_to_nodes_mapping(struct racks_to_nodes_mapping *map) {
     assert(map != NULL);
 
     uint16_t i;
@@ -36,7 +36,7 @@ void init_racks_to_nodes_mapping(struct racks_to_nodes_mapping *map) {
 
 // Obtain the index in a racks_to_nodes_mapping of a particular
 // source and destination rack
-uint32_t get_rack_pair_index(uint16_t src_rack, uint16_t dst_rack) {
+static uint32_t get_rack_pair_index(uint16_t src_rack, uint16_t dst_rack) {
     assert(src_rack < MAX_RACKS);
     assert(dst_rack < MAX_RACKS);
 
@@ -44,6 +44,7 @@ uint32_t get_rack_pair_index(uint16_t src_rack, uint16_t dst_rack) {
 }
 
 // Print the mapping, useful for debugging
+static inline
 void print_racks_to_nodes_mapping_counts(struct racks_to_nodes_mapping *map,
                                          uint8_t num_racks) {
     assert(map != NULL);
@@ -62,7 +63,7 @@ void print_racks_to_nodes_mapping_counts(struct racks_to_nodes_mapping *map,
 
 // Populate the mapping from rack ids to node ids for the given
 // admitted traffic
-void map_racks_to_nodes(struct admitted_traffic *admitted,
+static void map_racks_to_nodes(struct admitted_traffic *admitted,
                         struct racks_to_nodes_mapping *map) {
     assert(admitted != NULL);
     assert(map != NULL);
@@ -83,7 +84,7 @@ void map_racks_to_nodes(struct admitted_traffic *admitted,
 
 // Construct the graph structure and edges for the admitted traffic
 // Ensure that it is a regular graph
-void construct_graph(struct admitted_traffic *admitted,
+static void construct_graph(struct admitted_traffic *admitted,
                      struct graph_structure *structure,
                      struct graph_edges *edges) {
     assert(structure != NULL);
@@ -149,7 +150,7 @@ void construct_graph(struct admitted_traffic *admitted,
 
 // Assign an edge from src_rack to dst_rack in the admitted traffic to path.
 // Use map to find a specific pair of src and dst nodes.
-void assign_to_path(struct racks_to_nodes_mapping *map,
+static void assign_to_path(struct racks_to_nodes_mapping *map,
                     struct admitted_traffic *admitted,
                     uint8_t src_rack, uint8_t dst_rack, uint8_t path) {
     assert(map != NULL);
@@ -173,7 +174,7 @@ void assign_to_path(struct racks_to_nodes_mapping *map,
 // for these edges.
 // This effectively performs an Euler split, but does not add the split
 // edges to new graphs.
-void split_and_populate_paths(struct graph_structure *structure,
+static void split_and_populate_paths(struct graph_structure *structure,
                               struct graph_edges *edges,
                               struct racks_to_nodes_mapping *map,
                               struct admitted_traffic *admitted,

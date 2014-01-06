@@ -117,7 +117,34 @@ void choose_IP(uint32_t receiver_id, char *ip_addr) {
   ip_addr[index++] = '\0';
 }
 
-// Run a tcp_sender with a persistent connection
+// Open a socket and connect (dst specified by sender).
+// Populate sock_fd with the descriptor and return the return value for connect
+int open_socket_and_connect(struct tcp_sender *sender, int *sock_fd) {
+  assert(sender != NULL);
+
+  struct sockaddr_in sock_addr;
+
+  // Create a socket, set to non-blocking
+  *sock_fd = socket(PF_INET, SOCK_STREAM, IPPROTO_TCP);
+  assert(*sock_fd != -1);
+  assert(fcntl(*sock_fd, F_SETFL, O_NONBLOCK) != -1);
+ 
+  // Initialize destination address
+  memset(&sock_addr, 0, sizeof(sock_addr));
+  sock_addr.sin_family = AF_INET;
+  sock_addr.sin_port = htons(sender->port_num);
+  const char *ip_addr = sender->dest;
+  // Choose the IP that corresponds to a randomly chosen core router
+  //char ip_addr[12];
+  //choose_IP(outgoing.receiver, ip_addr);
+  //printf("chosen IP %s for receiver %d\n", ip_addr, outgoing.receiver);
+  assert(inet_pton(AF_INET, ip_addr, &sock_addr.sin_addr) > 0);
+
+  // Connect to the receiver
+  return connect(*sock_fd, (struct sockaddr *)&sock_addr, sizeof(sock_addr));
+}
+
+// Run a tcp_sender with a single persistent connection
 void run_tcp_sender_persistent(struct tcp_sender *sender) {
   assert(sender != NULL);
 
@@ -201,29 +228,9 @@ void run_tcp_sender_short_lived(struct tcp_sender *sender)
 	}
 	assert(index != -1);  // Otherwise, we have too many connections
 
-	struct sockaddr_in sock_addr;
-	struct sockaddr_in src_addr;
-
-	// Create a socket, set to non-blocking
-	connections[index].sock_fd = socket(PF_INET, SOCK_STREAM, IPPROTO_TCP);
-	assert(connections[index].sock_fd != -1);
-	assert(fcntl(connections[index].sock_fd, F_SETFL, O_NONBLOCK) != -1);
- 
-	// Initialize destination address
-	memset(&sock_addr, 0, sizeof(sock_addr));
-	sock_addr.sin_family = AF_INET;
-	sock_addr.sin_port = htons(sender->port_num);
-	// Choose the IP that corresponds to a randomly chosen core router
-	const char *ip_addr = sender->dest;
-	//char ip_addr[12];
-	//choose_IP(outgoing.receiver, ip_addr);
-	//printf("chosen IP %s for receiver %d\n", ip_addr, outgoing.receiver);
-	assert(inet_pton(AF_INET, ip_addr, &sock_addr.sin_addr) > 0);
- 
 	// Connect to the receiver
-	connections[index].return_val = connect(connections[index].sock_fd,
-						(struct sockaddr *)&sock_addr,
-						sizeof(sock_addr));
+	connections[index].return_val = open_socket_and_connect(sender,
+								&connections[index].sock_fd);
 	if (connections[index].return_val < 0 && errno != EINPROGRESS) {
 	  assert(current_time_nanoseconds() > end_time);
 	  return;

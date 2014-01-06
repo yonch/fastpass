@@ -14,9 +14,9 @@
 #include <stdio.h>
 #include <stdlib.h>
 
-#define LATENCY_BIN_DURATION (50 * 1000) // in nanoseconds
+#define LATENCY_BIN_DURATION (50 * 1000) // 50 microseconds in nanoseconds
 #define MAX_SENDERS 1
-#define NUM_LATENCY_BINS 10
+#define NUM_LATENCY_BINS 100
 
 // Information logged per sending node per interval
 // All times are in nanoseconds

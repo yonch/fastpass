@@ -3,6 +3,7 @@
 #define CONTROLLER_H_
 
 #include <stdint.h>
+#include <rte_ip.h>
 
 #define CONTROLLER_SEND_TIMEOUT_SECS 	0.004
 
@@ -32,6 +33,11 @@ struct comm_core_cmd {
 
 	struct rte_ring *q_admitted;
 };
+
+static inline uint32_t controller_ip(void)
+{
+	return IPv4(192,168,44,100);
+}
 
 /**
  * Initializes global data used by comm cores

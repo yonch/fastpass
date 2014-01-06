@@ -150,11 +150,6 @@ static inline struct fpproto_conn *fpproto_conn(struct fp_sched_data *q)
 	return &fp->conn;
 }
 
-/* translates IP address to short FastPass ID */
-u16 ip_to_id(__be32 ipaddr) {
-	return (u16)(ntohl(ipaddr) & ((1 << 8) - 1));
-}
-
 /* hashes a flow key into a u32, for lookup in the hash tables */
 static inline u32 src_dst_key_hash(u64 src_dst_key) {
 	return jhash_2words((__be32)(src_dst_key >> 32),
@@ -480,7 +475,7 @@ static struct fp_flow *fpq_classify(struct sk_buff *skb, struct fp_sched_data *q
 	}
 
 	/* get the skb's key (src_dst_key) */
-	src_dst_key = ip_to_id(keys.dst);
+	src_dst_key = fp_map_ip_to_id(keys.dst);
 
 	q->stat.data_pkts++;
 	return fpq_lookup(q, src_dst_key, true);

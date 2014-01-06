@@ -234,6 +234,11 @@ struct fpproto_conn {
 
 };
 
+/* translates IP address to short FastPass ID */
+static inline u16 fp_map_ip_to_id(__be32 ipaddr) {
+	return (u16)(ntohl(ipaddr) & ((1 << 8) - 1));
+}
+
 /* initializes conn */
 void fpproto_init_conn(struct fpproto_conn *conn, struct fpproto_ops *ops,
 		void *ops_param, u64 rst_win_ns, u64 send_timeout_us);

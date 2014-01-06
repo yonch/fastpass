@@ -137,14 +137,15 @@ void *run_tcp_receiver(void *arg)
 	  int bytes = read(ready_fd, incoming, sizeof(struct packet));
 	  assert(bytes == sizeof(struct packet));
 	  uint64_t time_now = current_time_nanoseconds();
-	  log_flow_start(&receiver->log, bytes, (time_now - incoming->packet_send_time));
+	  log_flow_start(&receiver->log, incoming->sender, bytes,
+			 (time_now - incoming->packet_send_time));
 	  bytes_left[ready_index] = incoming->size * MTU_SIZE - sizeof(struct packet);
 	}
 	else {
 	  // Read in data
 	  int count = bytes_left[ready_index] < MTU_SIZE ? bytes_left[ready_index] : MTU_SIZE;
 	  int bytes = read(ready_fd, buf, count);
-	  log_data_received(&receiver->log, bytes);
+	  log_data_received(&receiver->log, packets[ready_index].sender, bytes);
 	  bytes_left[ready_index] -= bytes;
 	  uint64_t time_now = current_time_nanoseconds();
 
@@ -157,7 +158,8 @@ void *run_tcp_receiver(void *arg)
 		     incoming->flow_start_time, incoming->id, time_now);*/
 
 	      if (incoming->flow_start_time < end_time) {
-		log_flow_completed(&receiver->log, (time_now - incoming->flow_start_time));
+		log_flow_completed(&receiver->log, incoming->sender,
+				   (time_now - incoming->flow_start_time));
 	      }
  
 	      assert(shutdown(ready_fd, SHUT_RDWR) != -1);

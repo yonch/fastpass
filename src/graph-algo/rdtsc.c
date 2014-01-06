@@ -3,7 +3,7 @@
  */
 
 #include <stdio.h>
-#include "common.h"
+#include "rdtsc.h"
 #include "inttypes.h"
 
 int main(int argc, char **argv)

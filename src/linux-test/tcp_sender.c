@@ -24,6 +24,7 @@
 #include <sys/unistd.h>
 #include <sys/fcntl.h>
 
+#define IP_ADDR_MAX_LENGTH 20
 #define NUM_CORES 4
 
 enum state {
@@ -41,14 +42,14 @@ struct connection {
 };
  
 void tcp_sender_init(struct tcp_sender *sender, struct generator *gen,
-		     uint32_t id, uint64_t start_time, uint64_t duration,
-		     float clock_freq)
+		     uint32_t id, uint64_t duration,
+		     uint16_t port_num, const char *dest)
 {
   sender->gen = gen;
   sender->id = id;
-  sender->start_time = start_time;
   sender->duration = duration;
-  sender->clock_freq = clock_freq;
+  sender->port_num = port_num;
+  sender->dest = dest;
 }
 
 // Selects the IP that corresponds to the receiver id
@@ -115,9 +116,8 @@ void choose_IP(uint32_t receiver_id, char *ip_addr) {
   ip_addr[index++] = '\0';
 }
 
-void *run_tcp_sender(void *arg)
+void *run_tcp_sender(struct tcp_sender *sender)
 {
-  struct tcp_sender *sender = (struct tcp_sender *) arg;
   struct packet outgoing;
   struct gen_packet packet;
   int count = 0;
@@ -127,9 +127,9 @@ void *run_tcp_sender(void *arg)
 
   ts.tv_sec = 0;
 
-  uint64_t start_time = sender->start_time;
+  uint64_t start_time = current_time_nanoseconds();
   uint64_t end_time = start_time + sender->duration;
-  uint64_t next_send_time = start_time;
+  uint64_t next_send_time;
 
   // Info about connections
   struct connection connections[MAX_CONNECTIONS];
@@ -144,22 +144,20 @@ void *run_tcp_sender(void *arg)
   next_send_time = start_time + packet.time;
 
   outgoing.sender = sender->id;
-  outgoing.receiver = packet.dest;
-  outgoing.send_time = next_send_time;
+  assert(inet_pton(AF_INET, sender->dest, &outgoing.receiver) > 0);
+  outgoing.flow_start_time = next_send_time;
   outgoing.size = packet.size;
   outgoing.id = count++;
 
-  while (current_time() < start_time);
-
-  while (current_time() < end_time)
+  while (current_time_nanoseconds() < end_time)
     {
       // Set timeout for when next packet should be sent
-      uint64_t time_now = current_time();
+      uint64_t time_now = current_time_nanoseconds();
       uint64_t time_diff = 0;
       if (next_send_time > time_now)
 	time_diff = (next_send_time < end_time ? next_send_time : end_time) - time_now;
-      assert(time_diff / sender->clock_freq < 1000 * 1000 * 1000);
-      ts.tv_nsec = time_diff / sender->clock_freq;
+      assert(time_diff < 1000 * 1000 * 1000);
+      ts.tv_nsec = time_diff;
 
       // Add fds to set and compute max
       FD_ZERO(&wfds);
@@ -178,7 +176,7 @@ void *run_tcp_sender(void *arg)
       if (retval < 0)
 	break;
 
-      if (current_time() >= next_send_time) {
+      if (current_time_nanoseconds() >= next_send_time) {
 	// Open a new connection
 
 	// Find an index to use
@@ -204,10 +202,11 @@ void *run_tcp_sender(void *arg)
 	// Initialize destination address
 	memset(&sock_addr, 0, sizeof(sock_addr));
 	sock_addr.sin_family = AF_INET;
-	sock_addr.sin_port = htons(PORT);
+	sock_addr.sin_port = htons(sender->port_num);
 	// Choose the IP that corresponds to a randomly chosen core router
-	char ip_addr[12];
-	choose_IP(outgoing.receiver, ip_addr);
+	const char *ip_addr = sender->dest;
+	//char ip_addr[12];
+	//choose_IP(outgoing.receiver, ip_addr);
 	//printf("chosen IP %s for receiver %d\n", ip_addr, outgoing.receiver);
 	assert(inet_pton(AF_INET, ip_addr, &sock_addr.sin_addr) > 0);
  
@@ -216,7 +215,7 @@ void *run_tcp_sender(void *arg)
 						(struct sockaddr *)&sock_addr,
 						sizeof(sock_addr));
 	if (connections[index].return_val < 0 && errno != EINPROGRESS) {
-	  assert(current_time() > end_time);
+	  assert(current_time_nanoseconds() > end_time);
 	  return;
 	}
 
@@ -230,8 +229,8 @@ void *run_tcp_sender(void *arg)
 	next_send_time = start_time + packet.time;
 
 	outgoing.sender = sender->id;
-	outgoing.receiver = packet.dest;
-	outgoing.send_time = next_send_time;
+	assert(inet_pton(AF_INET, sender->dest, &outgoing.receiver) > 0);
+	outgoing.flow_start_time = next_send_time;
 	outgoing.size = packet.size;
 	outgoing.id = count++;
       }
@@ -254,14 +253,15 @@ void *run_tcp_sender(void *arg)
 	    // send data
 	    struct packet *outgoing_data = (struct packet *) connections[i].buffer;
 	    connections[i].bytes_left = outgoing_data->size * MTU_SIZE;
+	    outgoing_data->packet_send_time = current_time_nanoseconds();
 	    connections[i].return_val = send(connections[i].sock_fd,
 					     connections[i].buffer,
 					     connections[i].bytes_left, 0);
 	    connections[i].status = SENDING;
-	    printf("sent, \t\t%d, %d, %d, %"PRIu64", %d, %"PRIu64"\n",
+	    /*printf("sent, \t\t%d, %d, %d, %"PRIu64", %d, %"PRIu64"\n",
 		   outgoing_data->sender, outgoing_data->receiver,
-		   outgoing_data->size, outgoing_data->send_time,
-		   outgoing_data->id, current_time());
+		   outgoing_data->size, outgoing_data->flow_start_time,
+		   outgoing_data->id, current_time_nanoseconds());*/
 	    flows_sent++;
 	  }
 	  else {
@@ -281,4 +281,35 @@ void *run_tcp_sender(void *arg)
 
   printf("sent %d flows\n", flows_sent);
 
+}
+
+int main(int argc, char **argv) {
+  uint32_t my_id;
+  uint32_t port_num = PORT;
+  char *dest_ip = malloc(sizeof(char) * IP_ADDR_MAX_LENGTH);
+  if (!dest_ip) return -1;
+
+  uint32_t mean_t_btwn_flows = 10000;
+  if (argc > 3) {
+	sscanf(argv[1], "%u", &mean_t_btwn_flows);
+	sscanf(argv[2], "%u", &my_id);
+	sscanf(argv[3], "%s", dest_ip);
+	if (argc > 4)
+	  sscanf(argv[4], "%u", &port_num);
+  } else {
+	  printf("usage: %s mean_t my_id dest_ip port_num (optional)\n", argv[0]);
+	  return -1;
+  }
+
+  uint64_t duration = 1ull * 1000 * 1000 * 1000;  // 1 second
+
+  printf("mean t between flows (microseconds): %d\n", mean_t_btwn_flows);
+  mean_t_btwn_flows *= 1000; // get it in nanoseconds
+
+  // Initialize the sender
+  struct generator gen;
+  struct tcp_sender sender;
+  gen_init(&gen, POISSON, UNIFORM, mean_t_btwn_flows, 20);
+  tcp_sender_init(&sender, &gen, my_id, duration, port_num, dest_ip);
+  run_tcp_sender(&sender);
 }

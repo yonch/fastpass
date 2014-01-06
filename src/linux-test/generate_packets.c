@@ -19,7 +19,7 @@ uint64_t generateExponentialVariate(uint64_t mean_t_btwn_requests);
 
 void gen_init(struct generator *generator, enum time_distribution time_dist,
 	      enum size_distribution size_dist, uint64_t time_param,
-	      uint32_t size_param, uint32_t id, uint32_t num_machines)
+	      uint32_t size_param)
 {
   assert(time_dist == POISSON);
   assert(size_dist == ONE_SIZE || size_dist == UNIFORM);
@@ -29,17 +29,12 @@ void gen_init(struct generator *generator, enum time_distribution time_dist,
   generator->time_param = time_param;
   generator->size_param = size_param;
   generator->t_last_request = 0;
-  generator->id = id;
-  generator->num_machines = num_machines;
 }
 
 void gen_next_packet(struct generator *generator, struct gen_packet *out)
 {
   generator->t_last_request += generateExponentialVariate(generator->time_param);
   out->time = generator->t_last_request;
-  out->dest = (rand() >> 10) % (generator->num_machines - 1);
-  if (out->dest >= generator->id) // skip my id
-    out->dest++;
 
   switch (generator->size_dist) {
     case ONE_SIZE:

@@ -6,6 +6,7 @@
  */
 
 #include "common.h"
+#include "log.h"
 #include "tcp_receiver.h" 
  
 #include <sys/types.h>
@@ -22,26 +23,25 @@
 #include <stdbool.h>
 #include <fcntl.h>
 
-void tcp_receiver_init(struct tcp_receiver *receiver, uint64_t start_time, uint64_t duration)
-{
-  int i;
+#define BITS_PER_BYTE 8
+#define NUM_INTERVALS 1000
 
-  receiver->start_time = start_time;
+void tcp_receiver_init(struct tcp_receiver *receiver, uint64_t duration,
+		       uint16_t port_num)
+{
   receiver->duration = duration;
+  receiver->port_num = port_num;
+  init_log(&receiver->log, NUM_INTERVALS);
 }
 
-void *run_tcp_receiver(void *arg)
+void *run_tcp_receiver(struct tcp_receiver *receiver)
 {
   int i;
   struct sockaddr_in sock_addr;
-  struct tcp_receiver *receiver = (struct tcp_receiver *) arg;
-  uint32_t flows_received = 0;
-  uint32_t bytes_received = 0;
-  uint64_t total_latency = 0;
-  struct timeval tv;
+  struct timespec timeout;
 
-  tv.tv_sec = 1;
-  tv.tv_usec = 0;
+  timeout.tv_sec = 0;
+  timeout.tv_nsec = 0;
 
   // Create a socket
   int sock_fd = socket(PF_INET, SOCK_STREAM, IPPROTO_TCP);
@@ -50,7 +50,7 @@ void *run_tcp_receiver(void *arg)
   // Initialize socket address
   memset(&sock_addr, 0, sizeof(sock_addr));
   sock_addr.sin_family = AF_INET;
-  sock_addr.sin_port = htons(PORT);
+  sock_addr.sin_port = htons(receiver->port_num);
   sock_addr.sin_addr.s_addr = htonl(INADDR_ANY);
  
   // Bind the address to the socket
@@ -68,8 +68,16 @@ void *run_tcp_receiver(void *arg)
   fd_set rfds;
   FD_ZERO(&rfds);
 
-  uint64_t end_time = receiver->start_time + receiver->duration;
-  while(current_time() < end_time + 1*1000*1000*1000uLL)
+  uint64_t start_time = current_time_nanoseconds();
+  uint64_t end_time = start_time + receiver->duration;
+
+  // Determine the next interval end time
+  uint64_t interval_duration = receiver->duration / NUM_INTERVALS;
+  uint64_t interval_end_time = start_time + interval_duration;
+  init_interval(receiver->log.current);
+  receiver->log.current->start_time = start_time;
+  uint64_t time_now;
+  while((time_now = current_time_nanoseconds()) < end_time + 1*1000*1000*1000uLL)
   {
     int i;
     char buf[MTU_SIZE];
@@ -87,7 +95,14 @@ void *run_tcp_receiver(void *arg)
     }
 
     // Wait for a socket to have data to read or a new connection
-    int retval = select(max + 1, &rfds, NULL, NULL, &tv);
+    // or the end of this interval
+    uint64_t time_diff;
+    if (interval_end_time > time_now)
+      time_diff = interval_end_time - time_now;
+    assert(time_diff < 1000 * 1000 * 1000);
+    timeout.tv_nsec = time_diff;
+
+    int retval = pselect(max + 1, &rfds, NULL, NULL, &timeout, NULL);
     if (retval < 0)
       break;
     
@@ -109,7 +124,6 @@ void *run_tcp_receiver(void *arg)
 	    }
 	}
 	assert(success);  // Otherwise, we have too many connections
-
       }
       
     // Read from all ready connections
@@ -126,28 +140,30 @@ void *run_tcp_receiver(void *arg)
 	  // Read first part of flow
 	  struct packet *incoming = &packets[ready_index];
 	  int bytes = read(ready_fd, incoming, sizeof(struct packet));
-	  assert(bytes == sizeof(struct packet));
+	  time_now = current_time_nanoseconds();
+	  log_flow_start(&receiver->log, incoming->sender, bytes,
+			 (time_now - incoming->packet_send_time));
 	  bytes_left[ready_index] = incoming->size * MTU_SIZE - sizeof(struct packet);
 	}
 	else {
 	  // Read in data
 	  int count = bytes_left[ready_index] < MTU_SIZE ? bytes_left[ready_index] : MTU_SIZE;
 	  int bytes = read(ready_fd, buf, count);
+	  log_data_received(&receiver->log, packets[ready_index].sender, bytes);
 	  bytes_left[ready_index] -= bytes;
-	  uint64_t time_now = current_time();
+	  time_now = current_time_nanoseconds();
 
 	  if (bytes_left[ready_index] == 0)
 	    {
 	      // This flow is done!
 	      struct packet *incoming = &packets[ready_index];
-	      printf("received,\t%d, %d, %d, %"PRIu64", %d, %"PRIu64"\n",
+	      /*printf("received,\t%d, %d, %d, %"PRIu64", %d, %"PRIu64"\n",
 		     incoming->sender, incoming->receiver, incoming->size,
-		     incoming->send_time, incoming->id, time_now);
+		     incoming->flow_start_time, incoming->id, time_now);*/
 
-	      if (incoming->send_time < end_time) {
-		total_latency += (time_now - incoming->send_time);
-		flows_received++;
-		bytes_received += incoming->size * MTU_SIZE;
+	      if (incoming->flow_start_time < end_time) {
+		log_flow_completed(&receiver->log, incoming->sender,
+				   (time_now - incoming->flow_start_time));
 	      }
  
 	      assert(shutdown(ready_fd, SHUT_RDWR) != -1);
@@ -159,16 +175,36 @@ void *run_tcp_receiver(void *arg)
 	    }
 	}
       }
+    
+    uint64_t now = current_time_nanoseconds();
+    if (now > interval_end_time && now < end_time) {
+      receiver->log.current->end_time = now;
 
+      // Start a new interval
+      receiver->log.current++;
+      init_interval(receiver->log.current);
+      receiver->log.current->start_time = now;
+      interval_end_time += interval_duration;
+    }
   }
 
-  printf("receiver finished at %"PRIu64"\n", current_time());
-  if (flows_received == 0)
-     printf("received 0 flows\n");
-  else {
-    uint64_t avg_flow_time = total_latency / flows_received;
-    printf("received %d flows (%d total bytes) with average flow completion time %"PRIu64"\n",
-	   flows_received, bytes_received, avg_flow_time);
-  }
   close(sock_fd);
+
+  // Write log to a file
+  write_out_log(&receiver->log);
+}
+
+int main(int argc, char **argv) {
+  uint32_t port_num = PORT;
+
+  if (argc > 1) {
+    sscanf(argv[1], "%u", &port_num);  // optional port number
+  }
+
+  uint64_t duration = 10ull * 1000 * 1000 * 1000;  // 10 seconds
+
+  // Initialize the receiver
+  struct tcp_receiver receiver;
+  tcp_receiver_init(&receiver, duration, port_num);
+  run_tcp_receiver(&receiver);
 }

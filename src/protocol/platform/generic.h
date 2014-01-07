@@ -200,7 +200,7 @@ uint32_t fp_csum_partial(const void *data, uint32_t data_len, uint32_t init_val)
 
 	if ((u64)p32 & 0x2) {
 		sum += *((const uint16_t *)p32);
-		p32 = (const uint32_t *)((const uint16_t *)p32 + 2);
+		p32 = (const uint32_t *)((const uint8_t *)p32 + 2);
 		data_len -= 2;
 	}
 

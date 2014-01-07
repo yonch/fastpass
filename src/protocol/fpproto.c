@@ -465,24 +465,25 @@ static int process_areq(struct fpproto_conn *conn, u8 *data, u8 *data_end)
 	u32 n_dst;
 	u16 payload_type;
 
-	if (curp + 2 > data_end) {
-		conn->stat.rx_incomplete_areq++;
-		return -1;
-	}
+	if (curp + 2 > data_end)
+		goto incomplete;
 
 	payload_type = ntohs(*(u16 *)curp);
 	n_dst = payload_type & 0x3F;
 	curp += 2;
-	if (curp + 4 * n_dst < data_end) {
-		conn->stat.rx_incomplete_areq++;
-		return -1;
-	}
+	if (curp + 4 * n_dst < data_end)
+		goto incomplete;
 
 	if (conn->ops->handle_areq)
 		conn->ops->handle_areq(conn->ops_param, (u16 *)curp, n_dst);
 
 	curp += 4 * n_dst;
 	return curp - data;
+
+incomplete:
+	fp_debug("incomplete A-REQ\n");
+	conn->stat.rx_incomplete_areq++;
+	return -1;
 }
 
 void fpproto_handle_rx_packet(struct fpproto_conn *conn, u8 *pkt, u32 len,
@@ -587,9 +588,11 @@ void fpproto_handle_rx_packet(struct fpproto_conn *conn, u8 *pkt, u32 len,
 	ack_vec |= ((u64)(ack_vec16 & 0x7FFF) << 48) | (1UL << 63); /* ack the ack_seqno */
 	ack_payload_handler(conn, ack_seq, ack_vec);
 
-	if (unlikely(curp == data_end))
+	if (unlikely(curp == data_end)) {
 		/* no more payloads in this packet, we're done with it */
+		fp_debug("no more payloads\n");
 		return;
+	}
 
 handle_payload:
 	/* at this point we know there is at least one byte remaining */

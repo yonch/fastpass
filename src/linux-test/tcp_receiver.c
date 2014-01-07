@@ -97,7 +97,6 @@ void run_tcp_receiver_persistent(struct tcp_receiver *receiver) {
   // Determine the next interval end time
   uint64_t interval_duration = receiver->duration / NUM_INTERVALS;
   uint64_t interval_end_time = start_time + interval_duration;
-  init_interval(receiver->log.current);
   receiver->log.current->start_time = start_time;
   uint64_t time_now;
   while((time_now = current_time_nanoseconds()) < end_time + 1*1000*1000*1000uLL)
@@ -204,7 +203,6 @@ void run_tcp_receiver_persistent(struct tcp_receiver *receiver) {
 
       // Start a new interval
       receiver->log.current++;
-      init_interval(receiver->log.current);
       receiver->log.current->start_time = now;
       interval_end_time += interval_duration;
     }
@@ -250,7 +248,6 @@ void run_tcp_receiver_short_lived(struct tcp_receiver *receiver)
   // Determine the next interval end time
   uint64_t interval_duration = receiver->duration / NUM_INTERVALS;
   uint64_t interval_end_time = start_time + interval_duration;
-  init_interval(receiver->log.current);
   receiver->log.current->start_time = start_time;
   uint64_t time_now;
   while((time_now = current_time_nanoseconds()) < end_time + 1*1000*1000*1000uLL)
@@ -361,7 +358,6 @@ void run_tcp_receiver_short_lived(struct tcp_receiver *receiver)
 
       // Start a new interval
       receiver->log.current++;
-      init_interval(receiver->log.current);
       receiver->log.current->start_time = now;
       interval_end_time += interval_duration;
     }

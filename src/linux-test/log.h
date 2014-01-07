@@ -46,28 +46,11 @@ static inline
 void init_log(struct log *log, uint32_t num_intervals) {
   assert(log != NULL);
   
-  log->log_intervals = malloc(sizeof(struct interval_info) *
-			      num_intervals);
+  log->log_intervals = calloc(num_intervals,
+			      sizeof(struct interval_info));
   assert(log->log_intervals != NULL);
 
   log->current = log->log_intervals;
-}
-
-static inline
-void init_interval(struct interval_info *interval) {
-  assert(interval != NULL);
-
-  uint16_t i;
-  for (i = 0; i < MAX_SENDERS; i++) {
-    interval->nodes[i].num_start_packets = 0;
-    interval->nodes[i].num_fcs = 0;
-    interval->nodes[i].sum_of_latencies = 0;
-    interval->nodes[i].sum_of_fcs = 0;
-    interval->nodes[i].bytes_received = 0;
-  }
-    
-  for (i = 0; i < NUM_LATENCY_BINS; i++)
-    interval->latency_bins[i] = 0;
 }
 
 // Logs the arrival of a packet indicating the start of a flow

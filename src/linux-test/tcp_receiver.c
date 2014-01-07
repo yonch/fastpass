@@ -27,6 +27,12 @@
 #define NUM_INTERVALS 1000
 #define RECEIVE_DURATION 10 // in seconds
 
+struct receiving_connection {
+  int sock_fd;
+  int bytes_left;
+  struct packet packet;
+};
+
 void tcp_receiver_init(struct tcp_receiver *receiver, uint64_t duration,
 		       uint16_t port_num)
 {
@@ -83,11 +89,9 @@ void run_tcp_receiver_short_lived(struct tcp_receiver *receiver)
 
   int sock_fd = bind_and_listen_to_socket(receiver);
 
-  int connected_fds[MAX_CONNECTIONS];
-  int bytes_left[MAX_CONNECTIONS];
-  struct packet packets[MAX_CONNECTIONS];
+  struct receiving_connection connections[MAX_CONNECTIONS];
   for (i = 0; i < MAX_CONNECTIONS; i++)
-    connected_fds[i] = -1;
+    connections[i].sock_fd = -1;
 
   fd_set rfds;
   FD_ZERO(&rfds);
@@ -110,12 +114,12 @@ void run_tcp_receiver_short_lived(struct tcp_receiver *receiver)
     int max = sock_fd;
     FD_SET(sock_fd, &rfds);
     for (i = 0; i < MAX_CONNECTIONS; i++) {
-      if (connected_fds[i] == -1)
+      if (connections[i].sock_fd == -1)
 	continue;
 
-      FD_SET(connected_fds[i], &rfds);
-      if (connected_fds[i] > max)
-	max = connected_fds[i];
+      FD_SET(connections[i].sock_fd, &rfds);
+      if (connections[i].sock_fd > max)
+	max = connections[i].sock_fd;
     }
 
     // Wait for a socket to have data to read or a new connection
@@ -139,10 +143,10 @@ void run_tcp_receiver_short_lived(struct tcp_receiver *receiver)
 	// Add to list of fds
 	bool success = false;
 	for (i = 0; i < MAX_CONNECTIONS; i++) {
-	  if (connected_fds[i] == -1)
+	  if (connections[i].sock_fd == -1)
 	    {
-	      connected_fds[i] = accept_fd;
-	      bytes_left[i] = -1;
+	      connections[i].sock_fd = accept_fd;
+	      connections[i].bytes_left = -1;
 	      success = true;
 	      break;
 	    }
@@ -153,34 +157,37 @@ void run_tcp_receiver_short_lived(struct tcp_receiver *receiver)
     // Read from all ready connections
     for (i = 0; i < MAX_CONNECTIONS; i++)
       {
-	if (connected_fds[i] == -1 ||
-	    !FD_ISSET(connected_fds[i], &rfds))
+	if (connections[i].sock_fd == -1 ||
+	    !FD_ISSET(connections[i].sock_fd, &rfds))
 	  continue;  // This fd is invalid or not ready
 
-	int ready_fd = connected_fds[i];
+	int ready_fd = connections[i].sock_fd;
 	int ready_index = i;
 
-	if (bytes_left[ready_index] == -1) {
+	if (connections[ready_index].bytes_left == -1) {
 	  // Read first part of flow
-	  struct packet *incoming = &packets[ready_index];
+	  struct packet *incoming = &connections[ready_index].packet;
 	  int bytes = read(ready_fd, incoming, sizeof(struct packet));
 	  time_now = current_time_nanoseconds();
 	  log_flow_start(&receiver->log, incoming->sender, bytes,
 			 (time_now - incoming->packet_send_time));
-	  bytes_left[ready_index] = incoming->size * MTU_SIZE - sizeof(struct packet);
+	  connections[ready_index].bytes_left = incoming->size * MTU_SIZE -
+	    sizeof(struct packet);
 	}
 	else {
 	  // Read in data
-	  int count = bytes_left[ready_index] < MTU_SIZE ? bytes_left[ready_index] : MTU_SIZE;
+	  int count = connections[ready_index].bytes_left < MTU_SIZE ?
+	    connections[ready_index].bytes_left : MTU_SIZE;
 	  int bytes = read(ready_fd, buf, count);
-	  log_data_received(&receiver->log, packets[ready_index].sender, bytes);
-	  bytes_left[ready_index] -= bytes;
+	  log_data_received(&receiver->log,
+			    connections[ready_index].packet.sender, bytes);
+	  connections[ready_index].bytes_left -= bytes;
 	  time_now = current_time_nanoseconds();
 
-	  if (bytes_left[ready_index] == 0)
+	  if (connections[ready_index].bytes_left == 0)
 	    {
 	      // This flow is done!
-	      struct packet *incoming = &packets[ready_index];
+	      struct packet *incoming = &connections[ready_index].packet;
 	      /*printf("received,\t%d, %d, %d, %"PRIu64", %d, %"PRIu64"\n",
 		     incoming->sender, incoming->receiver, incoming->size,
 		     incoming->flow_start_time, incoming->id, time_now);*/
@@ -195,7 +202,7 @@ void run_tcp_receiver_short_lived(struct tcp_receiver *receiver)
 	  
 	      // Remove from set
 	      FD_CLR(ready_fd, &rfds);
-	      connected_fds[ready_index] = -1;
+	      connections[ready_index].sock_fd = -1;
 	    }
 	}
       }

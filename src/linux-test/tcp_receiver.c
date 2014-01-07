@@ -37,7 +37,7 @@ enum connection_state {
 struct receiving_connection {
   enum connection_state status;
   int sock_fd;
-  int bytes_left;
+  uint64_t bytes_left;
   struct packet packet;
 };
 
@@ -175,7 +175,7 @@ void run_tcp_receiver_persistent(struct tcp_receiver *receiver) {
 	  time_now = current_time_nanoseconds();
 	  log_flow_start(&receiver->log, incoming->sender, bytes,
 			 (time_now - incoming->packet_send_time));
-	  connections[ready_index].bytes_left = incoming->size * MTU_SIZE -
+	  connections[ready_index].bytes_left = ((uint64_t) incoming->size) * MTU_SIZE -
 	    sizeof(struct packet);
 	  connections[ready_index].status = READING;
 	}

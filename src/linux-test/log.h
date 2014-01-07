@@ -112,7 +112,7 @@ void log_flow_completed(struct log *log, uint16_t node_id,
   node->sum_of_fcs += fc_time;
 }
 
-// Prints the log contents in CSV format to stdin to be piped to a file
+// Prints the log contents in CSV format to stdout to be piped to a file
 static inline
 void write_out_log(struct log *log) {
   assert(log != NULL);

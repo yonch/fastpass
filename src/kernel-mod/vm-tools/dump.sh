@@ -1,7 +1,7 @@
 #!/bin/bash
 
 OUTDIR=./pcap
-sudo date +%Y%M%d_%H%M%S_%N
+sudo date +%Y%m%d_%H%M%S_%N
 FNAME_DATE=`date +%Y%M%d_%H%M%S_%N`
 FNAME=$OUTDIR/fp_$FNAME_DATE.pcap
 

@@ -215,6 +215,7 @@ static void set_retrans_timer(void *param, u64 when)
 	uint16_t node_id = en - end_nodes;
 	uint64_t now = rte_get_timer_cycles();
 
+	COMM_DEBUG("setting timer now %lu when %llu (diff=%lld)\n", now, when, (when-now));
 	rte_timer_reset_sync(&en->timeout_timer, when - now, SINGLE, rte_lcore_id(),
 			retrans_timer_func, param);
 
@@ -304,6 +305,9 @@ static void trigger_request(struct end_node_state *en)
 	u32 node_id = en - end_nodes;
 
 	if (pacer_trigger(&en->tx_pacer, now)) {
+	  COMM_DEBUG("setting trigger timer now %lu when %llu (diff=%lld)\n", now, 
+pacer_next_event(&en->tx_pacer), (pacer_next_event(&en->tx_pacer)-now));
+
 		rte_timer_reset_sync(&en->tx_timer,
 				pacer_next_event(&en->tx_pacer) - now, SINGLE, rte_lcore_id(),
 				tx_end_node, (void *)en);

@@ -35,6 +35,34 @@ void tcp_receiver_init(struct tcp_receiver *receiver, uint64_t duration,
   init_log(&receiver->log, NUM_INTERVALS);
 }
 
+// Create, bind, and listen to a socket using the port specified by receiver
+// Returns the socket descriptor
+int bind_and_listen_to_socket(struct tcp_receiver *receiver) {
+  assert(receiver != NULL);
+
+  struct sockaddr_in sock_addr;
+
+  // Create a socket
+  int sock_fd = socket(PF_INET, SOCK_STREAM, IPPROTO_TCP);
+  assert(sock_fd > 0);
+ 
+  // Initialize socket address
+  memset(&sock_addr, 0, sizeof(sock_addr));
+  sock_addr.sin_family = AF_INET;
+  sock_addr.sin_port = htons(receiver->port_num);
+  sock_addr.sin_addr.s_addr = htonl(INADDR_ANY);
+ 
+  // Bind the address to the socket
+  int ret = bind(sock_fd,(struct sockaddr *)&sock_addr, sizeof(sock_addr));
+  assert(ret != -1);
+ 
+  // Listen for incoming connections
+  ret = listen(sock_fd, MAX_CONNECTIONS);
+  assert(ret != -1);
+
+  return sock_fd;
+}
+
 // Run a tcp_receiver which only accepts one connection per sender
 void run_tcp_receiver_persistent(struct tcp_receiver *receiver) {
   assert(receiver != NULL);
@@ -53,21 +81,7 @@ void run_tcp_receiver_short_lived(struct tcp_receiver *receiver)
   timeout.tv_sec = 0;
   timeout.tv_nsec = 0;
 
-  // Create a socket
-  int sock_fd = socket(PF_INET, SOCK_STREAM, IPPROTO_TCP);
-  assert(sock_fd > 0);
- 
-  // Initialize socket address
-  memset(&sock_addr, 0, sizeof(sock_addr));
-  sock_addr.sin_family = AF_INET;
-  sock_addr.sin_port = htons(receiver->port_num);
-  sock_addr.sin_addr.s_addr = htonl(INADDR_ANY);
- 
-  // Bind the address to the socket
-  assert(bind(sock_fd,(struct sockaddr *)&sock_addr, sizeof(sock_addr)) != -1);
- 
-  // Listen for incoming connections
-  assert(listen(sock_fd, MAX_CONNECTIONS) != -1);
+  int sock_fd = bind_and_listen_to_socket(receiver);
 
   int connected_fds[MAX_CONNECTIONS];
   int bytes_left[MAX_CONNECTIONS];

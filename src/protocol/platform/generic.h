@@ -221,9 +221,9 @@ do_last:
 	}
 
 	if (unlikely(flip))
-		sum = (u32)(sum << 8) + (sum >> 24); /* could have overflow on bit 32 */
-	else
-		sum = (u32)sum + (sum >> 32); /* could have overflow on bit 32 */
+		sum <<= 8; /* assume we didn't checksum so much data to overflow 56 bits */
+
+	sum = (u32)sum + (sum >> 32); /* could have overflow on bit 32 */
 	return (u32)sum + (u32)(sum >> 32);    /* add the overflow */
 }
 

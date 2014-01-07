@@ -471,7 +471,7 @@ static int process_areq(struct fpproto_conn *conn, u8 *data, u8 *data_end)
 	payload_type = ntohs(*(u16 *)curp);
 	n_dst = payload_type & 0x3F;
 	curp += 2;
-	if (curp + 4 * n_dst < data_end)
+	if (curp + 4 * n_dst > data_end)
 		goto incomplete;
 
 	if (conn->ops->handle_areq)

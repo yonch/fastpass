@@ -9,6 +9,7 @@
 #include "generate_packets.h"
 #include "tcp_sender.h" 
 
+#include <stdbool.h>
 #include <sys/types.h>
 #include <sys/socket.h>
 #include <netinet/in.h>
@@ -31,7 +32,8 @@
 enum state {
   INVALID,
   CONNECTING,
-  SENDING
+  SENDING,
+  READY
 };
 
 struct connection {
@@ -40,6 +42,7 @@ struct connection {
   int return_val;
   int bytes_left;
   char *buffer;
+  char *current_buffer;
 };
  
 void tcp_sender_init(struct tcp_sender *sender, struct generator *gen,
@@ -119,15 +122,20 @@ void choose_IP(uint32_t receiver_id, char *ip_addr) {
 
 // Open a socket and connect (dst specified by sender).
 // Populate sock_fd with the descriptor and return the return value for connect
-int open_socket_and_connect(struct tcp_sender *sender, int *sock_fd) {
+int open_socket_and_connect(struct tcp_sender *sender, int *sock_fd,
+			    bool non_blocking) {
   assert(sender != NULL);
 
   struct sockaddr_in sock_addr;
+  int result;
 
   // Create a socket, set to non-blocking
   *sock_fd = socket(PF_INET, SOCK_STREAM, IPPROTO_TCP);
   assert(*sock_fd != -1);
-  assert(fcntl(*sock_fd, F_SETFL, O_NONBLOCK) != -1);
+  if (non_blocking) {
+    result = fcntl(*sock_fd, F_SETFL, O_NONBLOCK);
+    assert(result != -1);
+  }
  
   // Initialize destination address
   memset(&sock_addr, 0, sizeof(sock_addr));
@@ -138,7 +146,8 @@ int open_socket_and_connect(struct tcp_sender *sender, int *sock_fd) {
   //char ip_addr[12];
   //choose_IP(outgoing.receiver, ip_addr);
   //printf("chosen IP %s for receiver %d\n", ip_addr, outgoing.receiver);
-  assert(inet_pton(AF_INET, ip_addr, &sock_addr.sin_addr) > 0);
+  result = inet_pton(AF_INET, ip_addr, &sock_addr.sin_addr);
+  assert(result > 0);
 
   // Connect to the receiver
   return connect(*sock_fd, (struct sockaddr *)&sock_addr, sizeof(sock_addr));
@@ -148,7 +157,143 @@ int open_socket_and_connect(struct tcp_sender *sender, int *sock_fd) {
 void run_tcp_sender_persistent(struct tcp_sender *sender) {
   assert(sender != NULL);
 
-  printf("persistent sender not yet implemented\n");
+  struct packet outgoing;
+  struct gen_packet packet;
+  int count = 0;
+  int i;
+  struct timespec ts;
+  uint32_t flows_sent = 0;
+
+  uint64_t start_time = current_time_nanoseconds();
+  uint64_t end_time = start_time + sender->duration;
+  uint64_t next_send_time;
+
+  // Info about the connection
+  struct connection connection;
+  connection.buffer = NULL;
+
+  fd_set wfds;
+  FD_ZERO(&wfds);
+
+  // Generate the first outgoing packet
+  gen_next_packet(sender->gen, &packet);
+  next_send_time = start_time + packet.time;
+
+  outgoing.sender = sender->id;
+  assert(inet_pton(AF_INET, sender->dest, &outgoing.receiver) > 0);
+  outgoing.flow_start_time = next_send_time;
+  outgoing.size = packet.size;
+  outgoing.id = count++;
+
+  // Connect to the receiver - blocking
+  connection.return_val = open_socket_and_connect(sender, &connection.sock_fd,
+						  false);
+  if (connection.return_val < 0 && errno != EINPROGRESS) {
+    perror("connection error\n");
+    assert(current_time_nanoseconds() > end_time);
+    return;
+  }
+
+  // check that connect was successful
+  int result;
+  socklen_t result_len = sizeof(result);
+  assert(getsockopt(connection.sock_fd, SOL_SOCKET, SO_ERROR,
+	 &result, &result_len) == 0);
+  assert(result == 0);
+
+  // now set to nonblocking
+  result = fcntl(connection.sock_fd, F_SETFL, O_NONBLOCK);
+  assert(result != -1);
+  connection.status = READY;
+
+  while (current_time_nanoseconds() < end_time)
+    {  
+      // Add fd to set
+      FD_ZERO(&wfds);
+      FD_SET(connection.sock_fd, &wfds);
+      
+      // Wait for the socket to be ready or for the next send time
+      int retval;
+      uint64_t time_now = current_time_nanoseconds();
+      if (!connection.status == READY || next_send_time > time_now) {
+	uint64_t time_diff = 0;
+	if (!READY)
+	  time_diff = 999999999;  // wait at most 1 second for socket
+	else
+	  time_diff = next_send_time - time_now;
+
+	// wait at most 1 second to avoid division to determine tv_sec
+	assert(time_diff < 1000 * 1000 * 1000);
+	ts.tv_sec = 0;
+	ts.tv_nsec = time_diff;
+
+	retval = pselect(connection.sock_fd + 1, NULL, &wfds, NULL, &ts, NULL);
+	if (retval < 0)
+	  break;  // error
+      }
+
+      if (FD_ISSET(connection.sock_fd, &wfds)) {
+	if (connection.return_val != connection.bytes_left) {
+	  // Not done sending - resend part of this flow
+	  connection.bytes_left -= connection.return_val;
+	  connection.current_buffer += connection.return_val;
+	  connection.return_val = send(connection.sock_fd,
+				       connection.current_buffer,
+				       connection.bytes_left, 0);
+	} else {
+	  // Finished sending this flow
+	  if (connection.buffer != NULL) {
+	    free(connection.buffer);
+	    connection.buffer = NULL;
+	  }
+	  connection.status = READY;  // now ready!
+	}
+      }
+
+      if (connection.status == READY &&
+	  current_time_nanoseconds() > next_send_time) {
+	// Ready to send the next flow
+
+	int size_in_bytes = outgoing.size * MTU_SIZE;
+	connection.buffer = malloc(size_in_bytes);
+	assert(connection.buffer != NULL);
+	connection.current_buffer = connection.buffer;
+	bcopy((void *) &outgoing, connection.buffer,
+	      sizeof(struct packet));
+	struct packet *outgoing_data = (struct packet *) connection.buffer;
+	connection.bytes_left = size_in_bytes;
+	outgoing_data->packet_send_time = current_time_nanoseconds();
+	connection.return_val = send(connection.sock_fd,
+				     connection.buffer,
+				     connection.bytes_left, 0);
+	connection.status = SENDING;
+	/*printf("sent, \t\t%d, %d, %d, %"PRIu64", %d, %"PRIu64"\n",
+	       outgoing_data->sender, outgoing_data->receiver,
+	       outgoing_data->size, outgoing_data->flow_start_time,
+	       outgoing_data->id, outgoing_data->packet_send_time);*/
+	flows_sent++;
+
+	// Generate the next outgoing packet
+	gen_next_packet(sender->gen, &packet);
+	next_send_time = start_time + packet.time;
+
+	outgoing.sender = sender->id;
+	assert(inet_pton(AF_INET, sender->dest, &outgoing.receiver) > 0);
+	outgoing.flow_start_time = next_send_time;
+	outgoing.size = packet.size;
+	outgoing.id = count++;
+      }
+    }
+
+  // close socket
+  (void) shutdown(connection.sock_fd, SHUT_RDWR);
+  close(connection.sock_fd);
+
+  // clean up state
+  free(connection.buffer);
+
+  printf("sent %d flows\n", flows_sent);
+
 }
 
 // Run a tcp_sender with short-lived connections
@@ -230,7 +375,8 @@ void run_tcp_sender_short_lived(struct tcp_sender *sender)
 
 	// Connect to the receiver
 	connections[index].return_val = open_socket_and_connect(sender,
-								&connections[index].sock_fd);
+								&connections[index].sock_fd,
+								true);
 	if (connections[index].return_val < 0 && errno != EINPROGRESS) {
 	  assert(current_time_nanoseconds() > end_time);
 	  return;

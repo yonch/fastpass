@@ -24,7 +24,10 @@ struct tcp_sender {
 void tcp_sender_init(struct tcp_sender *sender, struct generator *gen, uint32_t id,
 		     uint64_t duration, uint16_t port_num, const char *dest);
 
-// Runs one TCP sender.
-void *run_tcp_sender(struct tcp_sender *sender);
+// Runs one TCP sender with a persistent connection
+void run_tcp_sender_persistent(struct tcp_sender *sender);
+
+// Runs one TCP sender with short-lived connections
+void run_tcp_sender_short_lived(struct tcp_sender *sender);
 
 #endif /* TCP_SENDER_H_ */

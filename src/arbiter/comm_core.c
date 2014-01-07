@@ -233,6 +233,8 @@ static void handle_areq(void *param, u16 *dst_and_count, int n)
 	s32 demand_diff;
 	u32 num_increases = 0;
 
+	COMM_DEBUG("handling A-REQ with %d destinations\n", n);
+
 	for (i = 0; i < n; i++) {
 		dst = rte_be_to_cpu_16(dst_and_count[2*i]);
 		count = rte_be_to_cpu_16(dst_and_count[2*i + 1]);

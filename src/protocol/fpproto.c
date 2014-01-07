@@ -614,6 +614,7 @@ handle_payload:
 	case FASTPASS_PTYPE_ALLOC:
 		payload_length = process_alloc(conn, curp, data_end);
 
+		fp_debug("process_alloc returned %d\n", payload_length);
 		if (unlikely(payload_length == -1))
 			return;
 
@@ -623,6 +624,7 @@ handle_payload:
 	case FASTPASS_PTYPE_AREQ:
 		payload_length = process_areq(conn, curp, data_end);
 
+		fp_debug("process_areq returned %d\n", payload_length);
 		if (unlikely(payload_length == -1))
 			return;
 
@@ -631,6 +633,7 @@ handle_payload:
 
 	case FASTPASS_PTYPE_PADDING:
 		/* okay, we're done, it's padding from now on */
+		fp_debug("got padding. done with this packet.\n");
 		curp = data_end;
 		break;
 

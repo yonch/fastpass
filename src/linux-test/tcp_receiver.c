@@ -250,7 +250,7 @@ void run_tcp_receiver_short_lived(struct tcp_receiver *receiver)
 
   struct receiving_connection connections[MAX_CONNECTIONS];
   for (i = 0; i < MAX_CONNECTIONS; i++)
-    connections[i].sock_fd = -1;
+    connections[i].status = INVALID;
 
   fd_set rfds;
   FD_ZERO(&rfds);
@@ -272,7 +272,7 @@ void run_tcp_receiver_short_lived(struct tcp_receiver *receiver)
     int max = sock_fd;
     FD_SET(sock_fd, &rfds);
     for (i = 0; i < MAX_CONNECTIONS; i++) {
-      if (connections[i].sock_fd == -1)
+      if (connections[i].status == INVALID)
 	continue;
 
       FD_SET(connections[i].sock_fd, &rfds);
@@ -301,10 +301,10 @@ void run_tcp_receiver_short_lived(struct tcp_receiver *receiver)
 	// Add to list of fds
 	bool success = false;
 	for (i = 0; i < MAX_CONNECTIONS; i++) {
-	  if (connections[i].sock_fd == -1)
+	  if (connections[i].status == INVALID)
 	    {
 	      connections[i].sock_fd = accept_fd;
-	      connections[i].bytes_left = -1;
+	      connections[i].status = ACCEPTING;
 	      success = true;
 	      break;
 	    }
@@ -315,14 +315,14 @@ void run_tcp_receiver_short_lived(struct tcp_receiver *receiver)
     // Read from all ready connections
     for (i = 0; i < MAX_CONNECTIONS; i++)
       {
-	if (connections[i].sock_fd == -1 ||
+	if (connections[i].status == INVALID ||
 	    !FD_ISSET(connections[i].sock_fd, &rfds))
 	  continue;  // This fd is invalid or not ready
 
 	int ready_fd = connections[i].sock_fd;
 	int ready_index = i;
 
-	if (connections[ready_index].bytes_left == -1) {
+	if (connections[ready_index].status == ACCEPTING) {
 	  // Read first part of flow
 	  struct packet *incoming = &connections[ready_index].packet;
 	  int bytes = read(ready_fd, incoming, sizeof(struct packet));
@@ -331,9 +331,11 @@ void run_tcp_receiver_short_lived(struct tcp_receiver *receiver)
 			 (time_now - incoming->packet_send_time));
 	  connections[ready_index].bytes_left = incoming->size * MTU_SIZE -
 	    sizeof(struct packet);
+	  connections[ready_index].status = READING;
 	}
 	else {
 	  // Read in data
+	  assert(connections[ready_index].status == READING);
 	  int count = connections[ready_index].bytes_left < MTU_SIZE ?
 	    connections[ready_index].bytes_left : MTU_SIZE;
 	  int bytes = read(ready_fd, buf, count);
@@ -361,7 +363,7 @@ void run_tcp_receiver_short_lived(struct tcp_receiver *receiver)
 	  
 	      // Remove from set
 	      FD_CLR(ready_fd, &rfds);
-	      connections[ready_index].sock_fd = -1;
+	      connections[ready_index].status = INVALID;
 	    }
 	}
       }

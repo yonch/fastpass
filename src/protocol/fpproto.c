@@ -404,6 +404,31 @@ static int update_inwnd(struct fpproto_conn *conn, u64 seqno)
 }
 
 /**
+ * At-most-once: should we accept the packet?
+ * @return 0 if can accept
+ * 		   1 if caller should drop the packet with seqno
+ */
+static int at_most_once_may_accept(struct fpproto_conn *conn, u64 seqno)
+{
+	u64 head = conn->in_max_seqno;
+
+	/* seqno after head */
+	if (likely(time_after64(seqno, head)))
+		return 0; /* accept */
+
+	/* seqno before the bits kept in inwnd ? */
+	if (unlikely(time_before_eq64(seqno, head - 64)))
+		return 1; /* drop */
+
+	/* seqno in [head-63, head] */
+	if (conn->inwnd & (1UL << (63 - (head - seqno))))
+		/* already marked as received */
+		return 1; /* drop */
+
+	return 0; /* accept */
+}
+
+/**
  * Processes ALLOC payload.
  * On success, returns the payload length in bytes. On failure returns -1.
  */
@@ -578,8 +603,8 @@ void fpproto_handle_rx_packet(struct fpproto_conn *conn, u8 *pkt, u32 len,
 		conn->in_sync = 1;
 	}
 
-	/* update inwnd */
-	if (update_inwnd(conn, in_seq) != 0)
+	/* check if may accept the packet */
+	if (at_most_once_may_accept(conn, in_seq) != 0)
 		return; /* drop packet to keep at-most-once semantics */
 
 	/* handle acks */
@@ -644,6 +669,9 @@ handle_payload:
 	/* more payloads in packet? */
 	if (curp < data_end)
 		goto handle_payload;
+
+	/* successful parsing, can ack */
+	update_inwnd(conn, in_seq);
 
 	return;
 

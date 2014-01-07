@@ -78,6 +78,11 @@ void launch_cores(void)
 	first_time_slot = (now + INIT_MAX_TIME_NS) / TIMESLOT_LENGTH_NS;
 	CONTROL_INFO("now %lu first time slot will be %lu\n", now, first_time_slot);
 
+	/*** LOGGING OUTPUT ***/
+#ifdef LOG_TO_STDOUT
+	rte_openlog_stream(stdout);
+#endif
+
 	/*** GLOBAL INIT ***/
 	/* initialize comm core global data */
 	comm_init_global_structs(first_time_slot);

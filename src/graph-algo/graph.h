@@ -81,7 +81,6 @@ uint8_t get_degree(struct graph_edges *edges, uint8_t vertex) {
     assert(vertex < 2 * MAX_GRAPH_NODES);
 
     uint8_t degree = 0;
-    int i;
     uint64_t bitmap = edges->neighbor_bitmaps[vertex];
     while (bitmap > 0) {
         degree += bitmap & 0x1ULL;

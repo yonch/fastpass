@@ -4,6 +4,7 @@
 #include <rte_mempool.h>
 #include <rte_errno.h>
 #include <rte_string_fns.h>
+#include <rte_timer.h>
 #include <string.h>
 
 #include "main.h"
@@ -147,6 +148,10 @@ int exec_admission_core(void *void_cmd_p)
 		admission_log_allocation_end();
 
 		current_timeslot += BATCH_SIZE * N_ADMISSION_CORES;
+
+		/* manage timers: timer documentation asks for this to run on all cores
+		 * there shouldn't be any timers on this core */
+		rte_timer_manage();
 	}
 
 	return 0;

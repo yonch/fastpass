@@ -47,6 +47,15 @@ static __sum16 fastpass_checksum(u8 *pkt, u32 len, __be32 saddr, __be32 daddr,
 	u32 seq_hash = jhash_3words((u32)seqno, seqno >> 32, (u32)ack_seq,
 			ack_seq >> 32);
 	__wsum csum = csum_partial(pkt, len, seq_hash);
+	fp_debug("seq_hash 0x%X csum 0x%X len %u csum_partial 0 0x%X 1 0x%X 2 0x%X 3 0x%X 4 0x%X 5 0x%X 6 0x%X\n",
+			seq_hash, csum, len,
+			csum_partial(pkt, 0, seq_hash),
+			csum_partial(pkt, 1, seq_hash),
+			csum_partial(pkt, 2, seq_hash),
+			csum_partial(pkt, 3, seq_hash),
+			csum_partial(pkt, 4, seq_hash),
+			csum_partial(pkt, 5, seq_hash),
+			csum_partial(pkt, 6, seq_hash));
 	return csum_tcpudp_magic(0, 0, len, IPPROTO_FASTPASS, csum);
 	/* TODO: reinstate checksumming saddr and daddr */
 	return csum_tcpudp_magic(saddr, daddr, len, IPPROTO_FASTPASS, csum);

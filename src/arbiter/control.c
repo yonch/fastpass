@@ -8,6 +8,7 @@
 #include "main.h"
 #include "comm_core.h"
 #include "admission_core.h"
+#include "path_sel_core.h"
 
 int control_do_queue_allocation(void)
 {
@@ -18,7 +19,7 @@ int control_do_queue_allocation(void)
 		return 0;
 	}
 
-	if(n_enabled_lcore < N_ADMISSION_CORES + N_COMM_CORES + N_LOG_CORES) {
+	if(n_enabled_lcore < N_ADMISSION_CORES + N_COMM_CORES + N_LOG_CORES + N_PATH_SEL_CORES) {
 		rte_exit(EXIT_FAILURE, "Need #alloc + #comm + #log cores (need %d, got %d)\n",
 				N_ADMISSION_CORES + N_COMM_CORES + N_LOG_CORES, n_enabled_lcore);
 	}
@@ -62,9 +63,11 @@ void launch_cores(void)
 	int i; (void)i;
 	struct comm_core_cmd comm_cmd;
 	struct admission_core_cmd admission_cmd;
+	struct path_sel_core_cmd path_sel_cmd;
 	uint64_t first_time_slot;
 	uint64_t now;
 	struct rte_ring *q_admitted;
+	struct rte_ring *q_path_selected;
 
 	rte_timer_subsystem_init();
 
@@ -75,6 +78,11 @@ void launch_cores(void)
 	first_time_slot = (now + INIT_MAX_TIME_NS) / TIMESLOT_LENGTH_NS;
 	CONTROL_INFO("now %lu first time slot will be %lu\n", now, first_time_slot);
 
+	/*** LOGGING OUTPUT ***/
+#ifdef LOG_TO_STDOUT
+	rte_openlog_stream(stdout);
+#endif
+
 	/*** GLOBAL INIT ***/
 	/* initialize comm core global data */
 	comm_init_global_structs(first_time_slot);
@@ -84,7 +92,14 @@ void launch_cores(void)
 			2 * ADMITTED_TRAFFIC_MEMPOOL_SIZE, 0, 0);
 	if (q_admitted == NULL)
 		rte_exit(EXIT_FAILURE,
-				"Cannot init q_admitted_out: %s\n", rte_strerror(rte_errno));
+				"Cannot init q_admitted: %s\n", rte_strerror(rte_errno));
+
+	/* create q_admitted_out */
+	q_path_selected = rte_ring_create("q_path_selected",
+			2 * ADMITTED_TRAFFIC_MEMPOOL_SIZE, 0, 0);
+	if (q_path_selected == NULL)
+		rte_exit(EXIT_FAILURE,
+				"Cannot init q_path_selected: %s\n", rte_strerror(rte_errno));
 
 	/* initialize admission core global data */
 	admission_init_global(q_admitted);
@@ -92,6 +107,14 @@ void launch_cores(void)
 	// Calculate start and end times
 	start_time = rte_get_timer_cycles() + sec_to_hpet(0.2); /* start after last end */
 	end_time = start_time + sec_to_hpet(100*1000*1000);
+
+	/*** PATH_SELECTION CORES ***/
+	/* set commands */
+	path_sel_cmd.q_admitted = q_admitted;
+	path_sel_cmd.q_path_selected = q_path_selected;
+
+	/* launch admission core */
+	rte_eal_remote_launch(exec_path_sel_core, &path_sel_cmd, enabled_lcore[2]);
 
 	/*** ADMISSION CORES ***/
 	/* set commands */
@@ -112,7 +135,7 @@ void launch_cores(void)
 	// Set commands
 	comm_cmd.start_time = start_time;
 	comm_cmd.end_time = end_time;
-	comm_cmd.q_admitted = q_admitted;
+	comm_cmd.q_allocated = q_path_selected;
 
 	/* initialize comm core on this core */
 	comm_init_core(rte_lcore_id(), first_time_slot);

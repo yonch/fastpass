@@ -14,6 +14,7 @@
 
 #define N_CONTROLLER_PORTS		1
 #define N_ADMISSION_CORES		1
+#define N_PATH_SEL_CORES		1
 #define N_COMM_CORES			1
 #define N_LOG_CORES				0
 

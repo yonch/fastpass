@@ -31,6 +31,7 @@
 
 #ifdef _RTE_IP_H_
 #define ntohs(x) rte_be_to_cpu_16(x)
+#define ntohl(x) rte_be_to_cpu_32(x)
 #else
 #include <arpa/inet.h>
 #endif
@@ -198,7 +199,7 @@ uint32_t fp_csum_partial(const void *data, uint32_t data_len, uint32_t init_val)
 
 	if ((u64)p32 & 0x2) {
 		sum += *((const uint16_t *)p32);
-		p32 = (const uint32_t *)((const uint16_t *)p32 + 1);
+		p32 = (const uint32_t *)((const uint16_t *)p32 + 2);
 	}
 
 	for (i = 0; i < data_len / 4; i++) {
@@ -220,9 +221,9 @@ do_last:
 	}
 
 	if (unlikely(flip))
-		sum = (u32)(sum << 8) + (sum >> 24); /* could have overflow on bit 32 */
-	else
-		sum = (u32)sum + (sum >> 32); /* could have overflow on bit 32 */
+		sum <<= 8; /* assume we didn't checksum so much data to overflow 56 bits */
+
+	sum = (u32)sum + (sum >> 32); /* could have overflow on bit 32 */
 	return (u32)sum + (u32)(sum >> 32);    /* add the overflow */
 }
 

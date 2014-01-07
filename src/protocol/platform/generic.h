@@ -195,11 +195,13 @@ uint32_t fp_csum_partial(const void *data, uint32_t data_len, uint32_t init_val)
 	if (unlikely(flip)) {
 		sum += *((const uint8_t *)p32);
 		p32 = (const uint32_t *)((const uint8_t *)p32 + 1);
+		data_len -= 1;
 	}
 
 	if ((u64)p32 & 0x2) {
 		sum += *((const uint16_t *)p32);
 		p32 = (const uint32_t *)((const uint16_t *)p32 + 2);
+		data_len -= 2;
 	}
 
 	for (i = 0; i < data_len / 4; i++) {

@@ -13,6 +13,7 @@
 #endif
 
 #include "platform/generic.h"
+#include "platform/debug.h"
 #include "window.h"
 
 /* FASTPASS_PR_DEBUG defined in platform.h */

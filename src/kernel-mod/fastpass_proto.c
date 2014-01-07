@@ -18,7 +18,6 @@
 #include <net/pkt_sched.h>
 
 #include "fastpass_proto.h"
-#include "debug.h"
 #include "../protocol/platform.h"
 
 struct inet_hashinfo fastpass_hashinfo;

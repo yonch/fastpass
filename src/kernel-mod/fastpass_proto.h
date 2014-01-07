@@ -12,7 +12,7 @@
 #include <linux/interrupt.h>
 #include <linux/hrtimer.h>
 
-#include "debug.h"
+#include "../protocol/platform/generic.h"
 #include "../protocol/fpproto.h"
 #include "fp_statistics.h"
 

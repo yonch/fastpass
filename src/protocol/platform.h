@@ -6,6 +6,7 @@
 #define PROTOCOL_PLATFORM_H_
 
 #include "platform/generic.h"
+#include "platform/debug.h"
 
 #ifdef __KERNEL__
 #include "../kernel-mod/linux-platform.h"

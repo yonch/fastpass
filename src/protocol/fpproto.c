@@ -89,12 +89,12 @@ static void do_ack_seqno(struct fpproto_conn *conn, u64 seqno)
 {
 	struct fpproto_pktdesc *pd;
 
-	BUG_ON(wnd_seq_after(&conn->outwnd, seqno));
-	BUG_ON(wnd_seq_before(&conn->outwnd,seqno));
+	FASTPASS_BUG_ON(wnd_seq_after(&conn->outwnd, seqno));
+	FASTPASS_BUG_ON(wnd_seq_before(&conn->outwnd,seqno));
 
 	fp_debug("ACK seqno 0x%08llX\n", seqno);
 	conn->stat.acked_packets++;
-	BUG_ON(!wnd_is_marked(&conn->outwnd, seqno));
+	FASTPASS_BUG_ON(!wnd_is_marked(&conn->outwnd, seqno));
 	pd = outwnd_pop(conn, seqno);
 
 	if (conn->ops->handle_ack)
@@ -291,8 +291,8 @@ static void ack_payload_handler(struct fpproto_conn *conn, u64 ack_seq, u64 ack_
 		offset = __ffs(todo_mask);
 		cur_seqno = ack_seq - 63 + offset;
 
-		BUG_ON(wnd_seq_before(&conn->outwnd, cur_seqno));
-		BUG_ON(!wnd_is_marked(&conn->outwnd, cur_seqno));
+		FASTPASS_BUG_ON(wnd_seq_before(&conn->outwnd, cur_seqno));
+		FASTPASS_BUG_ON(!wnd_is_marked(&conn->outwnd, cur_seqno));
 
 		do_ack_seqno(conn, cur_seqno);
 		n_acked++;

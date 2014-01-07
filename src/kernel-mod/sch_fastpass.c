@@ -312,7 +312,7 @@ static inline bool flow_in_flowqueue(struct fp_flow *f)
  */
 static void flowqueue_enqueue_request(struct fp_sched_data *q, struct fp_flow *f)
 {
-	BUG_ON(f->state == FLOW_REQUEST_QUEUE);
+	FASTPASS_BUG_ON(f->state == FLOW_REQUEST_QUEUE);
 
 	if (f->state == FLOW_RETRANSMIT_QUEUE)
 		return; /* already in queue with higher priority */
@@ -762,7 +762,7 @@ void set_watchdog(struct Qdisc* sch) {
 	struct fp_sched_data *q = qdisc_priv(sch);
 	int next_slot;
 
-	BUG_ON(q->internal.qlen != 0);
+	FASTPASS_BUG_ON(q->internal.qlen != 0);
 
 	next_slot = horizon_next_nonempty(&q->horizon);
 	if (unlikely(next_slot < 0)) {
@@ -813,8 +813,8 @@ static void handle_reset(void *param)
 			/* can we garbage-collect this flow? */
 			if (f->demand_tslots == f->alloc_tslots) {
 				/* yes, let's gc */
-				BUG_ON(f->qlen != 0);
-				BUG_ON(f->state != FLOW_UNQUEUED);
+				FASTPASS_BUG_ON(f->qlen != 0);
+				FASTPASS_BUG_ON(f->state != FLOW_UNQUEUED);
 				/* erase from old tree */
 				rb_erase(cur, root);
 				fp_debug("gc flow 0x%04llX, used %llu timeslots\n",
@@ -935,10 +935,10 @@ static void handle_ack(void *param, struct fpproto_pktdesc *pd)
 
 	for (i = 0; i < pd->n_areq; i++) {
 		f = fpq_lookup(q, pd->areq[i].src_dst_key, false);
-		BUG_ON(f == NULL);
+		FASTPASS_BUG_ON(f == NULL);
 		new_acked = pd->areq[i].tslots;
 		if (f->acked_tslots < new_acked) {
-			BUG_ON(new_acked > f->demand_tslots);
+			FASTPASS_BUG_ON(new_acked > f->demand_tslots);
 			delta = new_acked - f->acked_tslots;
 			q->acked_tslots += delta;
 			f->acked_tslots = new_acked;
@@ -1022,7 +1022,7 @@ static void send_request(struct Qdisc *sch, u64 now)
 		q->stat.request_with_empty_flowqueue++;
 		fp_debug("was called with no flows pending (could be due to bad packets?)\n");
 	}
-	BUG_ON(!q->ctrl_sock);
+	FASTPASS_BUG_ON(!q->ctrl_sock);
 
 	/* allocate packet descriptor */
 	pkt = fpproto_pktdesc_alloc();
@@ -1120,7 +1120,7 @@ static struct sk_buff *fpq_dequeue(struct Qdisc *sch)
 		goto out_got_skb;
 
 	/* no packets in queue, go to sleep */
-	BUG_ON(horizon_cur_is_marked(&q->horizon));
+	FASTPASS_BUG_ON(horizon_cur_is_marked(&q->horizon));
 	set_watchdog(sch);
 	return NULL;
 
@@ -1168,8 +1168,8 @@ static int reconnect_ctrl_socket(struct Qdisc *sch)
 
 	sk = q->ctrl_sock->sk;
 
-	BUG_ON(sk->sk_priority != TC_PRIO_CONTROL);
-	BUG_ON(sk->sk_allocation != GFP_ATOMIC);
+	FASTPASS_BUG_ON(sk->sk_priority != TC_PRIO_CONTROL);
+	FASTPASS_BUG_ON(sk->sk_allocation != GFP_ATOMIC);
 
 	/* give socket a reference to this qdisc for watchdog */
 	fpproto_set_qdisc(sk, sch);
@@ -1268,7 +1268,7 @@ static void fp_tc_rehash(struct fp_sched_data *q,
 				parent = *np;
 
 				nf = container_of(parent, struct fp_flow, fp_node);
-				BUG_ON(nf->src_dst_key == of->src_dst_key);
+				FASTPASS_BUG_ON(nf->src_dst_key == of->src_dst_key);
 
 				if (nf->src_dst_key > of->src_dst_key)
 					np = &parent->rb_right;

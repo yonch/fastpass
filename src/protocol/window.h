@@ -82,7 +82,7 @@ static inline bool wnd_is_marked(struct fp_window *wnd, u64 seqno)
 static inline void wnd_mark(struct fp_window *wnd, u64 seqno)
 {
 	u32 seqno_index = wnd_pos(seqno);
-	BUG_ON(wnd_is_marked(wnd, seqno));
+	FASTPASS_BUG_ON(wnd_is_marked(wnd, seqno));
 
 	__set_bit(seqno_index, wnd->marked);
 	__set_bit(summary_pos(wnd, seqno_index), &wnd->summary);
@@ -102,8 +102,8 @@ static inline void wnd_mark_bulk(struct fp_window *wnd, u64 seqno, u32 amount)
 	u32 end_offset;
 	unsigned long mask;
 
-	BUG_ON(time_before_eq64(seqno, wnd->head - FASTPASS_WND_LEN));
-	BUG_ON(time_after64(seqno + amount - 1, wnd->head));
+	FASTPASS_BUG_ON(time_before_eq64(seqno, wnd->head - FASTPASS_WND_LEN));
+	FASTPASS_BUG_ON(time_after64(seqno + amount - 1, wnd->head));
 
 	start_index = wnd_pos(seqno);
 	start_offset = start_index % BITS_PER_LONG;
@@ -119,7 +119,7 @@ static inline void wnd_mark_bulk(struct fp_window *wnd, u64 seqno, u32 amount)
 
 	/* separate start word and end word */
 	/* start word: */
-	BUG_ON((wnd->marked[cur_word] & mask) != 0);
+	FASTPASS_BUG_ON((wnd->marked[cur_word] & mask) != 0);
 	wnd->marked[cur_word] |= mask;
 	mask = ~0UL;
 
@@ -127,7 +127,7 @@ static inline void wnd_mark_bulk(struct fp_window *wnd, u64 seqno, u32 amount)
 next_intermediate:
 	cur_word = (cur_word + 1) % FASTPASS_WND_WORDS;
 	if (likely(cur_word != end_word)) {
-		BUG_ON(wnd->marked[cur_word] != 0);
+		FASTPASS_BUG_ON(wnd->marked[cur_word] != 0);
 		wnd->marked[cur_word] = ~0UL;
 		goto next_intermediate;
 	}
@@ -136,7 +136,7 @@ next_intermediate:
 	/* changes contained in one word */
 end_word:
 	mask &= (~0UL >> (BITS_PER_LONG - 1 - end_offset));
-	BUG_ON((wnd->marked[cur_word] & mask) != 0);
+	FASTPASS_BUG_ON((wnd->marked[cur_word] & mask) != 0);
 	wnd->marked[cur_word] |= mask;
 
 	/* update summary */
@@ -154,7 +154,7 @@ static inline void wnd_clear(struct fp_window *wnd, u64 seqno)
 {
 	u32 seqno_index = wnd_pos(seqno);
 
-	BUG_ON(!wnd_is_marked(wnd, seqno));
+	FASTPASS_BUG_ON(!wnd_is_marked(wnd, seqno));
 
 	__clear_bit(seqno_index, wnd->marked);
 	if (unlikely(wnd->marked[BIT_WORD(seqno_index)] == 0))
@@ -176,7 +176,7 @@ static inline s32 wnd_at_or_before(struct fp_window *wnd, u64 seqno)
 	unsigned long tmp;
 
 	/* sanity check: seqno shouldn't be after window */
-	BUG_ON(time_after64(seqno, wnd->head));
+	FASTPASS_BUG_ON(time_after64(seqno, wnd->head));
 
 	/* if before window, return -1 */
 	if (unlikely(time_before_eq64(seqno, wnd->head - FASTPASS_WND_LEN)))
@@ -216,8 +216,8 @@ static inline u64 wnd_earliest_marked(struct fp_window *wnd)
 	result = (wnd->head & ~(BITS_PER_LONG-1)) - (word_offset * BITS_PER_LONG)
 			+ __ffs(tmp);
 
-	BUG_ON(!wnd_is_marked(wnd, result));
-	BUG_ON(wnd_at_or_before(wnd, result - 1) != -1);
+	FASTPASS_BUG_ON(!wnd_is_marked(wnd, result));
+	FASTPASS_BUG_ON(wnd_at_or_before(wnd, result - 1) != -1);
 
 	return result;
 }
@@ -239,11 +239,11 @@ static inline void wnd_advance(struct fp_window *wnd, u64 amount)
 {
 	u64 word_shift = BIT_WORD(wnd->head + amount) - BIT_WORD(wnd->head);
 	if (word_shift >= FASTPASS_WND_WORDS) {
-		BUG_ON(wnd->num_marked != 0);
+		FASTPASS_BUG_ON(wnd->num_marked != 0);
 		memset(wnd->marked, 0, sizeof(wnd->marked));
 		wnd->summary = 0UL;
 	} else {
-		BUG_ON(!wnd_empty(wnd) &&
+		FASTPASS_BUG_ON(!wnd_empty(wnd) &&
 				time_before_eq64(wnd_earliest_marked(wnd),
 						wnd->head + amount - FASTPASS_WND_LEN));
 		wnd->summary <<= word_shift;

@@ -16,7 +16,7 @@
 static inline
 void outwnd_add(struct fpproto_conn *conn, struct fpproto_pktdesc *pd)
 {
-	BUG_ON(!pd);
+	FASTPASS_BUG_ON(!pd);
 
 	wnd_advance(&conn->outwnd, 1);
 	wnd_mark(&conn->outwnd, conn->outwnd.head);
@@ -61,41 +61,41 @@ static inline void outwnd_test(struct fpproto_conn* conn) {
 	fp_debug("testing outwnd\n");
 	wnd_reset(ow, BASE - 1);
 	for(tslot = BASE - FASTPASS_WND_LEN; tslot < BASE; tslot++) {
-		BUG_ON(wnd_at_or_before(ow, tslot) != -1);
-		BUG_ON(wnd_is_marked(ow, tslot));
+		FASTPASS_BUG_ON(wnd_at_or_before(ow, tslot) != -1);
+		FASTPASS_BUG_ON(wnd_is_marked(ow, tslot));
 	}
 
 	for(i = 0; i < FASTPASS_WND_LEN; i++)
 		outwnd_add(conn, (struct fpproto_pktdesc *)(0xFF00L + i));
 
 	for(tslot = BASE; tslot < BASE + FASTPASS_WND_LEN; tslot++) {
-		BUG_ON(!wnd_is_marked(ow, tslot));
-		BUG_ON(wnd_at_or_before(ow, tslot) != 0);
+		FASTPASS_BUG_ON(!wnd_is_marked(ow, tslot));
+		FASTPASS_BUG_ON(wnd_at_or_before(ow, tslot) != 0);
 	}
 
-	BUG_ON(wnd_earliest_marked(ow) != BASE);
-	BUG_ON(outwnd_pop(conn, BASE) != (void *)0xFF00L);
-	BUG_ON(wnd_earliest_marked(ow) != BASE+1);
-	BUG_ON(wnd_at_or_before(ow, BASE) != -1);
-	BUG_ON(wnd_at_or_before(ow, BASE+1) != 0);
-	BUG_ON(outwnd_pop(conn, BASE+2) != (void *)0xFF02L);
-	BUG_ON(wnd_earliest_marked(ow) != BASE+1);
-	BUG_ON(wnd_at_or_before(ow, BASE+2) != 1);
+	FASTPASS_BUG_ON(wnd_earliest_marked(ow) != BASE);
+	FASTPASS_BUG_ON(outwnd_pop(conn, BASE) != (void *)0xFF00L);
+	FASTPASS_BUG_ON(wnd_earliest_marked(ow) != BASE+1);
+	FASTPASS_BUG_ON(wnd_at_or_before(ow, BASE) != -1);
+	FASTPASS_BUG_ON(wnd_at_or_before(ow, BASE+1) != 0);
+	FASTPASS_BUG_ON(outwnd_pop(conn, BASE+2) != (void *)0xFF02L);
+	FASTPASS_BUG_ON(wnd_earliest_marked(ow) != BASE+1);
+	FASTPASS_BUG_ON(wnd_at_or_before(ow, BASE+2) != 1);
 
 	for(tslot = BASE+3; tslot < BASE + 152; tslot++) {
-		BUG_ON(outwnd_pop(conn, tslot) != (void *)(0xFF00L + tslot - BASE));
-		BUG_ON(wnd_is_marked(ow, tslot));
-		BUG_ON(wnd_at_or_before(ow, tslot) != (int)(tslot - BASE - 1));
-		BUG_ON(wnd_at_or_before(ow, tslot+1) != 0);
-		BUG_ON(wnd_earliest_marked(ow) != BASE+1);
+		FASTPASS_BUG_ON(outwnd_pop(conn, tslot) != (void *)(0xFF00L + tslot - BASE));
+		FASTPASS_BUG_ON(wnd_is_marked(ow, tslot));
+		FASTPASS_BUG_ON(wnd_at_or_before(ow, tslot) != (int)(tslot - BASE - 1));
+		FASTPASS_BUG_ON(wnd_at_or_before(ow, tslot+1) != 0);
+		FASTPASS_BUG_ON(wnd_earliest_marked(ow) != BASE+1);
 	}
 	for(tslot = BASE+152; tslot < BASE + FASTPASS_WND_LEN; tslot++) {
-		BUG_ON(!wnd_is_marked(ow, tslot));
-		BUG_ON(wnd_at_or_before(ow, tslot) != 0);
+		FASTPASS_BUG_ON(!wnd_is_marked(ow, tslot));
+		FASTPASS_BUG_ON(wnd_at_or_before(ow, tslot) != 0);
 	}
 
-	BUG_ON(outwnd_pop(conn, BASE+1) != (void *)0xFF01L);
-	BUG_ON(wnd_earliest_marked(ow) != BASE+152);
+	FASTPASS_BUG_ON(outwnd_pop(conn, BASE+1) != (void *)0xFF01L);
+	FASTPASS_BUG_ON(wnd_earliest_marked(ow) != BASE+152);
 
 	fp_debug("done testing outwnd, cleaning up\n");
 
@@ -105,13 +105,13 @@ clear_next_unacked:
 	gap = wnd_at_or_before(ow, tslot);
 	if (gap >= 0) {
 		tslot -= gap;
-		BUG_ON(outwnd_pop(conn, tslot) != (void *)(0xFF00L + tslot - BASE));
+		FASTPASS_BUG_ON(outwnd_pop(conn, tslot) != (void *)(0xFF00L + tslot - BASE));
 		goto clear_next_unacked;
 	}
 
 	/* make sure pointer array is clean */
 	for (i = 0; i < FASTPASS_WND_LEN; i++)
-		BUG_ON(conn->unacked_pkts[i] != NULL);
+		FASTPASS_BUG_ON(conn->unacked_pkts[i] != NULL);
 }
 
 #endif /* FP_OUTWND_H_ */

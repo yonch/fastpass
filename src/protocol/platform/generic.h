@@ -58,12 +58,12 @@ static inline void panic(void) {
 }
 
 /** from linux's include/asm-generic/bug.h */
-#define BUG() do { \
+#define FASTPASS_BUG() do { \
 	printf("BUG: failure at %s:%d/%s()!\n", __FILE__, __LINE__, __func__); \
 	panic(); \
 } while (0)
 
-#define BUG_ON(condition) do { if (unlikely(condition)) BUG(); } while(0)
+#define FASTPASS_BUG_ON(condition) do { if (unlikely(condition)) BUG(); } while(0)
 
 /* from kernel.h */
 #define DIV_ROUND_UP(n,d) (((n) + (d) - 1) / (d))

@@ -193,7 +193,7 @@ uint32_t fp_csum_partial(const void *data, uint32_t data_len, uint32_t init_val)
 
 	flip = (u64)p32 & 0x1;
 	if (unlikely(flip)) {
-		sum += *((const uint8_t *)p32);
+		sum += *((const uint8_t *)p32) << 8;
 		p32 = (const uint32_t *)((const uint8_t *)p32 + 1);
 		data_len -= 1;
 	}

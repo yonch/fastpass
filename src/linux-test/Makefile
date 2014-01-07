@@ -1,6 +1,8 @@
 # Macros
 CC = gcc
 CCFLAGS = -g
+#CCFLAGS += -DNDEBUG
+#CCFLAGS += -O3
 LDFLAGS = -lm -pthread -lrt
 
 # Pattern rule

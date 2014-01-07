@@ -180,7 +180,8 @@ void run_tcp_sender_persistent(struct tcp_sender *sender) {
   next_send_time = start_time + packet.time;
 
   outgoing.sender = sender->id;
-  assert(inet_pton(AF_INET, sender->dest, &outgoing.receiver) > 0);
+  int ret = inet_pton(AF_INET, sender->dest, &outgoing.receiver);
+  assert(ret > 0);
   outgoing.flow_start_time = next_send_time;
   outgoing.size = packet.size;
   outgoing.id = count++;
@@ -197,8 +198,9 @@ void run_tcp_sender_persistent(struct tcp_sender *sender) {
   // check that connect was successful
   int result;
   socklen_t result_len = sizeof(result);
-  assert(getsockopt(connection.sock_fd, SOL_SOCKET, SO_ERROR,
-	 &result, &result_len) == 0);
+  ret = getsockopt(connection.sock_fd, SOL_SOCKET, SO_ERROR,
+		   &result, &result_len);
+  assert(ret == 0);
   assert(result == 0);
 
   // now set to nonblocking
@@ -278,7 +280,8 @@ void run_tcp_sender_persistent(struct tcp_sender *sender) {
 	next_send_time = start_time + packet.time;
 
 	outgoing.sender = sender->id;
-	assert(inet_pton(AF_INET, sender->dest, &outgoing.receiver) > 0);
+	int ret = inet_pton(AF_INET, sender->dest, &outgoing.receiver);
+	assert(ret > 0);
 	outgoing.flow_start_time = next_send_time;
 	outgoing.size = packet.size;
 	outgoing.id = count++;
@@ -326,7 +329,8 @@ void run_tcp_sender_short_lived(struct tcp_sender *sender)
   next_send_time = start_time + packet.time;
 
   outgoing.sender = sender->id;
-  assert(inet_pton(AF_INET, sender->dest, &outgoing.receiver) > 0);
+  int ret = inet_pton(AF_INET, sender->dest, &outgoing.receiver);
+  assert(ret > 0);
   outgoing.flow_start_time = next_send_time;
   outgoing.size = packet.size;
   outgoing.id = count++;
@@ -392,7 +396,8 @@ void run_tcp_sender_short_lived(struct tcp_sender *sender)
 	next_send_time = start_time + packet.time;
 
 	outgoing.sender = sender->id;
-	assert(inet_pton(AF_INET, sender->dest, &outgoing.receiver) > 0);
+	int ret = inet_pton(AF_INET, sender->dest, &outgoing.receiver);
+	assert(ret > 0);
 	outgoing.flow_start_time = next_send_time;
 	outgoing.size = packet.size;
 	outgoing.id = count++;
@@ -409,8 +414,9 @@ void run_tcp_sender_short_lived(struct tcp_sender *sender)
 
 	  if (connections[i].status == CONNECTING) {
 	    // check that connect was successful
-	    assert(getsockopt(connections[i].sock_fd, SOL_SOCKET, SO_ERROR,
-			      &result, &result_len) == 0);
+	    int ret = getsockopt(connections[i].sock_fd, SOL_SOCKET, SO_ERROR,
+				 &result, &result_len);
+	    assert(ret == 0);
 	    assert(result == 0);
 
 	    // send data

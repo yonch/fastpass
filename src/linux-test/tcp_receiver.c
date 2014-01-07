@@ -211,7 +211,8 @@ void run_tcp_receiver_persistent(struct tcp_receiver *receiver) {
   // Close all sockets
   for (i = 0; i < MAX_SENDERS; i++) {
     if (connections[i].sock_fd != -1) {
-      assert(shutdown(connections[i].sock_fd, SHUT_RDWR) != -1);
+      int ret = shutdown(connections[i].sock_fd, SHUT_RDWR);
+      assert(ret != -1);
       close(connections[i].sock_fd);
     }
   }
@@ -342,7 +343,8 @@ void run_tcp_receiver_short_lived(struct tcp_receiver *receiver)
 				   (time_now - incoming->flow_start_time));
 	      }
  
-	      assert(shutdown(ready_fd, SHUT_RDWR) != -1);
+	      int ret = shutdown(ready_fd, SHUT_RDWR);
+	      assert(ret != -1);
 	      close(ready_fd);
 	  
 	      // Remove from set

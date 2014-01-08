@@ -26,6 +26,7 @@
 #include <sys/fcntl.h>
 
 #define IP_ADDR_MAX_LENGTH 20
+#define MAX_BUFFER_SIZE (100 * MTU_SIZE)
 #define NUM_CORES 4
 #define SEND_DURATION 1 // in seconds
 
@@ -40,7 +41,7 @@ struct connection {
   enum state status;
   int sock_fd;
   int return_val;
-  int bytes_left;
+  uint64_t bytes_left;
   char *buffer;
   char *current_buffer;
 };
@@ -151,6 +152,77 @@ int open_socket_and_connect(struct tcp_sender *sender, int *sock_fd,
 
   // Connect to the receiver
   return connect(*sock_fd, (struct sockaddr *)&sock_addr, sizeof(sock_addr));
+}
+
+// Run a tcp_sender with a single bulk flow. Send until all data has
+// been sent.
+void run_tcp_sender_bulk(struct tcp_sender *sender) {
+  assert(sender != NULL);
+
+  struct packet outgoing;
+
+  // Info about the connection
+  struct connection connection;
+  connection.buffer = NULL;
+
+  outgoing.sender = sender->id;
+  int ret = inet_pton(AF_INET, sender->dest, &outgoing.receiver);
+  assert(ret > 0);
+  outgoing.flow_start_time = current_time_nanoseconds();
+  uint64_t size_in_bytes = 5ull * 1000 * 1000 * 1000;  // 5 GBs
+  outgoing.size = size_in_bytes / MTU_SIZE;  // in MTUs
+  outgoing.id = 0;
+
+  // Connect to the receiver - blocking
+  connection.return_val = open_socket_and_connect(sender, &connection.sock_fd,
+						  false);
+  if (connection.return_val < 0 && errno != EINPROGRESS) {
+    perror("connection error\n");
+    return;
+  }
+
+  // Check that connect was successful
+  int result;
+  socklen_t result_len = sizeof(result);
+  ret = getsockopt(connection.sock_fd, SOL_SOCKET, SO_ERROR,
+		   &result, &result_len);
+  assert(ret == 0);
+  assert(result == 0);
+
+  // Allocate buffer space and populate flow info
+  connection.buffer = malloc(MAX_BUFFER_SIZE);
+  assert(connection.buffer != NULL);
+  connection.current_buffer = connection.buffer;
+  bcopy((void *) &outgoing, connection.buffer,
+	sizeof(struct packet));
+  connection.bytes_left = size_in_bytes;
+  outgoing.packet_send_time = current_time_nanoseconds();
+
+  uint32_t bytes_left_in_buffer = MAX_BUFFER_SIZE;
+  do {
+    // Send until done. Use buffer to hold chunks of data to send
+    uint32_t send_size = (connection.bytes_left < bytes_left_in_buffer) ? 
+      connection.bytes_left : bytes_left_in_buffer;
+    connection.return_val = send(connection.sock_fd,
+				 connection.current_buffer,
+			         send_size, 0);
+    connection.bytes_left -= connection.return_val;
+    bytes_left_in_buffer -= connection.return_val;
+    connection.current_buffer += connection.return_val;
+    if (bytes_left_in_buffer == 0) {
+      bytes_left_in_buffer = MAX_BUFFER_SIZE;
+      connection.current_buffer = connection.buffer;
+    }
+  } while (connection.bytes_left > 0);
+
+  // close socket
+  (void) shutdown(connection.sock_fd, SHUT_RDWR);
+  close(connection.sock_fd);
+
+  // clean up state
+  free(connection.buffer);
+
+  printf("sent %"PRIu64" bytes\n", size_in_bytes - connection.bytes_left);
 }
 
 // Run a tcp_sender with a single persistent connection
@@ -457,18 +529,20 @@ int main(int argc, char **argv) {
   uint32_t port_num = PORT;
   char *dest_ip = malloc(sizeof(char) * IP_ADDR_MAX_LENGTH);
   if (!dest_ip) return -1;
-  uint32_t persistent;
+  // short-lived/interactive (0), persistent/interactive (1), or persistent/bulk (2)
+  uint32_t type;
 
   uint32_t mean_t_btwn_flows = 10000;
   if (argc > 4) {
 	sscanf(argv[1], "%u", &mean_t_btwn_flows);
 	sscanf(argv[2], "%u", &my_id);
 	sscanf(argv[3], "%s", dest_ip);
-	sscanf(argv[4], "%u", &persistent);
+	sscanf(argv[4], "%u", &type);
 	if (argc > 5)
 	  sscanf(argv[5], "%u", &port_num);
-  } else {
-	  printf("usage: %s mean_t my_id dest_ip persistent port_num (optional)\n", argv[0]);
+  }
+  if (argc <= 4 || (type != 0 && type != 1 && type != 2)) {
+	  printf("usage: %s mean_t my_id dest_ip type port_num (optional)\n", argv[0]);
 	  return -1;
   }
 
@@ -483,8 +557,10 @@ int main(int argc, char **argv) {
   gen_init(&gen, POISSON, UNIFORM, mean_t_btwn_flows, 20);
   tcp_sender_init(&sender, &gen, my_id, duration, port_num, dest_ip);
 
-  if (persistent == 0)
+  if (type == 0)
     run_tcp_sender_short_lived(&sender);
-  else
+  else if (type == 1)
     run_tcp_sender_persistent(&sender);
+  else
+    run_tcp_sender_bulk(&sender);
 }

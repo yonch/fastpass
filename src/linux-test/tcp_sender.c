@@ -551,7 +551,6 @@ int main(int argc, char **argv) {
 
   uint64_t duration = (send_duration * 1ull) * 1000 * 1000 * 1000;
 
-  printf("mean t between flows (microseconds): %d\n", mean_t_btwn_flows);
   mean_t_btwn_flows *= 1000; // get it in nanoseconds
 
   // Initialize the sender
@@ -560,10 +559,22 @@ int main(int argc, char **argv) {
   gen_init(&gen, POISSON, UNIFORM, mean_t_btwn_flows, size_param);
   tcp_sender_init(&sender, &gen, my_id, duration, port_num, dest_ip);
 
-  if (type == 0)
+  if (type == 0) {
+    printf("Running interactive sender with short-lived connections\n");
+    printf("\tmy id: %u\n", my_id);
+    printf("\tduration (seconds): %u\n", send_duration);
     run_tcp_sender_short_lived(&sender);
-  else if (type == 1)
+  }
+  else if (type == 1) {
+    printf("Running interactive sender with persistent connections\n");
+    printf("\tmy id: %u\n", my_id);
+    printf("\tduration (seconds): %u\n", send_duration);
     run_tcp_sender_persistent(&sender);
-  else
+  }
+  else {
+    printf("Running bulk sender\n");
+    printf("\tmy id: %u\n", my_id);
+    printf("\tsend size (MB): %u\n", size_param);
     run_tcp_sender_bulk(&sender);
+  }
 }

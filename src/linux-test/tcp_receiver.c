@@ -386,17 +386,18 @@ void run_tcp_receiver_short_lived(struct tcp_receiver *receiver)
 
 int main(int argc, char **argv) {
   uint32_t receive_duration;
-  uint32_t persistent;
+  uint32_t type;
   uint32_t port_num = PORT;
 
   if (argc > 2) {
     sscanf(argv[1], "%u", &receive_duration);
-    sscanf(argv[2], "%u", &persistent);
+    sscanf(argv[2], "%u", &type);
     if (argc > 3) {
       sscanf(argv[3], "%u", &port_num);  // optional port number
     }
-  } else {
-    printf("usage: %s receive_duration persistent port_num (optional)\n", argv[0]);
+  }
+  if (argc <= 2 || (type != 0 && type != 1 && type != 2)) {
+    printf("usage: %s receive_duration type port_num (optional)\n", argv[0]);
     return -1;
   }
 
@@ -406,7 +407,7 @@ int main(int argc, char **argv) {
   struct tcp_receiver receiver;
   tcp_receiver_init(&receiver, duration, port_num);
 
-  if (persistent == 0)
+  if (type == 0)
     run_tcp_receiver_short_lived(&receiver);
   else
     run_tcp_receiver_persistent(&receiver);

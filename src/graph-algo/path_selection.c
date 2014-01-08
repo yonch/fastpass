@@ -212,6 +212,60 @@ static void split_and_populate_paths(struct graph_structure *structure,
     }
 }
 
+// Returns true if the assignment of paths is valid; false otherwise
+bool paths_are_valid(struct admitted_traffic *admitted, uint8_t num_racks) {
+    assert(admitted != NULL);
+
+    uint16_t i, j;
+    uint8_t src_rack_path_counts [MAX_RACKS * NUM_PATHS];
+    uint8_t dst_rack_path_counts [MAX_RACKS * NUM_PATHS];
+
+    for (i = 0; i < num_racks * NUM_PATHS; i++) {
+        src_rack_path_counts[i] = 0;
+        dst_rack_path_counts[i] = 0;
+    }
+
+    // Count the number of times each path is used per src/dst rack
+    for (i = 0; i < admitted->size; i++) {
+        struct admitted_edge *edge = &admitted->edges[i];
+        uint8_t path = (edge->dst & ~PATH_MASK) >> PATH_SHIFT;
+        uint16_t src_rack = get_rack_from_id(edge->src);
+        uint16_t dst_rack = get_rack_from_id(edge->dst & PATH_MASK);
+        src_rack_path_counts[src_rack * NUM_PATHS + path]++;
+        dst_rack_path_counts[dst_rack * NUM_PATHS + path]++;
+    }
+
+    // Calculate the maximum rack degree
+    uint16_t max_rack_degree = 0;
+    for (i = 0; i < num_racks; i++) {
+        uint16_t src_count = 0;
+        uint16_t dst_count = 0;
+        for (j = 0; j < NUM_PATHS; j++) {
+            src_count += src_rack_path_counts[i * NUM_PATHS + j];
+            dst_count += dst_rack_path_counts[i * NUM_PATHS + j];
+        }
+        if (src_count > max_rack_degree)
+            max_rack_degree = src_count;
+        if (dst_count > max_rack_degree)
+            max_rack_degree = dst_count;
+    }
+    // Round max_rack_degree up to next multiple of NUM_PATHS
+    if (max_rack_degree % NUM_PATHS != 0)
+        max_rack_degree = (max_rack_degree / NUM_PATHS + 1) * NUM_PATHS;
+
+    // Check that per-rack path counts are valid, using max_rack_degree
+    for (i = 0; i < num_racks; i++) {
+        for (j = 0; j < NUM_PATHS; j++) {
+            if (src_rack_path_counts[i * NUM_PATHS + j] > max_rack_degree / NUM_PATHS)
+                return false;
+            if (dst_rack_path_counts[i * NUM_PATHS + j] > max_rack_degree / NUM_PATHS)
+                return false;
+        }
+    }
+
+    return true;
+}
+
 // Selects paths for traffic in admitted. Modifies the highest two
 // bits of the destination to specify the path_id.
 void select_paths(struct admitted_traffic *admitted, uint8_t num_racks) {

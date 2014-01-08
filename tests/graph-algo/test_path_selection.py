@@ -42,7 +42,7 @@ class Test(unittest.TestCase):
             num_paths = pathselection.NUM_PATHS
             src_rack_path_counts = []
             dst_rack_path_counts = []
-            for i in range(pathselection.NUM_RACKS):
+            for i in range(n_racks):
                 src_rack_path_counts.append([])
                 dst_rack_path_counts.append([])
                 for j in range(num_paths):
@@ -59,8 +59,8 @@ class Test(unittest.TestCase):
                 dst_rack_path_counts[dst][path] += 1
 
             # check that per-rack path counts are valid
-            rack_degree = n_nodes / pathselection.NUM_RACKS
-            for i in range(pathselection.NUM_RACKS):
+            rack_degree = n_nodes / n_racks
+            for i in range(n_racks):
                 for j in range(num_paths):
                     self.assertTrue(src_rack_path_counts[i][j] <= rack_degree / num_paths)
                     self.assertTrue(dst_rack_path_counts[i][j] <= rack_degree / num_paths)
@@ -117,7 +117,7 @@ class Test(unittest.TestCase):
             num_paths = pathselection.NUM_PATHS
             src_rack_degrees = []
             dst_rack_degrees = []
-            for i in range(pathselection.NUM_RACKS):
+            for i in range(n_racks):
                 src_rack_degrees.append(0)
                 dst_rack_degrees.append(0)
         
@@ -136,7 +136,7 @@ class Test(unittest.TestCase):
             # is used the correct number of times per src/dst rack
             src_rack_path_counts = []
             dst_rack_path_counts = []
-            for i in range(pathselection.NUM_RACKS):
+            for i in range(n_racks):
                 src_rack_path_counts.append([])
                 dst_rack_path_counts.append([])
                 for j in range(num_paths):
@@ -153,7 +153,7 @@ class Test(unittest.TestCase):
                 dst_rack_path_counts[dst][path] += 1
 
             # check that per-rack path counts are valid
-            for i in range(pathselection.NUM_RACKS):
+            for i in range(n_racks):
                 for j in range(num_paths):
                     self.assertTrue(src_rack_path_counts[i][j] <= max_degree / num_paths)
                     self.assertTrue(dst_rack_path_counts[i][j] <= max_degree / num_paths)

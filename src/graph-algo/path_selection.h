@@ -11,7 +11,6 @@
 #include "admissible_structures.h"
 
 #define NUM_PATHS 4  // if not 4, NUM_GRAPHS and related code must be modified
-#define NUM_RACKS 8  // must be at most MAX_RACKS
 #define PATH_MASK 0x3FFF  // 2^PATH_SHIFT - 1
 #define PATH_SHIFT 14
 

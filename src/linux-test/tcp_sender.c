@@ -28,7 +28,6 @@
 #define IP_ADDR_MAX_LENGTH 20
 #define MAX_BUFFER_SIZE (100 * MTU_SIZE)
 #define NUM_CORES 4
-#define SEND_DURATION 1 // in seconds
 
 enum state {
   INVALID,
@@ -525,6 +524,7 @@ void run_tcp_sender_short_lived(struct tcp_sender *sender)
 }
 
 int main(int argc, char **argv) {
+  uint32_t send_duration;  // in seconds
   uint32_t my_id;
   uint32_t port_num = PORT;
   char *dest_ip = malloc(sizeof(char) * IP_ADDR_MAX_LENGTH);
@@ -533,20 +533,21 @@ int main(int argc, char **argv) {
   uint32_t type;
 
   uint32_t mean_t_btwn_flows = 10000;
-  if (argc > 4) {
-	sscanf(argv[1], "%u", &mean_t_btwn_flows);
-	sscanf(argv[2], "%u", &my_id);
-	sscanf(argv[3], "%s", dest_ip);
-	sscanf(argv[4], "%u", &type);
-	if (argc > 5)
-	  sscanf(argv[5], "%u", &port_num);
+  if (argc > 5) {
+    sscanf(argv[1], "%u", &send_duration);
+    sscanf(argv[2], "%u", &mean_t_btwn_flows);
+    sscanf(argv[3], "%u", &my_id);
+    sscanf(argv[4], "%s", dest_ip);
+    sscanf(argv[5], "%u", &type);
+    if (argc > 6)
+      sscanf(argv[6], "%u", &port_num);
   }
-  if (argc <= 4 || (type != 0 && type != 1 && type != 2)) {
-	  printf("usage: %s mean_t my_id dest_ip type port_num (optional)\n", argv[0]);
+  if (argc <= 5 || (type != 0 && type != 1 && type != 2)) {
+	  printf("usage: %s send_duration mean_t my_id dest_ip type port_num (optional)\n", argv[0]);
 	  return -1;
   }
 
-  uint64_t duration = (SEND_DURATION * 1ull) * 1000 * 1000 * 1000;
+  uint64_t duration = (send_duration * 1ull) * 1000 * 1000 * 1000;
 
   printf("mean t between flows (microseconds): %d\n", mean_t_btwn_flows);
   mean_t_btwn_flows *= 1000; // get it in nanoseconds

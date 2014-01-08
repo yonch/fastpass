@@ -25,7 +25,6 @@
 
 #define BITS_PER_BYTE 8
 #define NUM_INTERVALS 1000
-#define RECEIVE_DURATION 10 // in seconds
 
 enum connection_state {
   INVALID,  // this socket is not currently in use
@@ -386,20 +385,22 @@ void run_tcp_receiver_short_lived(struct tcp_receiver *receiver)
 }
 
 int main(int argc, char **argv) {
+  uint32_t receive_duration;
   uint32_t persistent;
   uint32_t port_num = PORT;
 
-  if (argc > 1) {
-    sscanf(argv[1], "%u", &persistent);
-    if (argc > 2) {
-      sscanf(argv[2], "%u", &port_num);  // optional port number
+  if (argc > 2) {
+    sscanf(argv[1], "%u", &receive_duration);
+    sscanf(argv[2], "%u", &persistent);
+    if (argc > 3) {
+      sscanf(argv[3], "%u", &port_num);  // optional port number
     }
   } else {
-    printf("usage: %s persistent port_num (optional)\n", argv[0]);
+    printf("usage: %s receive_duration persistent port_num (optional)\n", argv[0]);
     return -1;
   }
 
-  uint64_t duration = (RECEIVE_DURATION * 1ull) * 1000 * 1000 * 1000;
+  uint64_t duration = (receive_duration * 1ull) * 1000 * 1000 * 1000;
 
   // Initialize the receiver
   struct tcp_receiver receiver;

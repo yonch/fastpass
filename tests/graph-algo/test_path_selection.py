@@ -37,33 +37,8 @@ class Test(unittest.TestCase):
             # select paths
             pathselection.select_paths(admitted, n_racks)
 
-            # check that each edge has a valid path number and that each path
-            # is used the correct number of times per src/dst rack
-            num_paths = pathselection.NUM_PATHS
-            src_rack_path_counts = []
-            dst_rack_path_counts = []
-            for i in range(n_racks):
-                src_rack_path_counts.append([])
-                dst_rack_path_counts.append([])
-                for j in range(num_paths):
-                    src_rack_path_counts[i].append(0)
-                    dst_rack_path_counts[i].append(0)
-
-            for e in range(admitted.size):
-                edge = structures.get_admitted_edge(admitted, e)
-                path = (edge.dst & ~pathselection.PATH_MASK) >> pathselection.PATH_SHIFT
-                self.assertTrue(path < num_paths)
-                src = structures.get_rack_from_id(edge.src)
-                dst = structures.get_rack_from_id(edge.dst & pathselection.PATH_MASK)
-                src_rack_path_counts[src][path] += 1
-                dst_rack_path_counts[dst][path] += 1
-
-            # check that per-rack path counts are valid
-            rack_degree = n_nodes / n_racks
-            for i in range(n_racks):
-                for j in range(num_paths):
-                    self.assertTrue(src_rack_path_counts[i][j] <= rack_degree / num_paths)
-                    self.assertTrue(dst_rack_path_counts[i][j] <= rack_degree / num_paths)
+            # check that path assignments are valid
+            self.assertTrue(pathselection.paths_are_valid(admitted, n_racks))
 
             # check that src addrs and lower bits of destination addrs are unchanged
             for e in range(admitted.size):
@@ -113,50 +88,8 @@ class Test(unittest.TestCase):
             # select paths
             pathselection.select_paths(admitted, n_racks)
 
-            # calculate the max degree into or out of a rack
-            num_paths = pathselection.NUM_PATHS
-            src_rack_degrees = []
-            dst_rack_degrees = []
-            for i in range(n_racks):
-                src_rack_degrees.append(0)
-                dst_rack_degrees.append(0)
-        
-            for e in range(admitted_copy.size):
-                edge = structures.get_admitted_edge(admitted_copy, e)
-                src_rack = structures.get_rack_from_id(edge.src)
-                dst_rack = structures.get_rack_from_id(edge.dst)
-                src_rack_degrees[src_rack] += 1
-                dst_rack_degrees[dst_rack] += 1
-            
-            max_degree = max(src_rack_degrees + dst_rack_degrees)
-            if max_degree % num_paths != 0:
-                max_degree = (max_degree / num_paths + 1) * num_paths
-
-            # check that each edge has a valid path number and that each path
-            # is used the correct number of times per src/dst rack
-            src_rack_path_counts = []
-            dst_rack_path_counts = []
-            for i in range(n_racks):
-                src_rack_path_counts.append([])
-                dst_rack_path_counts.append([])
-                for j in range(num_paths):
-                    src_rack_path_counts[i].append(0)
-                    dst_rack_path_counts[i].append(0)
-
-            for e in range(admitted.size):
-                edge = structures.get_admitted_edge(admitted, e)
-                path = (edge.dst & ~pathselection.PATH_MASK) >> pathselection.PATH_SHIFT
-                self.assertTrue(path < num_paths)
-                src = structures.get_rack_from_id(edge.src)
-                dst = structures.get_rack_from_id(edge.dst & pathselection.PATH_MASK)
-                src_rack_path_counts[src][path] += 1
-                dst_rack_path_counts[dst][path] += 1
-
-            # check that per-rack path counts are valid
-            for i in range(n_racks):
-                for j in range(num_paths):
-                    self.assertTrue(src_rack_path_counts[i][j] <= max_degree / num_paths)
-                    self.assertTrue(dst_rack_path_counts[i][j] <= max_degree / num_paths)
+            # check that path assignments are valid
+            self.assertTrue(pathselection.paths_are_valid(admitted, n_racks))
 
             # check that src addrs and lower bits of destination addrs are unchanged
             for e in range(admitted.size):

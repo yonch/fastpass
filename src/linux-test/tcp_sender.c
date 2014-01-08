@@ -168,7 +168,7 @@ void run_tcp_sender_bulk(struct tcp_sender *sender) {
   int ret = inet_pton(AF_INET, sender->dest, &outgoing.receiver);
   assert(ret > 0);
   outgoing.flow_start_time = current_time_nanoseconds();
-  uint64_t size_in_bytes = 5ull * 1000 * 1000 * 1000;  // 5 GBs
+  uint64_t size_in_bytes = (sender->gen->size_param * 1ull) * 1000 * 1000;  // size given in MBs
   outgoing.size = size_in_bytes / MTU_SIZE;  // in MTUs
   outgoing.id = 0;
 
@@ -529,21 +529,23 @@ int main(int argc, char **argv) {
   uint32_t port_num = PORT;
   char *dest_ip = malloc(sizeof(char) * IP_ADDR_MAX_LENGTH);
   if (!dest_ip) return -1;
+  uint32_t size_param;
   // short-lived/interactive (0), persistent/interactive (1), or persistent/bulk (2)
   uint32_t type;
 
   uint32_t mean_t_btwn_flows = 10000;
-  if (argc > 5) {
+  if (argc > 6) {
     sscanf(argv[1], "%u", &send_duration);
     sscanf(argv[2], "%u", &mean_t_btwn_flows);
     sscanf(argv[3], "%u", &my_id);
     sscanf(argv[4], "%s", dest_ip);
-    sscanf(argv[5], "%u", &type);
-    if (argc > 6)
-      sscanf(argv[6], "%u", &port_num);
+    sscanf(argv[5], "%u", &size_param);
+    sscanf(argv[6], "%u", &type);
+    if (argc > 7)
+      sscanf(argv[7], "%u", &port_num);
   }
-  if (argc <= 5 || (type != 0 && type != 1 && type != 2)) {
-	  printf("usage: %s send_duration mean_t my_id dest_ip type port_num (optional)\n", argv[0]);
+  if (argc <= 6 || (type != 0 && type != 1 && type != 2)) {
+	  printf("usage: %s send_duration mean_t my_id dest_ip size_param type port_num (optional)\n", argv[0]);
 	  return -1;
   }
 
@@ -555,7 +557,7 @@ int main(int argc, char **argv) {
   // Initialize the sender
   struct generator gen;
   struct tcp_sender sender;
-  gen_init(&gen, POISSON, UNIFORM, mean_t_btwn_flows, 20);
+  gen_init(&gen, POISSON, UNIFORM, mean_t_btwn_flows, size_param);
   tcp_sender_init(&sender, &gen, my_id, duration, port_num, dest_ip);
 
   if (type == 0)

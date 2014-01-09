@@ -327,7 +327,7 @@ void run_tcp_sender_persistent(struct tcp_sender *sender) {
 	  current_time_nanoseconds() > next_send_time) {
 	// Ready to send the next flow
 
-	int size_in_bytes = outgoing.size * MTU_SIZE;
+	uint64_t size_in_bytes = outgoing.size * MTU_SIZE;
 	connection.buffer = malloc(size_in_bytes);
 	assert(connection.buffer != NULL);
 	connection.current_buffer = connection.buffer;

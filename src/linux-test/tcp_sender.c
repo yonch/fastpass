@@ -506,6 +506,9 @@ void run_tcp_sender_short_lived(struct tcp_sender *sender)
 	  }
 	  else {
 	    // check that send was succsessful
+	    // if this assert fails, can implement the method for persistent
+	    // connections above to resend the remainder. but this should only
+	    // be a problem with really large flow sizes.
 	    assert(connections[i].return_val == connections[i].bytes_left);
 
 	    // close socket

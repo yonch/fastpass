@@ -3,6 +3,8 @@
 
 #include <rte_timer.h>
 #include "../graph-algo/path_selection.h"
+#include "control.h"
+
 
 int exec_path_sel_core(void *void_cmd_p)
 {

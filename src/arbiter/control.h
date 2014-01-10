@@ -18,6 +18,8 @@
 #define N_COMM_CORES			1
 #define N_LOG_CORES				0
 
+#define NUM_RACKS				2
+
 /* how many nanoseconds before the timeslot to start processing it */
 #define		PREALLOC_DURATION_NS	(10*1000*1000)
 

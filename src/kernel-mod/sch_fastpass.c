@@ -696,10 +696,10 @@ static void move_timeslot_from_flow(struct Qdisc *sch, struct psched_ratecfg *ra
  * Handles cases where a flow was allocated but we cannot fulfill it, either
  *    because the time has passed or is too far in the future.
  */
-void handle_out_of_bounds_allocation(struct fp_sched_data* q,
-		u64 src_dst_key)
+void handle_out_of_bounds_allocation(struct Qdisc *sch, u64 src_dst_key)
 {
-	struct fp_flow *f = fpq_lookup(q, src_dst_key, false);
+	struct fp_sched_data *q = qdisc_priv(sch);
+	struct fp_flow *f = fpq_lookup(q, fp_alloc_node(src_dst_key), false);
 
 	if (f == NULL) {
 		/*
@@ -707,6 +707,11 @@ void handle_out_of_bounds_allocation(struct fp_sched_data* q,
 		 *    destination, or was not needed and the flow was garbage-collected.
 		 */
 		q->stat.flow_not_found_oob++;
+		fp_debug("could not find flow with key 0x%llX node 0x%X will force reset\n",
+				src_dst_key, fp_alloc_node(src_dst_key));
+		/* This corrupts the status; will force a reset */
+		fpproto_force_reset(fpproto_conn(q));
+		handle_reset((void *)sch); /* manually call callback since fpproto won't call it */
 		return;
 	}
 
@@ -762,7 +767,7 @@ begin:
 		q->stat.missed_timeslots++;
 		fp_debug("missed timeslot %llu by %llu ns, rescheduling\n",
 				q->horizon.timeslot, now - (q->tslot_start_time + q->tslot_len));
-		handle_out_of_bounds_allocation(q, fp_alloc_node(horizon_current_key(q)));
+		handle_out_of_bounds_allocation(sch, horizon_current_key(q));
 		horizon_unmark_current(&q->horizon);
 		goto begin;
 	}
@@ -770,7 +775,13 @@ begin:
 move_current:
 	f = fpq_lookup(q, fp_alloc_node(horizon_current_key(q)), false);
 	if (unlikely(f == NULL)) {
+		fp_debug("could not find flow for allocation at time %llu key 0x%llX node 0x%X will force reset\n",
+				q->tslot_start_time, horizon_current_key(q),
+				fp_alloc_node(horizon_current_key(q)));
 		q->stat.flow_not_found_update++;
+		/* This corrupts the status; will force a reset */
+		fpproto_force_reset(fpproto_conn(q));
+		handle_reset((void *)sch); /* manually call callback since fpproto won't call it */
 		return;
 	}
 
@@ -917,11 +928,11 @@ static void handle_alloc(void *param, u32 base_tslot, u16 *dst,
 		if (unlikely(full_tslot <= q->horizon.timeslot)) {
 			/* this allocation is too late */
 			q->stat.alloc_too_late++;
-			handle_out_of_bounds_allocation(q, dst[dst_ind - 1]);
+			handle_out_of_bounds_allocation(sch, dst[dst_ind - 1]);
 			fp_debug("-X- already gone, will reschedule\n");
 		} else if (unlikely(full_tslot >= q->horizon.timeslot + FASTPASS_HORIZON)) {
 			q->stat.alloc_premature++;
-			handle_out_of_bounds_allocation(q, dst[dst_ind - 1]);
+			handle_out_of_bounds_allocation(sch, dst[dst_ind - 1]);
 			fp_debug("-X- too futuristic, will reschedule\n");
 		} else {
 			/* okay, allocate */

@@ -149,6 +149,9 @@ struct fp_sched_data {
 
 static struct kmem_cache *fp_flow_cachep __read_mostly;
 
+static void handle_reset(void *param);
+
+
 static inline struct fpproto_conn *fpproto_conn(struct fp_sched_data *q)
 {
 	struct fastpass_sock *fp = (struct fastpass_sock *)q->ctrl_sock->sk;

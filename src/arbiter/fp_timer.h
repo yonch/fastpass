@@ -5,7 +5,7 @@
 #include <ccan/list/list.h>
 
 #define MAX_TIMER_SLOTS		1024
-#define TIMER_GRANULARITY	100
+#define TIMER_GRANULARITY	(16*1024)
 #define TIMER_NOT_SET_TIME	(~0UL)
 
 struct fp_timers {

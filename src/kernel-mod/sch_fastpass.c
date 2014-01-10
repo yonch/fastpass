@@ -24,11 +24,16 @@
 #include <linux/prefetch.h>
 #include <linux/time.h>
 #include <linux/bitops.h>
+#include <linux/version.h>
 #include <net/netlink.h>
 #include <net/pkt_sched.h>
 #include <net/sock.h>
 #include <net/tcp_states.h>
 #include <net/sch_generic.h>
+
+#if LINUX_VERSION_CODE == KERNEL_VERSION(3,2,45)
+#include "compat-3_2.h"
+#endif
 
 #include "fastpass_proto.h"
 #include "fp_statistics.h"
@@ -442,9 +447,9 @@ static struct fp_flow *fpq_lookup(struct fp_sched_data *q, u64 src_dst_key,
 /* returns the flow for the given packet, allocates a new flow if needed */
 static struct fp_flow *fpq_classify(struct sk_buff *skb, struct fp_sched_data *q)
 {
-	struct sock *sk = skb->sk;
+	__be16 proto = skb->protocol;
+	int nhoff = skb_network_offset(skb);
 	int band;
-	struct flow_keys keys;
 	u64 src_dst_key;
 
 	/* warning: no starvation prevention... */
@@ -457,25 +462,43 @@ static struct fp_flow *fpq_classify(struct sk_buff *skb, struct fp_sched_data *q
 		return &q->internal;
 	}
 
-	/* get source and destination IPs */
-	if (likely(   sk
-			   && (sk->sk_family == AF_INET)
-			   && (sk->sk_protocol == IPPROTO_TCP))) {
-		keys.src = inet_sk(sk)->inet_saddr;
-		keys.dst = inet_sk(sk)->inet_daddr;
-	} else {
-		if (!skb_flow_dissect(skb, &keys))
+	switch (proto) {
+	case __constant_htons(ETH_P_IP): {
+		const struct iphdr *iph;
+		struct iphdr _iph;
+
+		iph = skb_header_pointer(skb, nhoff, sizeof(_iph), &_iph);
+		if (!iph || iph->ihl < 5)
 			goto cannot_classify;
+
+		src_dst_key = iph->saddr;
+		break;
+	}
+	case __constant_htons(ETH_P_IPV6): {
+		const struct ipv6hdr *iph;
+		struct ipv6hdr _iph;
+
+		iph = skb_header_pointer(skb, nhoff, sizeof(_iph), &_iph);
+		if (!iph)
+			goto cannot_classify;
+
+		src_dst_key = iph->saddr.in6_u.u6_addr32[3];
+		break;
+	}
+	default:
+		goto cannot_classify;
 	}
 
+#if 0
 	/* special case for NTP packets, let them through with high priority */
 	if (unlikely(keys.ip_proto == IPPROTO_UDP && keys.port16[1] == htons(123))) {
 		q->stat.ntp_pkts++;
 		return &q->internal;
 	}
+#endif
 
 	/* get the skb's key (src_dst_key) */
-	src_dst_key = fp_map_ip_to_id(keys.dst);
+	src_dst_key = fp_map_ip_to_id(src_dst_key);
 
 	q->stat.data_pkts++;
 	return fpq_lookup(q, src_dst_key, true);
@@ -1331,7 +1354,9 @@ static int fp_tc_change(struct Qdisc *sch, struct nlattr *opt) {
 	bool should_reconnect = false;
 	bool changed_pacer = false;
 	struct tc_ratespec data_rate_spec ={
+#if LINUX_VERSION_CODE != KERNEL_VERSION(3,2,45)
 			.linklayer = TC_LINKLAYER_ETHERNET,
+#endif
 			.overhead = 24};
 
 
@@ -1481,7 +1506,9 @@ static int fp_tc_init(struct Qdisc *sch, struct nlattr *opt)
 	struct fp_sched_data *q = qdisc_priv(sch);
 	u64 now = fp_get_time_ns();
 	struct tc_ratespec data_rate_spec ={
+#if LINUX_VERSION_CODE != KERNEL_VERSION(3,2,45)
 			.linklayer = TC_LINKLAYER_ETHERNET,
+#endif
 			.rate = 1e9/8,
 			.overhead = 24};
 	int err;

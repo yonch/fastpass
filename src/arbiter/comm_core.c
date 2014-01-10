@@ -708,9 +708,6 @@ void exec_comm_core(struct comm_core_cmd * cmd)
 
 	comm_log_init(&comm_core_logs[lcore_id]);
 
-	fp_init_timers(&core->timeout_timers, rte_get_timer_cycles());
-	fp_init_timers(&core->tx_timers, rte_get_timer_cycles());
-
 	if (qconf->n_rx_queue == 0) {
 		RTE_LOG(INFO, BENCHAPP, "lcore %u has nothing to do\n", rte_lcore_id());
 		while(1);
@@ -732,6 +729,9 @@ void exec_comm_core(struct comm_core_cmd * cmd)
 		portid = qconf->rx_queue_list[i].port_id;
 		send_gratuitous_arp(portid, controller_ip());
 	}
+
+	fp_init_timers(&core->timeout_timers, rte_get_timer_cycles());
+	fp_init_timers(&core->tx_timers, rte_get_timer_cycles());
 
 	/* MAIN LOOP */
 	while (rte_get_timer_cycles() < cmd->end_time) {

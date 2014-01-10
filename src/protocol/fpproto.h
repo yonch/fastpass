@@ -198,6 +198,7 @@ struct fp_proto_stat {
 	__u64 reset_both_old;
 	__u64 no_reset_because_recent;
 	__u64 reset_from_bad_pkts;
+	__u64 forced_reset;
 };
 
 /**
@@ -256,6 +257,13 @@ void fpproto_init_conn(struct fpproto_conn *conn, struct fpproto_ops *ops,
 
 /* destroys conn */
 void fpproto_destroy_conn(struct fpproto_conn *conn);
+
+/**
+ * Forces a reset (maybe a reset needed due to application failure).
+ * Note: the caller should reset application state beforehand, the reset
+ *    callback will NOT be called.
+ */
+void fpproto_force_reset(struct fpproto_conn *conn);
 
 /*** TIMER CALLBACK ***/
 void fpproto_handle_timeout(struct fpproto_conn *conn, u64 now);

@@ -153,6 +153,14 @@ static void do_proto_reset(struct fpproto_conn *conn, u64 reset_time,
 	conn->stat.proto_resets++;
 }
 
+void fpproto_force_reset(struct fpproto_conn *conn)
+{
+	u64 now = fp_get_time_ns();
+	fp_debug("executing forced reset at %llu\n", now);
+	conn->stat.forced_reset++;
+	do_proto_reset(conn, now, false);
+}
+
 
 void fpproto_handle_timeout(struct fpproto_conn *conn, u64 now)
 {

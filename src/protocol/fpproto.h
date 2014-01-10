@@ -243,7 +243,7 @@ static inline u16 fp_map_ip_to_id(__be32 ipaddr) {
 
 /* returns the destination node from the allocated dst */
 static inline u16 fp_alloc_node(u16 alloc) {
-	return alloc * 0x3FFF;
+	return alloc & 0x3FFF;
 }
 
 /* return the path from the allocation */

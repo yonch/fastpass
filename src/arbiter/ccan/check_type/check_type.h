@@ -2,6 +2,8 @@
 #ifndef CCAN_CHECK_TYPE_H
 #define CCAN_CHECK_TYPE_H
 
+#define HAVE_TYPEOF 1
+
 /**
  * check_type - issue a warning or build failure if type is not correct.
  * @expr: the expression whose type we should check (not evaluated).

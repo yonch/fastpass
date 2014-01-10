@@ -123,8 +123,8 @@ struct list_node *list_check_node(const struct list_node *n,
  * Example:
  *	static LIST_HEAD(my_global_list);
  */
-#define LIST_HEAD(name) \
-	struct list_head name = LIST_HEAD_INIT(name)
+/*#define LIST_HEAD(name) \
+	struct list_head name = LIST_HEAD_INIT(name) */
 
 /**
  * list_head_init - initialize a list_head
@@ -309,7 +309,7 @@ static inline const void *list_top_(const struct list_head *h, size_t off)
 #define list_pop(h, type, member)					\
 	((type *)list_pop_((h), list_off_(type, member)))
 
-static inline const void *list_pop_(const struct list_head *h, size_t off)
+static inline void *list_pop_(const struct list_head *h, size_t off)
 {
 	struct list_node *n;
 
@@ -317,7 +317,7 @@ static inline const void *list_pop_(const struct list_head *h, size_t off)
 		return NULL;
 	n = h->n.next;
 	list_del(n);
-	return (const char *)n - off;
+	return (char *)n - off;
 }
 
 /**
@@ -605,7 +605,7 @@ static inline struct list_node *list_node_from_off_(void *ptr, size_t off)
 
 /* Returns member, or NULL if at end of list. */
 static inline void *list_entry_or_null(const struct list_head *h,
-				       const struct list_node *n,
+				       struct list_node *n,
 				       size_t off)
 {
 	if (n == &h->n)

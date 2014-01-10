@@ -10,6 +10,7 @@
 #include <rte_errno.h>
 #include <rte_mempool.h>
 #include <rte_timer.h>
+#include <ccan/list/list.h>
 #include "control.h"
 #include "comm_log.h"
 #include "main.h"
@@ -21,6 +22,7 @@
 #include "dpdk-platform.h"
 #include "bigmap.h"
 #include "admission_core.h"
+#include "fp_timer.h"
 
 /* number of elements to keep in the pktdesc local core cache */
 #define PKTDESC_MEMPOOL_CACHE_SIZE		256
@@ -52,10 +54,10 @@ struct end_node_state {
 	uint32_t demands[MAX_NODES];
 
 	/* timeout timer */
-	struct rte_timer timeout_timer;
+	struct fp_timer timeout_timer;
 
 	/* egress packet timer and pacer */
-	struct rte_timer tx_timer;
+	struct fp_timer tx_timer;
 	struct fp_pacer tx_pacer;
 };
 
@@ -67,6 +69,9 @@ struct end_node_state {
 struct comm_core_state {
 	uint8_t alloc_enc_space[MAX_NODES * MAX_PATHS];
 	uint64_t latest_timeslot;
+
+	struct fp_timers timeout_timers;
+	struct fp_timers tx_timers;
 };
 
 /* whether we should output verbose debugging */
@@ -91,7 +96,6 @@ static void handle_areq(void *param, u16 *dst_and_count, int n);
 static void set_retrans_timer(void *param, u64 when);
 static int cancel_retrans_timer(void *param);
 static void handle_neg_ack(void *param, struct fpproto_pktdesc *pd);
-static inline void tx_end_node(struct rte_timer *timer, void *param);
 
 struct fpproto_ops proto_ops = {
 	.handle_reset	= &handle_reset,
@@ -122,8 +126,8 @@ void comm_init_global_structs(uint64_t first_time_slot)
 		fpproto_init_conn(&end_nodes[i].conn, &proto_ops,&end_nodes[i],
 						FASTPASS_RESET_WINDOW_NS, send_timeout);
 		wnd_reset(&end_nodes[i].pending, first_time_slot - 1);
-		rte_timer_init(&end_nodes[i].timeout_timer);
-		rte_timer_init(&end_nodes[i].tx_timer);
+		fp_init_timer(&end_nodes[i].timeout_timer);
+		fp_init_timer(&end_nodes[i].tx_timer);
 		pacer_init_full(&end_nodes[i].tx_pacer, now, send_cost, max_burst,
 				min_trigger_gap);
 	}
@@ -195,18 +199,8 @@ static int cancel_retrans_timer(void *param)
 	uint16_t node_id = en - end_nodes;
 
 	comm_log_cancel_timer(node_id);
-	rte_timer_stop(&en->timeout_timer);
+	fp_timer_stop(&en->timeout_timer);
 	return 0;
-}
-
-static void retrans_timer_func(struct rte_timer *timer, void *param) {
-	struct end_node_state *en = (struct end_node_state *)param;
-	uint16_t node_id = en - end_nodes;
-	uint64_t now = rte_get_timer_cycles();
-	(void)timer;
-
-	comm_log_retrans_timer_expired(node_id, now);
-	fpproto_handle_timeout(&en->conn, now);
 }
 
 static void set_retrans_timer(void *param, u64 when)
@@ -214,10 +208,11 @@ static void set_retrans_timer(void *param, u64 when)
 	struct end_node_state *en = (struct end_node_state *)param;
 	uint16_t node_id = en - end_nodes;
 	uint64_t now = rte_get_timer_cycles();
+	const unsigned lcore_id = rte_lcore_id();
+	struct comm_core_state *core = &core_state[lcore_id];
 
 	COMM_DEBUG("setting timer now %lu when %llu (diff=%lld)\n", now, when, (when-now));
-	rte_timer_reset_sync(&en->timeout_timer, when - now, SINGLE, rte_lcore_id(),
-			retrans_timer_func, param);
+	fp_timer_reset(&core->timeout_timers, &en->timeout_timer, when);
 
 	comm_log_set_timer(node_id, when, when - now);
 }
@@ -305,14 +300,15 @@ static void trigger_request(struct end_node_state *en)
 {
 	uint64_t now = rte_get_timer_cycles();
 	u32 node_id = en - end_nodes;
+	const unsigned lcore_id = rte_lcore_id();
+	struct comm_core_state *core = &core_state[lcore_id];
 
 	if (pacer_trigger(&en->tx_pacer, now)) {
 	  COMM_DEBUG("setting trigger timer now %lu when %llu (diff=%lld)\n", now, 
 pacer_next_event(&en->tx_pacer), (pacer_next_event(&en->tx_pacer)-now));
 
-		rte_timer_reset_sync(&en->tx_timer,
-				pacer_next_event(&en->tx_pacer) - now, SINGLE, rte_lcore_id(),
-				tx_end_node, (void *)en);
+		fp_timer_reset(&core->tx_timers, &en->tx_timer,
+				pacer_next_event(&en->tx_pacer));
 
 		comm_log_triggered_send(node_id);
 	}
@@ -653,17 +649,14 @@ out:
 	assert((pd->alloc_tslot & 1) == 0);
 }
 
-static inline void tx_end_node(struct rte_timer *timer, void *param)
+static inline void tx_end_node(struct end_node_state *en)
 {
-	struct end_node_state *en = (struct end_node_state *)param;
 	const unsigned lcore_id = rte_lcore_id();
 	struct comm_core_state *core = &core_state[lcore_id];
 	uint32_t node_ind = en - end_nodes;
 	struct rte_mbuf *out_pkt;
 	struct fpproto_pktdesc *pd;
 	u64 now;
-
-	(void)timer;
 
 	/* clear the trigger */
 	pacer_reset(&en->tx_pacer);
@@ -706,10 +699,17 @@ void exec_comm_core(struct comm_core_cmd * cmd)
 	struct lcore_conf *qconf;
 	const unsigned lcore_id = rte_lcore_id();
 	struct comm_core_state *core = &core_state[lcore_id];
+	struct list_head lst = LIST_HEAD_INIT(lst);
+	struct end_node_state *en;
+	uint64_t now;
+	struct fp_timer *tim;
 
 	qconf = &lcore_conf[lcore_id];
 
 	comm_log_init(&comm_core_logs[lcore_id]);
+
+	fp_init_timers(&core->timeout_timers, rte_get_timer_cycles());
+	fp_init_timers(&core->tx_timers, rte_get_timer_cycles());
 
 	if (qconf->n_rx_queue == 0) {
 		RTE_LOG(INFO, BENCHAPP, "lcore %u has nothing to do\n", rte_lcore_id());
@@ -741,8 +741,29 @@ void exec_comm_core(struct comm_core_cmd * cmd)
 		/* Process newly allocated timeslots */
 		process_allocated_traffic(core, cmd->q_allocated);
 
-		/* process timers */
-		rte_timer_manage();
+		/* process retrans timers */
+		now = rte_get_timer_cycles();
+		fp_timer_get_expired(&core->timeout_timers, now, &lst);
+		while ((tim = list_pop(&lst, struct fp_timer, node)) != NULL) {
+			/* get pointer to end_node_state */
+			en = container_of(tim, struct end_node_state, timeout_timer);
+
+			/* log */
+			comm_log_retrans_timer_expired(en - end_nodes, now);
+
+			/* call the handler */
+			fpproto_handle_timeout(&en->conn, now);
+		}
+
+		/* process tx timers */
+		fp_timer_get_expired(&core->tx_timers, now, &lst);
+		while ((tim = list_pop(&lst, struct fp_timer, node)) != NULL) {
+			/* get pointer to end_node_state */
+			en = container_of(tim, struct end_node_state, tx_timer);
+
+			/* do the TX */
+			tx_end_node(en);
+		}
 
 		/* Flush queued packets */
 		for (i = 0; i < n_enabled_port; i++)

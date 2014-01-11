@@ -9,7 +9,8 @@ else
 KDIR ?= /home/yonch/huge/linux-build/
 
 default:
-	$(MAKE) -C $(KDIR) M=$$PWD KCPPFLAGS="-DFASTPASS_ENDPOINT -DCONFIG_IP_FASTPASS_DEBUG"
+	$(MAKE) -C $(KDIR) M=$$PWD KCPPFLAGS="-DFASTPASS_ENDPOINT"
+#	$(MAKE) -C $(KDIR) M=$$PWD KCPPFLAGS="-DFASTPASS_ENDPOINT -DCONFIG_IP_FASTPASS_DEBUG"
 
 clean:
 	rm -f fastpass.o sch_fastpass.o fastpass_proto.o ../protocol/fpproto.o fastpass.ko compat-3_2.o

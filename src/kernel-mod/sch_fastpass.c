@@ -972,7 +972,10 @@ static void handle_ack(void *param, struct fpproto_pktdesc *pd)
 
 	for (i = 0; i < pd->n_areq; i++) {
 		f = fpq_lookup(q, pd->areq[i].src_dst_key, false);
-		FASTPASS_BUG_ON(f == NULL);
+		if (unlikely(f == NULL)) {
+			FASTPASS_CRIT("could not find flow - known destruction race\n");
+			break;
+		}
 		new_acked = pd->areq[i].tslots;
 		if (f->acked_tslots < new_acked) {
 			FASTPASS_BUG_ON(new_acked > f->demand_tslots);

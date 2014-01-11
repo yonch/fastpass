@@ -762,6 +762,7 @@ void fpproto_commit_packet(struct fpproto_conn *conn, struct fpproto_pktdesc *pd
 
 	/* add packet to outwnd, will advance fp->next_seqno */
 	outwnd_add(conn, pd);
+	conn->stat.committed_pkts++;
 
 	/* if first packet in outwnd, enqueue timer and set fp->earliest_unacked */
 	if (wnd_num_marked(&conn->outwnd) == 1) {
@@ -849,6 +850,20 @@ int fpproto_encode_packet(struct fpproto_conn *conn,
 			pd->seqno, pd->ack_seq, *(__be16 *)(pkt + 6), curp - pkt);
 
 	return curp - pkt;
+}
+
+void fpproto_dump_stats(struct fpproto_conn *conn, struct fp_proto_stat *stat)
+{
+	memcpy(stat, &conn->stat, sizeof(conn->stat));
+
+	stat->last_reset_time		= conn->last_reset_time;
+	stat->out_max_seqno			= conn->next_seqno - 1;
+	stat->in_max_seqno			= conn->in_max_seqno;
+	stat->in_sync				= conn->in_sync;
+	stat->consecutive_bad_pkts	= (__u16)conn->consecutive_bad_pkts;
+	stat->tx_num_unacked		= (__u16)wnd_num_marked(&conn->outwnd);
+	stat->earliest_unacked		= conn->earliest_unacked;
+	stat->inwnd					= conn->inwnd;
 }
 
 void fpproto_init_conn(struct fpproto_conn *conn, struct fpproto_ops *ops,

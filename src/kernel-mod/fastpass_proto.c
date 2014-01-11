@@ -288,6 +288,8 @@ void fpproto_send_packet(struct sock *sk, struct fpproto_pktdesc *pd)
 	if (unlikely(err != 0)) {
 		fp->stat.xmit_errors++;
 		fp_debug("got error %d from ip_queue_xmit\n", err);
+	} else {
+		fp->stat.xmit_success++;
 	}
 
 	bh_unlock_sock(sk);

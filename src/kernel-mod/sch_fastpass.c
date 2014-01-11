@@ -1097,8 +1097,6 @@ static void send_request(struct Qdisc *sch, u64 now)
 	fp_debug("end: unreq_flows=%u, unreq_tslots=%llu\n",
 			q->n_unreq_flows, q->demand_tslots - q->requested_tslots);
 
-	q->stat.requests++;
-
 	fpproto_commit_packet(fpproto_conn(q), pkt, now);
 
 out:
@@ -1657,16 +1655,7 @@ static int fp_tc_dump_stats(struct Qdisc *sch, struct gnet_dump *d)
 		struct fastpass_sock *fp = (struct fastpass_sock *)q->ctrl_sock->sk;
 		struct fpproto_conn *conn = fpproto_conn(q);
 		memcpy(&st.socket_stats[0], &fp->stat, sizeof(fp->stat));
-		memcpy(&st.proto_stats[0], &conn->stat, sizeof(conn->stat));
-
-		st.last_reset_time		= conn->last_reset_time;
-		st.out_max_seqno		= conn->next_seqno - 1;
-		st.in_max_seqno			= conn->in_max_seqno;
-		st.in_sync				= conn->in_sync;
-		st.consecutive_bad_pkts	= (__u16)conn->consecutive_bad_pkts;
-		st.tx_num_unacked		= (__u16)wnd_num_marked(&conn->outwnd);
-		st.earliest_unacked		= conn->earliest_unacked;
-		st.inwnd				= conn->inwnd;
+		fpproto_dump_stats(conn, (struct fp_proto_stat *)&st.proto_stats);
 	}
 	return gnet_stats_copy_app(d, &st, sizeof(st));
 }

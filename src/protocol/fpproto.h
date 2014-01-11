@@ -162,6 +162,7 @@ struct fpproto_ops {
 /* Control socket statistics */
 struct fp_proto_stat {
 	/* ACK/NACK-related */
+	__u64 out_max_seqno;
 	__u64 tasklet_runs;
 	__u64 ack_payloads;
 	__u64 too_early_ack;
@@ -169,6 +170,9 @@ struct fp_proto_stat {
 	__u64 timeout_pkts;
 	__u64 informative_ack_payloads;
 	__u64 reprogrammed_timer;
+	__u64 earliest_unacked;
+	__u64 committed_pkts;
+	__u16 tx_num_unacked;
 
 	/* send-related */
 	__u64 fall_off_outwnd;
@@ -184,10 +188,15 @@ struct fp_proto_stat {
 	__u64 rx_dup_pkt;
 	__u64 rx_out_of_order;
 	__u64 rx_checksum_error;
+	__u64 in_max_seqno;
 	__u64 inwnd_jumped;
 	__u64 seqno_before_inwnd;
+	__u16 consecutive_bad_pkts;
+	__u64 inwnd;
 
 	/* reset */
+	__u32 in_sync:1;
+	__u64 last_reset_time;
 	__u64 reset_payloads;
 	__u64 proto_resets;
 	__u64 redundant_reset;
@@ -257,6 +266,9 @@ void fpproto_init_conn(struct fpproto_conn *conn, struct fpproto_ops *ops,
 
 /* destroys conn */
 void fpproto_destroy_conn(struct fpproto_conn *conn);
+
+/* dumps statistics to @stat */
+void fpproto_dump_stats(struct fpproto_conn *conn, struct fp_proto_stat *stat);
 
 /**
  * Forces a reset (maybe a reset needed due to application failure).

@@ -28,6 +28,7 @@
 #include <stdlib.h>
 #include <stdint.h>
 #include <stdbool.h>
+#include <linux/types.h>
 
 #ifdef _RTE_IP_H_
 #define ntohs(x) rte_be_to_cpu_16(x)
@@ -87,17 +88,22 @@ static inline int test_bit(int nr, const volatile unsigned long *addr)
 }
 
 typedef unsigned long long u64;
-typedef unsigned long long __u64;
 typedef long long s64;
-typedef long long __s64;
 typedef uint32_t u32;
-typedef uint32_t __be32;
-typedef uint32_t __wsum;
 typedef int32_t s32;
 typedef uint16_t u16;
+typedef uint8_t u8;
+
+#if 0
+typedef unsigned long long __u64;
+typedef long long __s64;
+typedef uint32_t __u32;
+typedef uint32_t __be32;
+typedef uint32_t __wsum;
+typedef uint16_t __u16;
 typedef uint16_t __be16;
 typedef uint16_t __sum16;
-typedef uint8_t u8;
+#endif
 
 /* kernel.h */
 #define max_t(type, x, y) ({			\

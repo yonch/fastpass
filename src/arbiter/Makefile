@@ -16,7 +16,7 @@ SRCS-y := main.c \
           ../graph-algo/euler_split.c
 
 CFLAGS += -O3 
-CFLAGS += $(WERROR_FLAGS)
+#CFLAGS += $(WERROR_FLAGS)
 CFLAGS += -DFASTPASS_CONTROLLER 
 #CFLAGS += -DCONFIG_IP_FASTPASS_DEBUG
 CFLAGS += -DLOG_TO_STDOUT 

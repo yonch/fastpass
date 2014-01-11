@@ -856,6 +856,7 @@ void fpproto_dump_stats(struct fpproto_conn *conn, struct fp_proto_stat *stat)
 {
 	memcpy(stat, &conn->stat, sizeof(conn->stat));
 
+	stat->version				= FASTPASS_PROTOCOL_STATS_VERSION;
 	stat->last_reset_time		= conn->last_reset_time;
 	stat->out_max_seqno			= conn->next_seqno - 1;
 	stat->in_max_seqno			= conn->in_max_seqno;

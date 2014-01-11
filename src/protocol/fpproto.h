@@ -159,8 +159,12 @@ struct fpproto_ops {
 
 };
 
+#define FASTPASS_PROTOCOL_STATS_VERSION 1
+
 /* Control socket statistics */
 struct fp_proto_stat {
+	__u32 version;
+
 	/* ACK/NACK-related */
 	__u64 out_max_seqno;
 	__u64 tasklet_runs;

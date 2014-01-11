@@ -766,7 +766,7 @@ enum {
 
 #define TC_FASTPASS_SCHED_STAT_MAX_BYTES (35 * sizeof(__u64))
 #define TC_FASTPASS_SOCKET_STAT_MAX_BYTES (12 * sizeof(__u64))
-#define TC_FASTPASS_PROTO_STAT_MAX_BYTES (40 * sizeof(__u64))
+#define TC_FASTPASS_PROTO_STAT_MAX_BYTES (50 * sizeof(__u64))
 
 struct tc_fastpass_qd_stats {
 	__u32	version;

@@ -1600,7 +1600,7 @@ static int fp_tc_dump(struct Qdisc *sch, struct sk_buff *skb)
 	if (nla_put_u32(skb, TCA_FASTPASS_PLIMIT, sch->limit) ||
 	    nla_put_u32(skb, TCA_FASTPASS_FLOW_PLIMIT, q->flow_plimit) ||
 	    nla_put_u32(skb, TCA_FASTPASS_BUCKETS_LOG, q->hash_tbl_log) ||
-	    nla_put_u32(skb, TCA_FASTPASS_DATA_RATE, q->data_rate.rate_bps) ||
+	    nla_put_u32(skb, TCA_FASTPASS_DATA_RATE, (u32)(q->data_rate.rate_bps >> 3)) ||
 	    nla_put_u32(skb, TCA_FASTPASS_TIMESLOT_NSEC, q->tslot_len) ||
 	    nla_put_u32(skb, TCA_FASTPASS_REQUEST_COST, q->req_cost) ||
 	    nla_put_u32(skb, TCA_FASTPASS_REQUEST_BUCKET, q->req_bucketlen) ||

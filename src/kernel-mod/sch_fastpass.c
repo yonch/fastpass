@@ -129,7 +129,8 @@ struct fp_sched_data {
 
 	struct fp_window alloc_wnd;
 	u64		current_timeslot;
-	u64		schedule[FASTPASS_HORIZON];	/* flows scheduled in the next time slots: */
+	u64		schedule[(1 << FASTPASS_WND_LOG)];	/* flows scheduled in the next time slots: */
+
 										/* slot x at [x % FASTPASS_HORIZON] */
 
 	struct fp_pacer request_pacer;
@@ -252,7 +253,7 @@ cleanup:
 	return;
 
 qdisc_destroyed:
-	fp_debug("qdisc seems to have been destroyed\n");
+	FASTPASS_WARN("qdisc seems to have been destroyed\n");
 	goto cleanup;
 }
 
@@ -1037,6 +1038,7 @@ static void send_request(struct Qdisc *sch, u64 now)
 
 	/* Check that the qdisc destroy func didn't race ahead of us */
 	if (unlikely(sch->limit == 0)) {
+		FASTPASS_WARN("qdisc seems to have been destroyed\n");
 		spin_unlock_bh(root_lock);
 		return;
 	}
@@ -1144,7 +1146,7 @@ cleanup:
 	return;
 
 qdisc_destroyed:
-	fp_debug("qdisc seems to have been destroyed\n");
+	FASTPASS_WARN("qdisc seems to have been destroyed\n");
 	goto cleanup;
 }
 

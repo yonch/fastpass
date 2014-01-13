@@ -135,6 +135,7 @@ struct fp_sched_data {
 	struct fp_pacer request_pacer;
 	struct socket	*ctrl_sock;			/* socket to the controller */
 
+	struct qdisc_watchdog 	watchdog;
 	struct hrtimer 			timeslot_update_timer;
 	struct tasklet_struct 	timeslot_update_tasklet;
 
@@ -1580,6 +1581,7 @@ static void fp_tc_destroy(struct Qdisc *sch)
 	spin_lock_bh(root_lock);
 	fp_tc_reset(sch);
 	kfree(q->flow_hash_tbl);
+	qdisc_watchdog_cancel(&q->watchdog);
 	spin_unlock_bh(root_lock);
 }
 
@@ -1595,6 +1597,7 @@ static int fp_tc_init(struct Qdisc *sch, struct nlattr *opt)
 			.rate = 1e9/8,
 			.overhead = 24};
 	int err;
+	struct qdisc_watchdog tmp_watchdog;
 
 	sch->limit			= 10000;
 	q->flow_plimit		= 100;
@@ -1630,6 +1633,12 @@ static int fp_tc_init(struct Qdisc *sch, struct nlattr *opt)
 	pacer_init_full(&q->request_pacer, fp_get_time_ns(), q->req_cost,
 			q->req_bucketlen, q->req_min_gap);
 
+	/* initialize watchdog */
+	qdisc_watchdog_init(&tmp_watchdog, sch);
+	qdisc_watchdog_init(&q->watchdog, sch);
+	/* hack to get watchdog on realtime clock */
+	hrtimer_init(&q->watchdog.timer, CLOCK_REALTIME, HRTIMER_MODE_ABS);
+	q->watchdog.timer.function = tmp_watchdog.timer.function;
 	/* initialize timeslot update timer */
 	hrtimer_init(&q->timeslot_update_timer, CLOCK_REALTIME, HRTIMER_MODE_ABS);
 	q->timeslot_update_timer.function = timeslot_update_timer_func;

@@ -372,8 +372,6 @@ int main(int argc, char **argv)
         for (i = 0; i < BATCH_SIZE; i++) {
             admitted_batch[i] = create_admitted_traffic();
             if (!admitted_batch[i]) exit(-1);
-            if (admitted_batch[i] == NULL)
-                return -1;
         }
     }
     else {
@@ -385,8 +383,6 @@ int main(int argc, char **argv)
         for (i = 0; i < duration - warm_up_duration; i++) {
             all_admitted[i] = create_admitted_traffic();
             if (!all_admitted[i]) exit(-1);
-            if (all_admitted[i] == NULL)
-                return -1;
         }
     }
 

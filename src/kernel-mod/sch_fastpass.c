@@ -252,7 +252,7 @@ cleanup:
 	return;
 
 qdisc_destroyed:
-	fp_debug("qdisc seems to have been destroyed\n");
+	FASTPASS_WARN("qdisc seems to have been destroyed\n");
 	goto cleanup;
 }
 
@@ -1037,6 +1037,7 @@ static void send_request(struct Qdisc *sch, u64 now)
 
 	/* Check that the qdisc destroy func didn't race ahead of us */
 	if (unlikely(sch->limit == 0)) {
+		FASTPASS_WARN("qdisc seems to have been destroyed\n");
 		spin_unlock_bh(root_lock);
 		return;
 	}
@@ -1144,7 +1145,7 @@ cleanup:
 	return;
 
 qdisc_destroyed:
-	fp_debug("qdisc seems to have been destroyed\n");
+	FASTPASS_WARN("qdisc seems to have been destroyed\n");
 	goto cleanup;
 }
 

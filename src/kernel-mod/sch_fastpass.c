@@ -1123,7 +1123,7 @@ static enum hrtimer_restart timeslot_update_timer_func(struct hrtimer *timer)
 	return HRTIMER_NORESTART;
 }
 
-static void timeslot_update_tasklet(unsigned long int param)
+static void timeslot_update_tasklet_func(unsigned long int param)
 {
 	struct Qdisc *sch = (struct Qdisc *)param;
 	u64 now = fp_get_time_ns();
@@ -1550,39 +1550,53 @@ static void fp_tc_destroy(struct Qdisc *sch)
 	/* Apparently no lock protection here. We lock to prevent races */
 
 	/* Notify lockers that qdisc is being destroyed */
+	FASTPASS_CRIT("marking fastpass qdisc as destroyed\n");
 	spin_lock_bh(root_lock);
 	sch->limit = 0;
 	spin_unlock_bh(root_lock);
+	FASTPASS_CRIT("marked fastpass qdisc as destroyed\n");
 
 	/* close socket. no new packets should arrive afterwards */
+	FASTPASS_CRIT("closing control socket\n");
 	sock_release(q->ctrl_sock);
 
-	/* eliminate the retransmission timer */
+	/* eliminate the timeslot update timer */
+	FASTPASS_CRIT("canceling timeslot update timer\n");
 	hrtimer_cancel(&q->timeslot_update_timer);
 
 	/* kill tasklet */
+	FASTPASS_CRIT("killing timeslot update tasklet\n");
 	tasklet_kill(&q->timeslot_update_tasklet);
 
 	/* eliminate the request timer */
+	FASTPASS_CRIT("canceling TX timer\n");
 	hrtimer_cancel(&q->request_timer);
 
 	/**
 	 * make sure there isn't a tasklet running which might try to lock
 	 *   after the the lock is destroyed
 	 */
+	FASTPASS_CRIT("killing TX tasklet\n");
 	tasklet_kill(&q->request_tasklet);
 
 	/* eliminate the retransmission timer */
+	FASTPASS_CRIT("canceling retransmission timer\n");
 	hrtimer_cancel(&q->retrans_timer);
 
 	/* kill tasklet */
+	FASTPASS_CRIT("killing retransmission tasklet\n");
 	tasklet_kill(&q->retrans_tasklet);
 
+	FASTPASS_CRIT("locking qdisc for reset\n");
 	spin_lock_bh(root_lock);
 	fp_tc_reset(sch);
+	FASTPASS_CRIT("done resetting qdisc. freeing flow_hash_tbl\n");
 	kfree(q->flow_hash_tbl);
+	FASTPASS_CRIT("cancelling qdisc watchdog\n");
 	qdisc_watchdog_cancel(&q->watchdog);
+	FASTPASS_CRIT("unlocking qdisc\n");
 	spin_unlock_bh(root_lock);
+	FASTPASS_CRIT("done\n");
 }
 
 /* initialize a new qdisc (part of qdisc API) */
@@ -1652,7 +1666,7 @@ static int fp_tc_init(struct Qdisc *sch, struct nlattr *opt)
 	q->retrans_timer.function = retrans_timer_func;
 
 	/* initialize timeslot update tasklet */
-	tasklet_init(&q->timeslot_update_tasklet, &timeslot_update_tasklet,
+	tasklet_init(&q->timeslot_update_tasklet, &timeslot_update_tasklet_func,
 			(unsigned long int)sch);
 
 	/* initialize retransmission tasklet */

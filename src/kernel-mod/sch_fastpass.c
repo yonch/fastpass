@@ -800,7 +800,6 @@ done:
 
 	/* set timer to update timeslots */
 	if (!wnd_empty(&q->alloc_wnd)) {
-		hrtimer_try_to_cancel(&q->timeslot_update_timer);
 		hrtimer_start(&q->timeslot_update_timer,
 				ns_to_ktime(q->update_timeslot_timer_ns), HRTIMER_MODE_REL);
 	}
@@ -1632,7 +1631,7 @@ static int fp_tc_init(struct Qdisc *sch, struct nlattr *opt)
 			q->req_bucketlen, q->req_min_gap);
 
 	/* initialize timeslot update timer */
-	hrtimer_init(&q->timeslot_update_timer, CLOCK_MONOTONIC, HRTIMER_MODE_ABS);
+	hrtimer_init(&q->timeslot_update_timer, CLOCK_MONOTONIC, HRTIMER_MODE_REL);
 	q->timeslot_update_timer.function = timeslot_update_timer_func;
 
 	/* initialize request timer */

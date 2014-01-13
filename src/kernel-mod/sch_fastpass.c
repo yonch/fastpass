@@ -1379,6 +1379,12 @@ static const struct nla_policy fp_policy[TCA_FASTPASS_MAX + 1] = {
 	[TCA_FASTPASS_REQUEST_GAP]		= { .type = NLA_U32 },
 	[TCA_FASTPASS_CONTROLLER_IP]	= { .type = NLA_U32 },
 	[TCA_FASTPASS_RST_WIN_USEC]		= { .type = NLA_U32 },
+	[TCA_FASTPASS_TIMESLOT_MUL]		= { .type = NLA_U32 },
+	[TCA_FASTPASS_TIMESLOT_SHIFT]	= { .type = NLA_U32 },
+	[TCA_FASTPASS_MISS_THRESHOLD]	= { .type = NLA_U32 },
+	[TCA_FASTPASS_DEV_BACKLOG_NS]	= { .type = NLA_U32 },
+	[TCA_FASTPASS_MAX_PRELOAD]		= { .type = NLA_U32 },
+	[TCA_FASTPASS_UPDATE_TIMESLOT_TIMER_NS]		= { .type = NLA_U32 },
 };
 
 /* change configuration (part of qdisc API) */

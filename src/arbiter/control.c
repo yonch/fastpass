@@ -75,7 +75,7 @@ void launch_cores(void)
 
 	/* decide what the first time slot to be output is */
 	now = fp_get_time_ns();
-	first_time_slot = (now + INIT_MAX_TIME_NS) / TIMESLOT_LENGTH_NS;
+	first_time_slot = ((now + INIT_MAX_TIME_NS) * TIMESLOT_MUL) >> TIMESLOT_SHIFT;
 	CONTROL_INFO("now %lu first time slot will be %lu\n", now, first_time_slot);
 
 	/*** LOGGING OUTPUT ***/
@@ -122,8 +122,6 @@ void launch_cores(void)
 	admission_cmd.end_time = end_time;
 	admission_cmd.admission_core_index = 0;
 	admission_cmd.start_timeslot = first_time_slot;
-	admission_cmd.timeslot_len = TIMESLOT_LENGTH_NS;
-	admission_cmd.prealloc_gap_ns = PREALLOC_DURATION_NS;
 
 	/* initialize core structures */
 	admission_init_core(enabled_lcore[1]);

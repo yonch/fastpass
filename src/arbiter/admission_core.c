@@ -136,15 +136,12 @@ int exec_admission_core(void *void_cmd_p)
 			continue; /* we try again */
 		}
 
-		/* decide when the first timeslot should start processing */
-		start_time_first_timeslot =
-				current_timeslot * cmd->timeslot_len - cmd->prealloc_gap_ns;
-
 		/* perform allocation */
 		admission_log_allocation_begin(current_timeslot,
 				start_time_first_timeslot);
 		get_admissible_traffic(&core, &g_admissible_status, &admitted[0],
-				start_time_first_timeslot, cmd->timeslot_len);
+				current_timeslot - PREALLOC_DURATION_TIMESLOTS,
+				TIMESLOT_MUL, TIMESLOT_SHIFT);
 		admission_log_allocation_end();
 
 		current_timeslot += BATCH_SIZE * N_ADMISSION_CORES;

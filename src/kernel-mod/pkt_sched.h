@@ -759,6 +759,12 @@ enum {
 	TCA_FASTPASS_REQUEST_GAP,	/* minimum gap between requests (in ns) */
 	TCA_FASTPASS_CONTROLLER_IP,	/* controller IP, in network byte order */
 	TCA_FASTPASS_RST_WIN_USEC, /* time window to accept resets, in usec */
+	TCA_FASTPASS_TIMESLOT_MUL,	/* mul to get timeslot from nsec */
+	TCA_FASTPASS_TIMESLOT_SHIFT,/* shift to get timeslot from nsec */
+	TCA_FASTPASS_MISS_THRESHOLD,/* #timeslots after which the alloc considered missed */
+	TCA_FASTPASS_DEV_BACKLOG_NS,/* max number of ns to backlog the internal queue */
+	TCA_FASTPASS_MAX_PRELOAD,	/* #timeslots to look ahead to future when queueing internal */
+	TCA_FASTPASS_UPDATE_TIMESLOT_TIMER_NS, /* how often to update internal queue */
 	__TCA_FASTPASS_MAX
 };
 

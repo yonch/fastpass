@@ -152,8 +152,8 @@ process_head:
 void get_admissible_traffic(struct admission_core_state *core,
 								struct admissible_status *status,
 								struct admitted_traffic **admitted,
-								uint64_t start_time_first_timeslot,
-								uint64_t timeslot_len)
+								uint64_t first_timeslot, uint32_t tslot_mul,
+								uint32_t tslot_shift)
 {
     assert(status != NULL);
 
@@ -183,14 +183,16 @@ void get_admissible_traffic(struct admission_core_state *core,
     	} else {
     	    /* wait for start time */
     	    if (bin % 4 == 0) {
-    	    	uint64_t start_time = start_time_first_timeslot
-    	    							+ (bin - NUM_BINS) * timeslot_len;
-        	    do
+    	    	uint64_t start_timeslot = first_timeslot + (bin - NUM_BINS);
+    	    	uint64_t now_timeslot;
+
+        	    do {
         	    	/* process requests */
         	    	process_new_requests(status, core, bin);
         	    	/* at least until the next core had finished allocating */
         	    	/*  and we reach the start time */
-        	    while (!core->is_head || (fp_get_time_ns() < start_time));
+        	    	now_timeslot = (fp_get_time_ns() * tslot_mul) >> tslot_shift;
+        	    } while (!core->is_head || (now_timeslot < start_timeslot));
     	    }
 
     	    /* enqueue the allocated traffic for this timeslot */

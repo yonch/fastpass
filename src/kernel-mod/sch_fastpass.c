@@ -129,7 +129,8 @@ struct fp_sched_data {
 
 	struct fp_window alloc_wnd;
 	u64		current_timeslot;
-	u64		schedule[FASTPASS_HORIZON];	/* flows scheduled in the next time slots: */
+	u64		schedule[(1 << FASTPASS_WND_LOG)];	/* flows scheduled in the next time slots: */
+
 										/* slot x at [x % FASTPASS_HORIZON] */
 
 	struct fp_pacer request_pacer;

@@ -720,9 +720,13 @@ static void update_current_timeslot(struct Qdisc *sch, u64 now_real)
 	u64 tslot_advance;
 	u32 moved_timeslots = 0;
 	u64 now_monotonic = fp_monotonic_time_ns();
+	u64 new_timeslot;
 
-	q->current_timeslot = (now_real * q->tslot_mul) >> q->tslot_shift;
+	new_timeslot = (now_real * q->tslot_mul) >> q->tslot_shift;
+	if (q->current_timeslot > new_timeslot)
+		FASTPASS_WARN("new timeslot is _before_ current timeslot!\n");
 	q->internal_free_time = max_t(u64, q->internal_free_time, now_monotonic);
+
 
 begin:
 	if (unlikely(wnd_empty(&q->alloc_wnd)))

@@ -34,6 +34,10 @@
 #define NUM_BINS_SHIFT 8
 #define NUM_BINS 256 // 2^NUM_BINS_SHIFT
 #define NUM_CORES 1
+#define NUM_SRC_DST_PAIRS (MAX_NODES * (MAX_NODES + 1))  // include dst == out of boundary
+#define OUT_OF_BOUNDARY_NODE_ID MAX_NODES  // highest node id
+#define MAX_DSTS MAX_NODES + 1  // include dst == out of boundary
+#define MAX_SRCS MAX_NODES
 
 struct admitted_edge {
     uint16_t src;
@@ -62,14 +66,15 @@ struct bin {
 struct batch_state {
     bool oversubscribed;
     uint16_t inter_rack_capacity;  // Only valid if oversubscribed is true
+    uint16_t out_of_boundary_capacity;
     uint64_t allowed_mask;
-    uint64_t src_endnodes [MAX_NODES];
-    uint64_t dst_endnodes [MAX_NODES];
+    uint64_t src_endnodes [MAX_SRCS];
+    uint64_t dst_endnodes [MAX_DSTS];
     uint64_t src_rack_bitmaps [MAX_NODES];
     uint64_t dst_rack_bitmaps [MAX_NODES];
     uint16_t src_rack_counts [MAX_RACKS * BATCH_SIZE];  // rows are racks
     uint16_t dst_rack_counts [MAX_RACKS * BATCH_SIZE];
-
+    uint16_t out_of_boundary_counts [BATCH_SIZE];
 };
 
 // Data structures associated with one allocation core
@@ -95,10 +100,11 @@ struct flow_status {
 struct admissible_status {
     uint64_t current_timeslot;
     bool oversubscribed;
+    uint16_t out_of_boundary_capacity;
     uint16_t inter_rack_capacity;  // Only valid if oversubscribed is true
     uint16_t num_nodes;
-    uint64_t last_alloc_tslot[MAX_NODES * MAX_NODES];
-    struct flow_status flows[MAX_NODES * MAX_NODES];
+    uint64_t last_alloc_tslot[NUM_SRC_DST_PAIRS];
+    struct flow_status flows[NUM_SRC_DST_PAIRS];
     struct fp_ring *q_head;
     struct fp_ring *q_admitted_out;
 };
@@ -117,8 +123,8 @@ void insert_admitted_edge(struct admitted_traffic *admitted, uint16_t src,
                           uint16_t dst) {
     assert(admitted != NULL);
     assert(admitted->size < MAX_NODES);
-    assert(src < MAX_NODES);
-    assert(dst < MAX_NODES);
+    assert(src < MAX_SRCS);
+    assert(dst < MAX_DSTS);
 
     struct admitted_edge *edge = &admitted->edges[admitted->size];
     edge->src = src;
@@ -211,30 +217,6 @@ void print_backlog_counts(struct fp_ring *queue) {
     }
     printf("total flows: %d\n", bin_sums);
 }
-
-// Returns true if this backlog queue contains duplicate entries for a src/dst pair
-// Used for debugging
-// Note this runs in n^2 time - super slow
-static inline
-bool has_duplicates(struct fp_ring *queue) {
-    assert(queue != NULL);
-    
-    uint16_t index;
-    uint16_t bin_num;
-    bool *flows = calloc(MAX_NODES * MAX_NODES, sizeof(bool));
-    assert(flows != NULL);
-
-    for (bin_num = 0; bin_num < NUM_BINS; bin_num++) {
-		struct bin *bin = (struct bin *)queue->elem[bin_num];
-        for (index = bin->head; index < bin->tail; index++) {
-            struct backlog_edge *edge = &bin->edges[index];
-            if (flows[edge->src * MAX_NODES + edge->dst] == true)
-                return true;
-            flows[edge->src * MAX_NODES + edge->dst] = true;
-        }
-    }
-    return false;
-}
 #endif
 
 // Returns the ID of the rack corresponding to id
@@ -246,19 +228,25 @@ uint16_t get_rack_from_id(uint16_t id) {
 // Initialize an admitted bitmap
 static inline
 void init_batch_state(struct batch_state *state, bool oversubscribed,
-                      uint16_t inter_rack_capacity, uint16_t num_nodes) {
+                      uint16_t inter_rack_capacity, uint16_t out_of_boundary_capacity,
+                      uint16_t num_nodes) {
     assert(state != NULL);
     assert(num_nodes <= MAX_NODES);
 
     state->oversubscribed = oversubscribed;
     state->inter_rack_capacity = inter_rack_capacity;
+    state->out_of_boundary_capacity = out_of_boundary_capacity;
     state->allowed_mask = ~0UL;
 
-    int i;
+    uint16_t i;
+    for (i = 0; i < num_nodes; i++) {
+        state->src_endnodes[i] = 0xFFFFFFFFFFFFFFFFULL;
+        state->dst_endnodes[i] = 0xFFFFFFFFFFFFFFFFULL;
+    }
+    state->dst_endnodes[OUT_OF_BOUNDARY_NODE_ID] = 0xFFFFFFFFFFFFFFFFULL;
+
     if (oversubscribed) {
         for (i = 0; i < num_nodes; i++) {
-            state->src_endnodes[i] = 0xFFFFFFFFFFFFFFFFULL;
-            state->dst_endnodes[i] = 0xFFFFFFFFFFFFFFFFULL;
             state->src_rack_bitmaps[i] = 0xFFFFFFFFFFFFFFFFULL;
             state->dst_rack_bitmaps[i] = 0xFFFFFFFFFFFFFFFFULL;
         }
@@ -268,27 +256,30 @@ void init_batch_state(struct batch_state *state, bool oversubscribed,
             state->dst_rack_counts[i] = 0;
         }
     }
-    else {
-        for (i = 0; i < num_nodes; i++) {
-            state->src_endnodes[i] = 0xFFFFFFFFFFFFFFFFULL;
-            state->dst_endnodes[i] = 0xFFFFFFFFFFFFFFFFULL;
-        }
-    }
+
+    // init out of boundary counts
+    for (i = 0; i < BATCH_SIZE; i++)
+        state->out_of_boundary_counts[i] = 0;
 }
 
 // Returns the first available timeslot for src and dst, or NONE_AVAILABLE
 static inline
 uint8_t get_first_timeslot(struct batch_state *state, uint16_t src, uint16_t dst) {
     assert(state != NULL);
-    assert(src < MAX_NODES);
-    assert(dst < MAX_NODES);
+    assert(src < MAX_SRCS);
+    assert(dst < MAX_DSTS);
 
     uint64_t endnode_bitmap = state->allowed_mask & state->src_endnodes[src] & state->dst_endnodes[dst];
       
     uint64_t bitmap = endnode_bitmap;
     if (state->oversubscribed) {
-        uint64_t rack_bitmap = state->src_rack_bitmaps[get_rack_from_id(src)] &
-            state->dst_rack_bitmaps[get_rack_from_id(dst)];
+        uint64_t rack_bitmap;
+        if (dst == OUT_OF_BOUNDARY_NODE_ID)
+            rack_bitmap = state->src_rack_bitmaps[get_rack_from_id(src)];
+        else
+            rack_bitmap = state->src_rack_bitmaps[get_rack_from_id(src)] &
+                state->dst_rack_bitmaps[get_rack_from_id(dst)];
+
         bitmap = endnode_bitmap & rack_bitmap;
     }
  
@@ -298,7 +289,6 @@ uint8_t get_first_timeslot(struct batch_state *state, uint16_t src, uint16_t dst
     uint64_t timeslot;
     asm("bsfq %1,%0" : "=r"(timeslot) : "r"(bitmap));
 
-
     return (uint8_t) timeslot;
 }
 
@@ -307,24 +297,34 @@ static inline
 void set_timeslot_occupied(struct batch_state *state, uint16_t src,
                            uint16_t dst, uint8_t timeslot) {
     assert(state != NULL);
-    assert(src < MAX_NODES);
-    assert(dst < MAX_NODES);
+    assert(src < MAX_SRCS);
+    assert(dst < MAX_DSTS);
     assert(timeslot <= BATCH_SIZE);
 
     state->src_endnodes[src] = state->src_endnodes[src] & ~(0x1ULL << timeslot);
-    state->dst_endnodes[dst] = state->dst_endnodes[dst] & ~(0x1ULL << timeslot);
+
+    if (dst == OUT_OF_BOUNDARY_NODE_ID) {
+        // destination is outside of scheduling boundary
+        state->out_of_boundary_counts[timeslot]++;
+
+        if (state->out_of_boundary_counts[timeslot] == state->out_of_boundary_capacity)
+            state->dst_endnodes[dst] = state->dst_endnodes[dst] & ~(0x1ULL << timeslot);
+    }
+    else
+        state->dst_endnodes[dst] = state->dst_endnodes[dst] & ~(0x1ULL << timeslot);
   
     if (state->oversubscribed) {
         uint16_t src_rack = get_rack_from_id(src);
-        uint16_t dst_rack = get_rack_from_id(dst);
-
         state->src_rack_counts[BATCH_SIZE * src_rack + timeslot] += 1;
-        state->dst_rack_counts[BATCH_SIZE * dst_rack + timeslot] += 1;
         if (state->src_rack_counts[BATCH_SIZE * src_rack + timeslot] == state->inter_rack_capacity)
             state->src_rack_bitmaps[src_rack] = state->src_rack_bitmaps[src_rack] & ~(0x1ULL << timeslot);
         
-        if (state->dst_rack_counts[BATCH_SIZE * dst_rack + timeslot] == state->inter_rack_capacity)
-            state->dst_rack_bitmaps[dst_rack] = state->dst_rack_bitmaps[dst_rack] & ~(0x1ULL << timeslot);
+        if (dst != OUT_OF_BOUNDARY_NODE_ID) {
+            uint16_t dst_rack = get_rack_from_id(dst);
+            state->dst_rack_counts[BATCH_SIZE * dst_rack + timeslot] += 1;
+            if (state->dst_rack_counts[BATCH_SIZE * dst_rack + timeslot] == state->inter_rack_capacity)
+                state->dst_rack_bitmaps[dst_rack] = state->dst_rack_bitmaps[dst_rack] & ~(0x1ULL << timeslot);
+        }
     }
 
 }
@@ -332,19 +332,21 @@ void set_timeslot_occupied(struct batch_state *state, uint16_t src,
 // Initialize all timeslots and demands to zero
 static inline
 void reset_admissible_status(struct admissible_status *status, bool oversubscribed,
-                            uint16_t inter_rack_capacity, uint16_t num_nodes)
+                             uint16_t inter_rack_capacity, uint16_t out_of_boundary_capacity,
+                             uint16_t num_nodes)
 {
     assert(status != NULL);
 
     status->current_timeslot = NUM_BINS;  // simplifies logic in request_timeslots
     status->oversubscribed = oversubscribed;
     status->inter_rack_capacity = inter_rack_capacity;
+    status->out_of_boundary_capacity = out_of_boundary_capacity;
     status->num_nodes = num_nodes;
 
     uint32_t i;
-    for (i = 0; i < MAX_NODES * MAX_NODES; i++)
+    for (i = 0; i < NUM_SRC_DST_PAIRS; i++)
         status->last_alloc_tslot[i] = 0;
-    for (i = 0; i < MAX_NODES * MAX_NODES; i++)
+    for (i = 0; i < NUM_SRC_DST_PAIRS; i++)
         atomic32_init(&status->flows[i].backlog);
 }
 
@@ -396,7 +398,8 @@ void alloc_core_reset(struct admission_core_state *core,
 		init_bin(core->new_request_bins[i]);
 
     init_batch_state(&core->batch_state, status->oversubscribed,
-                     status->inter_rack_capacity, status->num_nodes);
+                     status->inter_rack_capacity, status->out_of_boundary_capacity,
+                     status->num_nodes);
 
     for (i = 0; i < BATCH_SIZE; i++)
         init_admitted_traffic(admitted[i]);
@@ -497,16 +500,17 @@ static inline int alloc_core_init(struct admission_core_state* core,
  */
 static inline
 void init_admissible_status(struct admissible_status *status,
-		bool oversubscribed, uint16_t inter_rack_capacity, uint16_t num_nodes,
-		struct fp_ring *q_head, struct fp_ring *q_admitted_out)
+                            bool oversubscribed, uint16_t inter_rack_capacity,
+                            uint16_t out_of_boundary_capacity, uint16_t num_nodes,
+                            struct fp_ring *q_head, struct fp_ring *q_admitted_out)
 {
-	assert(status != NULL);
+    assert(status != NULL);
 
-	reset_admissible_status(status, oversubscribed, inter_rack_capacity,
-			num_nodes);
+    reset_admissible_status(status, oversubscribed, inter_rack_capacity,
+                            out_of_boundary_capacity, num_nodes);
 
     status->q_head = q_head;
-	status->q_admitted_out = q_admitted_out;
+    status->q_admitted_out = q_admitted_out;
 }
 
 /**
@@ -514,8 +518,11 @@ void init_admissible_status(struct admissible_status *status,
  */
 static inline
 struct admissible_status *create_admissible_status(bool oversubscribed,
-		uint16_t inter_rack_capacity, uint16_t num_nodes,
-		struct fp_ring *q_head, struct fp_ring *q_admitted_out)
+                                                   uint16_t inter_rack_capacity,
+                                                   uint16_t out_of_boundary_capacity,
+                                                   uint16_t num_nodes,
+                                                   struct fp_ring *q_head,
+                                                   struct fp_ring *q_admitted_out)
 {
     struct admissible_status *status =
     		fp_malloc("admissible_status", sizeof(struct admissible_status));
@@ -524,7 +531,7 @@ struct admissible_status *create_admissible_status(bool oversubscribed,
     	return NULL;
 
     init_admissible_status(status, oversubscribed, inter_rack_capacity,
-    		num_nodes, q_head, q_admitted_out);
+                           out_of_boundary_capacity, num_nodes, q_head, q_admitted_out);
 
     return status;
 }

@@ -1622,7 +1622,7 @@ static int fp_tc_init(struct Qdisc *sch, struct nlattr *opt)
 	q->req_min_gap		= 1000;
 	q->ctrl_addr_netorder = htonl(0x7F000001); /* need sensible default? */
 	q->reset_window_us	= 2e6; /* 2 seconds */
-	q->send_timeout_us	= 5000000; /* 5ms timeout */
+	q->send_timeout_us	= 100000; /* 5ms timeout */
 	q->flow_hash_tbl	= NULL;
 	INIT_LIST_HEAD(&q->unreq_flows);
 	INIT_LIST_HEAD(&q->retrans_flows);

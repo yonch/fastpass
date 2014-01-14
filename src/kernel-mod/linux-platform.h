@@ -20,6 +20,11 @@ static inline u64 fp_get_time_ns(void)
 	return ktime_to_ns(ktime_get_real());
 }
 
+static inline u64 fp_monotonic_time_ns(void)
+{
+	return ktime_to_ns(ktime_get());
+}
+
 static inline
 struct fpproto_pktdesc *fpproto_pktdesc_alloc(void)
 {

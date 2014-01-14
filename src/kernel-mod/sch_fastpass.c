@@ -943,8 +943,9 @@ static void handle_alloc(void *param, u32 base_tslot, u16 *dst,
 
 		/* sanity check */
 		if (wnd_is_marked(&q->alloc_wnd, full_tslot)) {
-			FASTPASS_WARN("got ALLOC tslot %llu dst 0x%X but but it was already marked for 0x%llX\n",
-					full_tslot, dst[dst_ind - 1], q->schedule[wnd_pos(full_tslot)]);
+			FASTPASS_WARN("got ALLOC tslot %llu dst 0x%X but but it was already marked for 0x%llX current_tslot %llu base %u now_real %llu\n",
+					full_tslot, dst[dst_ind - 1], q->schedule[wnd_pos(full_tslot)],
+					q->current_timeslot, base_tslot, now_real);
 			continue;
 		}
 

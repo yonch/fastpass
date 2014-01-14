@@ -78,4 +78,23 @@ uint16_t bin_index_from_timeslot(uint64_t last_allocated,
 #define unlikely(x)  __builtin_expect((x),0)
 #endif /* unlikely */
 
+// Helper method for testing in Python. Enqueues the head token.
+static inline
+void enqueue_head_token(struct fp_ring *ring) {
+    assert(ring != NULL);
+
+    fp_ring_enqueue(ring, (void *) URGENT_Q_HEAD_TOKEN);
+}
+
+// Helper method for testing in Python. Dequeues and returns an admitted traffic struct.
+static inline
+struct admitted_traffic *dequeue_admitted_traffic(struct admissible_status *status) {
+    assert(status != NULL);
+
+    struct admitted_traffic *traffic;
+    fp_ring_dequeue(status->q_admitted_out, (void **)&traffic);
+
+    return traffic;
+}
+
 #endif /* ADMISSIBLE_TRAFFIC_H_ */

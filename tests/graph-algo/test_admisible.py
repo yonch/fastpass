@@ -13,6 +13,7 @@ sys.path.insert(0, '../../src/graph-algo')
 
 import structures
 import admissible
+import fpring
 from timing_util import *
 
 class Test(unittest.TestCase):
@@ -20,66 +21,82 @@ class Test(unittest.TestCase):
     def test_one_request(self):
         """Basic test involving one src/dst pair."""
 
-        queue_0 = structures.create_backlog_queue()
-        queue_1 = structures.create_backlog_queue()
-        status = structures.create_admissible_status(False, 0, 2)
+        # initialization
+        q_bin = fpring.fp_ring_create(structures.NUM_BINS_SHIFT)
+        q_urgent = fpring.fp_ring_create(2 * structures.NODES_SHIFT + 1)
+        q_head = fpring.fp_ring_create(2 * structures.NODES_SHIFT)
+        q_admitted_out= fpring.fp_ring_create(structures.BATCH_SHIFT)
+        core = structures.create_admission_core_state()
+        structures.alloc_core_init(core, q_bin, q_bin, q_urgent, q_urgent)
+        status = structures.create_admissible_status(False, 0, 0, 2, q_head,
+                                                     q_admitted_out)
+        admitted_batch = structures.create_admitted_batch()
 
-        admitted = structures.get_admitted_by_core(status, 0)
+        for i in range(0, structures.NUM_BINS):
+            empty_bin = structures.create_bin(structures.LARGE_BIN_SIZE)
+            fpring.fp_ring_enqueue(q_bin, empty_bin)
+
+        admissible.enqueue_head_token(q_urgent)
 
         # Make a request
-        admissible.request_timeslots(status, 0, 1, 5)
+        admissible.add_backlog(status, 0, 1, 5)
  
         # Get admissible traffic (timeslot 1)
-        admissible.get_admissible_traffic(queue_0, queue_1, status)
+        admissible.get_admissible_traffic(core, status, admitted_batch, 0, 1, 0)
 
         # Check that one packet was admitted in each of the first 5 tslots
         # and queue_0 and queue_1 are empty
         for i in range(5):
-            admitted_i = structures.get_admitted_struct(admitted, i)
+            admitted_i = admissible.dequeue_admitted_traffic(status)
             self.assertEqual(admitted_i.size, 1)
             self.assertEqual(admitted_i.edges.src, 0)
             self.assertEqual(admitted_i.edges.dst, 1)
         for i in range(5, structures.BATCH_SIZE):
-            admitted_i = structures.get_admitted_struct(admitted, i)
+            admitted_i = admissible.dequeue_admitted_traffic(status)
             self.assertEqual(admitted_i.size, 0)
-    
-        structures.destroy_backlog_queue(queue_0)
-        structures.destroy_backlog_queue(queue_1)
-        structures.destroy_admissible_status(status)
+
+        # should clean up memory
 
         pass
 
     def test_multiple_competing_requests(self):
         """Test of two flows from the same source. """
  
-        queue_0 = structures.create_backlog_queue()
-        queue_1 = structures.create_backlog_queue()
-        status = structures.create_admissible_status(False, 0, 8)
-        empty_queue = structures.create_backlog_queue()
+        # initialization
+        q_bin = fpring.fp_ring_create(structures.NUM_BINS_SHIFT)
+        q_urgent = fpring.fp_ring_create(2 * structures.NODES_SHIFT + 1)
+        q_head = fpring.fp_ring_create(2 * structures.NODES_SHIFT)
+        q_admitted_out= fpring.fp_ring_create(structures.BATCH_SHIFT)
+        core = structures.create_admission_core_state()
+        structures.alloc_core_init(core, q_bin, q_bin, q_urgent, q_urgent)
+        status = structures.create_admissible_status(False, 0, 0, 5, q_head,
+                                                     q_admitted_out)
+        admitted_batch = structures.create_admitted_batch()
 
-        admitted = structures.get_admitted_by_core(status, 0)
+        for i in range(0, structures.NUM_BINS):
+            empty_bin = structures.create_bin(structures.LARGE_BIN_SIZE)
+            fpring.fp_ring_enqueue(q_bin, empty_bin)
+
+        admissible.enqueue_head_token(q_urgent)
 
         # Make a few competing requests
-        admissible.request_timeslots(status, 0, 1, 2)
-        admissible.request_timeslots(status, 0, 4, 1)
-
+        admissible.add_backlog(status, 0, 1, 2)
+        admissible.add_backlog(status, 0, 4, 1)
+ 
         # Get admissible traffic, check that one packet was admitted
-        admissible.get_admissible_traffic(queue_0, queue_1, status)
+        admissible.get_admissible_traffic(core, status, admitted_batch, 0, 1, 0)
 
         # Check that one packet was admitted in each of first 3 timeslots
         for i in range(3):
-            admitted_i = structures.get_admitted_struct(admitted, i)
+            admitted_i = admissible.dequeue_admitted_traffic(status)
             self.assertEqual(admitted_i.size, 1)
  
         # Check that no packets were admitted in remaining timeslots
         for i in range(3, structures.BATCH_SIZE):
-            admitted_i = structures.get_admitted_struct(admitted, i)
+            admitted_i = admissible.dequeue_admitted_traffic(status)
             self.assertEqual(admitted_i.size, 0)
 
-        structures.destroy_backlog_queue(queue_0)
-        structures.destroy_backlog_queue(queue_1)
-        structures.destroy_admissible_status(status)
-        structures.destroy_backlog_queue(empty_queue)
+        # should clean up memory
 
         pass
 
@@ -87,56 +104,63 @@ class Test(unittest.TestCase):
         """Tests that requests are admitted in the order of last send timeslot,
         regardless of the order the requests arrive in."""
 
-        queue_0 = structures.create_backlog_queue()
-        queue_1 = structures.create_backlog_queue()
-        status = structures.create_admissible_status(False, 0, 8)
-        empty_queue = structures.create_backlog_queue()
+        # initialization
+        q_bin = fpring.fp_ring_create(structures.NUM_BINS_SHIFT)
+        q_urgent = fpring.fp_ring_create(2 * structures.NODES_SHIFT + 1)
+        q_head = fpring.fp_ring_create(2 * structures.NODES_SHIFT)
+        q_admitted_out= fpring.fp_ring_create(structures.BATCH_SHIFT)
+        core = structures.create_admission_core_state()
+        structures.alloc_core_init(core, q_bin, q_bin, q_urgent, q_urgent)
+        status = structures.create_admissible_status(False, 0, 0, 6, q_head,
+                                                     q_admitted_out)
+        admitted_batch = structures.create_admitted_batch()
 
-        admitted = structures.get_admitted_by_core(status, 0)
+        for i in range(0, structures.NUM_BINS):
+            empty_bin = structures.create_bin(structures.LARGE_BIN_SIZE)
+            fpring.fp_ring_enqueue(q_bin, empty_bin)
+
+        admissible.enqueue_head_token(q_urgent)
 
         # Make two competing requests
-        admissible.request_timeslots(status, 3, 5, 1)
-        admissible.request_timeslots(status, 4, 5, 1)
-    
+        admissible.add_backlog(status, 3, 5, 1)
+        admissible.add_backlog(status, 4, 5, 1)
+ 
         # Get admissible traffic (first batch)
-        admissible.get_admissible_traffic(queue_0, queue_1, status)
+        admissible.get_admissible_traffic(core, status, admitted_batch, 0, 1, 0)
 
         # Check that one packet was admitted from src 3 in timeslot 0
-        admitted_0 = structures.get_admitted_struct(admitted, 0)
+        admitted_0 = admissible.dequeue_admitted_traffic(status)
         self.assertEqual(admitted_0.size, 1)
         self.assertEqual(admitted_0.edges.src, 3)
 
         # Check that one packet was admitted from src 4 in timeslot 1
-        admitted_1 = structures.get_admitted_struct(admitted, 1)
+        admitted_1 = admissible.dequeue_admitted_traffic(status)
         self.assertEqual(admitted_1.size, 1)
         self.assertEqual(admitted_1.edges.src, 4)
 
         # Check that no more packets were admitted in this batch
         for i in range(2, structures.BATCH_SIZE):
-            admitted_i = structures.get_admitted_struct(admitted, i)
+            admitted_i = admissible.dequeue_admitted_traffic(status)
             self.assertEqual(admitted_i.size, 0)
 
         # Make two competing requests out of their timeslot order
-        admissible.request_timeslots(status, 4, 5, 2)
-        admissible.request_timeslots(status, 3, 5, 2)
+        admissible.add_backlog(status, 4, 5, 2)
+        admissible.add_backlog(status, 3, 5, 2)
 
         # Get admissible traffic (second batch)
-        admissible.get_admissible_traffic(queue_0, queue_1, status)
+        admissible.get_admissible_traffic(core, status, admitted_batch, 0, 1, 0)
 
         # Check that one packet was admitted from src 3 in timeslot 0
-        admitted_0 = structures.get_admitted_struct(admitted, 0)
+        admitted_0 = admissible.dequeue_admitted_traffic(status)
         self.assertEqual(admitted_0.size, 1)
         self.assertEqual(admitted_0.edges.src, 3)
 
         # Check that one packet was admitted from src 4 in timeslot 1
-        admitted_1 = structures.get_admitted_struct(admitted, 1)
+        admitted_1 = admissible.dequeue_admitted_traffic(status)
         self.assertEqual(admitted_1.size, 1)
         self.assertEqual(admitted_1.edges.src, 4)
 
-        structures.destroy_backlog_queue(queue_0)
-        structures.destroy_backlog_queue(queue_1)
-        structures.destroy_admissible_status(status)
-        structures.destroy_backlog_queue(empty_queue)
+        # should clean up memory
 
         pass
 
@@ -154,12 +178,22 @@ class Test(unittest.TestCase):
         # Track total demands
         cumulative_demands = {}
 
-        # initialize structures
-        queue_0 = structures.create_backlog_queue()
-        queue_1 = structures.create_backlog_queue()
-        status = structures.create_admissible_status(True, rack_capacity, n_nodes)
+        # initialization
+        q_bin = fpring.fp_ring_create(structures.NUM_BINS_SHIFT)
+        q_urgent = fpring.fp_ring_create(2 * structures.NODES_SHIFT + 1)
+        q_head = fpring.fp_ring_create(2 * structures.NODES_SHIFT)
+        q_admitted_out= fpring.fp_ring_create(structures.BATCH_SHIFT)
+        core = structures.create_admission_core_state()
+        structures.alloc_core_init(core, q_bin, q_bin, q_urgent, q_urgent)
+        status = structures.create_admissible_status(True, rack_capacity, 0, n_nodes, q_head,
+                                                     q_admitted_out)
+        admitted_batch = structures.create_admitted_batch()
 
-        admitted = structures.get_admitted_by_core(status, 0)
+        for i in range(0, structures.NUM_BINS):
+            empty_bin = structures.create_bin(structures.LARGE_BIN_SIZE)
+            fpring.fp_ring_enqueue(q_bin, empty_bin)
+
+        admissible.enqueue_head_token(q_urgent)
 
         num_admitted = 0
         num_requested = 0
@@ -180,22 +214,14 @@ class Test(unittest.TestCase):
                         pending_requests[(src, dst)] = pending_requests[(src, dst)] + size
                     else:
                         pending_requests[(src, dst)] = size
-                    admissible.request_timeslots(status, src, dst, demand)
+                    admissible.add_backlog(status, src, dst, size)
                     num_requested += size
             
             # Get admissible traffic for this batch
-            if b % 2 == 0:
-                queue_in = queue_0
-                queue_out = queue_1
-            else:
-                queue_in = queue_1
-                queue_out = queue_0
-
-            structures.init_backlog_queue(queue_out)
-            admissible.get_admissible_traffic(queue_in, queue_out, status)
+            admissible.get_admissible_traffic(core, status, admitted_batch, 0, 1, 0)
             
             for i in range(structures.BATCH_SIZE):
-                admitted_i = structures.get_admitted_struct(admitted, i)
+                admitted_i = admissible.dequeue_admitted_traffic(status)
                 num_admitted += admitted_i.size
 
                 # Check all admitted edges - make sure they were requested
@@ -221,34 +247,43 @@ class Test(unittest.TestCase):
                 
         print 'requested %d, admitted %d, capacity %d' % (num_requested, num_admitted, duration * n_nodes)
 
-        structures.destroy_backlog_queue(queue_0)
-        structures.destroy_backlog_queue(queue_1)
-        structures.destroy_admissible_status(status)
+        # should clean up memory
 
         pass
 
     def test_oversubscribed(self):
         """Tests networks which are oversubscribed on the uplinks from racks/downlinks to racks."""
 
-        queue_in = structures.create_backlog_queue()
-        queue_out = structures.create_backlog_queue()
-        status = structures.create_admissible_status(True, 2, 128)
-        empty_queue = structures.create_backlog_queue()
+        # initialization
+        q_bin = fpring.fp_ring_create(structures.NUM_BINS_SHIFT)
+        q_urgent = fpring.fp_ring_create(2 * structures.NODES_SHIFT + 1)
+        q_head = fpring.fp_ring_create(2 * structures.NODES_SHIFT)
+        q_admitted_out= fpring.fp_ring_create(structures.BATCH_SHIFT)
+        core = structures.create_admission_core_state()
+        structures.alloc_core_init(core, q_bin, q_bin, q_urgent, q_urgent)
+        status = structures.create_admissible_status(True, 2, 0, 128, q_head,
+                                                     q_admitted_out)
+        admitted_batch = structures.create_admitted_batch()
 
-        admitted = structures.get_admitted_by_core(status, 0)
+        for i in range(0, structures.NUM_BINS):
+            empty_bin = structures.create_bin(structures.LARGE_BIN_SIZE)
+            fpring.fp_ring_enqueue(q_bin, empty_bin)
+
+        admissible.enqueue_head_token(q_urgent)
 
         # Make requests that could overfill the links above the ToRs
-        admissible.request_timeslots(status, 0, 32, 1)
-        admissible.request_timeslots(status, 1, 64, 1)
-        admissible.request_timeslots(status, 2, 96, 1)
-        admissible.request_timeslots(status, 33, 65, 1)
-        admissible.request_timeslots(status, 97, 66, 1)
+        admissible.add_backlog(status, 0, 32, 1)
+        admissible.add_backlog(status, 1, 64, 1)
+        admissible.add_backlog(status, 2, 96, 1)
+        admissible.add_backlog(status, 33, 65, 1)
+        admissible.add_backlog(status, 97, 66, 1)
     
         # Get admissible traffic
-        admissible.get_admissible_traffic(queue_in, queue_out, status)
+        admissible.get_admissible_traffic(core, status, admitted_batch, 0, 1, 0)
    
         # Check that we admitted at most 2 packets for each of the
         # oversubscribed links
+        admitted = admissible.dequeue_admitted_traffic(status)
         rack_0_out = 0
         rack_2_in = 0
         for e in range(admitted.size):
@@ -261,34 +296,90 @@ class Test(unittest.TestCase):
         self.assertEqual(rack_0_out, 2)
         self.assertEqual(rack_2_in, 2)
 
-        structures.destroy_backlog_queue(queue_in)
-        structures.destroy_backlog_queue(queue_out)
-        structures.destroy_admissible_status(status)
-        structures.destroy_backlog_queue(empty_queue)
+        # should clean up memory
+
+        pass
+
+    def test_out_of_boundary(self):
+        """Tests traffic to destinations out of the scheduling boundary."""
+
+        # initialization
+        q_bin = fpring.fp_ring_create(structures.NUM_BINS_SHIFT)
+        q_urgent = fpring.fp_ring_create(2 * structures.NODES_SHIFT + 1)
+        q_head = fpring.fp_ring_create(2 * structures.NODES_SHIFT)
+        q_admitted_out= fpring.fp_ring_create(structures.BATCH_SHIFT)
+        core = structures.create_admission_core_state()
+        structures.alloc_core_init(core, q_bin, q_bin, q_urgent, q_urgent)
+        status = structures.create_admissible_status(False, 0, 2, 6, q_head,
+                                                     q_admitted_out)
+        admitted_batch = structures.create_admitted_batch()
+
+        for i in range(0, structures.NUM_BINS):
+            empty_bin = structures.create_bin(structures.LARGE_BIN_SIZE)
+            fpring.fp_ring_enqueue(q_bin, empty_bin)
+
+        admissible.enqueue_head_token(q_urgent)
+
+        # Make requests that could overfill the links out of the scheduling boundary
+        dst = structures.OUT_OF_BOUNDARY_NODE_ID
+        admissible.add_backlog(status, 0, dst, 1)
+        admissible.add_backlog(status, 1, dst, 1)
+        admissible.add_backlog(status, 2, dst, 1)
+        admissible.add_backlog(status, 3, dst, 1)
+        admissible.add_backlog(status, 4, dst, 1)
+        admissible.add_backlog(status, 5, dst, 1)
+    
+        # Get admissible traffic
+        admissible.get_admissible_traffic(core, status, admitted_batch, 0, 1, 0)
+   
+        # Check that we admitted at most 2 out of the boundary per timeslot for
+        # first 3 timeslots
+        for i in range(0, 3):
+            admitted_i = admissible.dequeue_admitted_traffic(status)
+            self.assertEqual(admitted_i.size, 2)
+            for e in range(admitted_i.size):
+                edge = structures.get_admitted_edge(admitted_i, e)
+                self.assertEqual(edge.src, 2 * i + e)
+        # Check that we admitted none for the remainder of the batch
+        for i in range(3, structures.BATCH_SIZE):
+            admitted_i = admissible.dequeue_admitted_traffic(status)
+            self.assertEqual(admitted_i.size, 0)
+
+        # should clean up memory
 
         pass
 
     def test_reset_sender(self):
         '''Tests resetting a sender.'''
 
-        queue_0 = structures.create_backlog_queue()
-        queue_1 = structures.create_backlog_queue()
-        status = structures.create_admissible_status(False, 0, 32)
-        empty_queue = structures.create_backlog_queue()
+        # initialization
+        q_bin = fpring.fp_ring_create(structures.NUM_BINS_SHIFT)
+        q_urgent = fpring.fp_ring_create(2 * structures.NODES_SHIFT + 1)
+        q_head = fpring.fp_ring_create(2 * structures.NODES_SHIFT)
+        q_admitted_out= fpring.fp_ring_create(structures.BATCH_SHIFT)
+        core = structures.create_admission_core_state()
+        structures.alloc_core_init(core, q_bin, q_bin, q_urgent, q_urgent)
+        status = structures.create_admissible_status(False, 0, 0, 21, q_head,
+                                                     q_admitted_out)
+        admitted_batch = structures.create_admitted_batch()
 
-        admitted = structures.get_admitted_by_core(status, 0)
+        for i in range(0, structures.NUM_BINS):
+            empty_bin = structures.create_bin(structures.LARGE_BIN_SIZE)
+            fpring.fp_ring_enqueue(q_bin, empty_bin)
+
+        admissible.enqueue_head_token(q_urgent)
 
         # Make requests
-        admissible.request_timeslots(status, 0, 10, structures.BATCH_SIZE)
-        admissible.request_timeslots(status, 1, 10, structures.BATCH_SIZE)
-        admissible.request_timeslots(status, 0, 20, structures.BATCH_SIZE)
+        admissible.add_backlog(status, 0, 10, structures.BATCH_SIZE)
+        admissible.add_backlog(status, 1, 10, structures.BATCH_SIZE)
+        admissible.add_backlog(status, 0, 20, structures.BATCH_SIZE)
 
         # Get admissible traffic
-        admissible.get_admissible_traffic(queue_0, queue_1, status)
+        admissible.get_admissible_traffic(core, status, admitted_batch, 0, 1, 0)
    
         # Check admitted traffic
         for i in range(structures.BATCH_SIZE):
-            admitted_i = structures.get_admitted_struct(admitted, i)
+            admitted_i = admissible.dequeue_admitted_traffic(status)
 
             if i % 2 == 0:
                 self.assertEqual(admitted_i.size, 1)
@@ -308,13 +399,12 @@ class Test(unittest.TestCase):
         admissible.reset_sender(status, 0)
 
         # Get admissible traffic again
-        structures.init_backlog_queue(queue_0)
-        admissible.get_admissible_traffic(queue_1, queue_0, status)
+        admissible.get_admissible_traffic(core, status, admitted_batch, 0, 1, 0)
    
         # Check that we admit only one more packet for each of src 0's
         # pending flows
         for i in range(structures.BATCH_SIZE):
-            admitted_i = structures.get_admitted_struct(admitted, i)
+            admitted_i = admissible.dequeue_admitted_traffic(status)
             
             if i == 0:
                 self.assertEqual(admitted_i.size, 1)
@@ -336,11 +426,8 @@ class Test(unittest.TestCase):
                 self.assertEqual(edge.dst, 10)
             else:
                 self.assertEqual(admitted_i.size, 0)
-        
-        structures.destroy_backlog_queue(queue_0)
-        structures.destroy_backlog_queue(queue_1)
-        structures.destroy_admissible_status(status)
-        structures.destroy_backlog_queue(empty_queue)
+
+        # should clean up memory
 
         pass
       

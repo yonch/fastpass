@@ -300,6 +300,55 @@ class Test(unittest.TestCase):
 
         pass
 
+    def test_out_of_boundary(self):
+        """Tests traffic to destinations out of the scheduling boundary."""
+
+        # initialization
+        q_bin = fpring.fp_ring_create(structures.NUM_BINS_SHIFT)
+        q_urgent = fpring.fp_ring_create(2 * structures.NODES_SHIFT + 1)
+        q_head = fpring.fp_ring_create(2 * structures.NODES_SHIFT)
+        q_admitted_out= fpring.fp_ring_create(structures.BATCH_SHIFT)
+        core = structures.create_admission_core_state()
+        structures.alloc_core_init(core, q_bin, q_bin, q_urgent, q_urgent)
+        status = structures.create_admissible_status(False, 0, 2, 6, q_head,
+                                                     q_admitted_out)
+        admitted_batch = structures.create_admitted_batch()
+
+        for i in range(0, structures.NUM_BINS):
+            empty_bin = structures.create_bin(structures.LARGE_BIN_SIZE)
+            fpring.fp_ring_enqueue(q_bin, empty_bin)
+
+        admissible.enqueue_head_token(q_urgent)
+
+        # Make requests that could overfill the links out of the scheduling boundary
+        dst = structures.OUT_OF_BOUNDARY_NODE_ID
+        admissible.add_backlog(status, 0, dst, 1)
+        admissible.add_backlog(status, 1, dst, 1)
+        admissible.add_backlog(status, 2, dst, 1)
+        admissible.add_backlog(status, 3, dst, 1)
+        admissible.add_backlog(status, 4, dst, 1)
+        admissible.add_backlog(status, 5, dst, 1)
+    
+        # Get admissible traffic
+        admissible.get_admissible_traffic(core, status, admitted_batch, 0, 1, 0)
+   
+        # Check that we admitted at most 2 out of the boundary per timeslot for
+        # first 3 timeslots
+        for i in range(0, 3):
+            admitted_i = admissible.dequeue_admitted_traffic(status)
+            self.assertEqual(admitted_i.size, 2)
+            for e in range(admitted_i.size):
+                edge = structures.get_admitted_edge(admitted_i, e)
+                self.assertEqual(edge.src, 2 * i + e)
+        # Check that we admitted none for the remainder of the batch
+        for i in range(3, structures.BATCH_SIZE):
+            admitted_i = admissible.dequeue_admitted_traffic(status)
+            self.assertEqual(admitted_i.size, 0)
+
+        # should clean up memory
+
+        pass
+
     def test_reset_sender(self):
         '''Tests resetting a sender.'''
 

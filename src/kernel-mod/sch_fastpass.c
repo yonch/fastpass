@@ -521,10 +521,6 @@ void flow_inc_alloc(struct fp_sched_data* q, struct fp_flow* f)
 
 	f->alloc_tslots++;
 	q->alloc_tslots++;
-
-	if (unlikely((!flow_in_flowqueue(f))
-			&& (f->requested_tslots != f->demand_tslots)))
-		flowqueue_enqueue_request(q, f);
 }
 
 /**
@@ -986,6 +982,11 @@ static void handle_ack(void *param, struct fpproto_pktdesc *pd)
 			f->acked_tslots = new_acked;
 			fp_debug("acked request of %llu additional slots, flow 0x%04llX, total %llu slots\n",
 					delta, f->src_dst_key, new_acked);
+
+			/* the demand-limiting window might be in effect, re-enqueue flow */
+			if (unlikely((!flow_in_flowqueue(f))
+					&& (f->requested_tslots != f->demand_tslots)))
+				flowqueue_enqueue_request(q, f);
 		}
 	}
 	fpproto_pktdesc_free(pd);
@@ -1084,7 +1085,7 @@ static void send_request(struct Qdisc *sch)
 		f = flowqueue_dequeue(q);
 
 		new_requested = min_t(u64, f->demand_tslots,
-				f->alloc_tslots + FASTPASS_REQUEST_WINDOW_SIZE - 1);
+				f->acked_tslots + FASTPASS_REQUEST_WINDOW_SIZE - 1);
 		if(new_requested <= f->acked_tslots) {
 			q->stat.queued_flow_already_acked++;
 			fp_debug("flow 0x%04llX was in queue, but already fully acked\n",

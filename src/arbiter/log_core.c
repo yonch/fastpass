@@ -24,12 +24,6 @@
 
 #define CONN_LOG_STRUCT_VERSION		1
 
-struct conn_log_struct {
-	uint16_t version;
-	uint16_t node_id;
-	struct fp_proto_stat stat;
-};
-
 int exec_log_core(void *void_cmd_p)
 {
 	struct log_core_cmd *cmd = (struct log_core_cmd *) void_cmd_p;
@@ -60,14 +54,13 @@ int exec_log_core(void *void_cmd_p)
 		for (i = 49; i < 50; i++) {
 			conn_log.version = CONN_LOG_STRUCT_VERSION;
 			conn_log.node_id = i;
+			conn_log.timestamp = fp_get_time_ns();
 			comm_dump_stat(i, &conn_log.stat);
 			if (fwrite(&conn_log, sizeof(conn_log), 1, fp) != 1)
 				LOGGING_ERR("couldn't write conn info of node %d to file\n", i);
-#ifdef PRINT_CONN_LOG_TO_STDOUT
-			printf(" node %d now_real %llu\n", i, fp_get_time_ns());
-			fpproto_print_complete(stdout, &conn_log.stat);
-#endif
 		}
+
+		fflush(fp);
 
 		next_ticks += cmd->log_gap_ticks;
 	}

@@ -12,6 +12,7 @@
 #include "log_core.h"
 #include "control.h"
 #include "comm_core.h"
+#include "admission_core.h"
 #include "../protocol/fpproto.h"
 #include "../protocol/platform.h"
 #include "../graph-algo/admissible_structures.h"
@@ -64,7 +65,7 @@ int exec_log_core(void *void_cmd_p)
 {
 	struct log_core_cmd *cmd = (struct log_core_cmd *) void_cmd_p;
 	uint64_t next_ticks = rte_get_timer_cycles();
-	int i;
+	int i, j;
 	struct conn_log_struct conn_log;
 	FILE *fp;
 	char filename[MAX_FILENAME_LEN];
@@ -94,6 +95,15 @@ int exec_log_core(void *void_cmd_p)
 			conn_log.node_id = i;
 			conn_log.timestamp = fp_get_time_ns();
 			comm_dump_stat(i, &conn_log);
+
+			/* get backlog */
+			conn_log.backlog = 0;
+			for (j = 0; j < MAX_NODES; j++) {
+				uint32_t index = get_status_index(i, j);
+				conn_log.backlog +=
+						atomic32_read(&g_admissible_status.flows[index].backlog);
+			}
+
 			if (fwrite(&conn_log, sizeof(conn_log), 1, fp) != 1)
 				LOGGING_ERR("couldn't write conn info of node %d to file\n", i);
 		}

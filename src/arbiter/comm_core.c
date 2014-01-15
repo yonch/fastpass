@@ -738,9 +738,6 @@ void exec_comm_core(struct comm_core_cmd * cmd)
 		/* read packets from RX queues */
 		do_rx_burst(qconf);
 
-		/* Process newly allocated timeslots */
-		process_allocated_traffic(core, cmd->q_allocated);
-
 		/* process retrans timers */
 		now = rte_get_timer_cycles();
 		fp_timer_get_expired(&core->timeout_timers, now, &lst);
@@ -754,6 +751,9 @@ void exec_comm_core(struct comm_core_cmd * cmd)
 			/* call the handler */
 			fpproto_handle_timeout(&en->conn, now);
 		}
+
+		/* Process newly allocated timeslots */
+		process_allocated_traffic(core, cmd->q_allocated);
 
 		/* process tx timers */
 		fp_timer_get_expired(&core->tx_timers, now, &lst);

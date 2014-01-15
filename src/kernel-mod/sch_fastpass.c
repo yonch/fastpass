@@ -689,6 +689,13 @@ void handle_out_of_bounds_allocation(struct Qdisc *sch, u64 src_dst_key)
 		return;
 	}
 
+	if (f->alloc_tslots == f->demand_tslots) {
+		q->stat.unwanted_out_of_bounds++;
+		fp_debug("got an out-of-bound packet for flow 0x%llx node 0x%X but demand=alloc=%lu, so will discard\n",
+				src_dst_key, fp_alloc_node(src_dst_key), f->demand_tslots);
+		return;
+	}
+
 	/* flow will need to re-request a slot*/
 	flow_inc_demand(q, f);
 	/* we mark that we were allocated this timeslot */

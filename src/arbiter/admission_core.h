@@ -8,9 +8,10 @@
 #include "control.h"
 #include "../graph-algo/admissible_structures.h"
 
-#define		OVERSUBSCRIBED			0
-#define		INTER_RACK_CAPACITY		4
-#define		NUM_NODES				256
+#define		OVERSUBSCRIBED				0
+#define		INTER_RACK_CAPACITY			4
+#define		OUT_OF_BOUNDARY_CAPACITY	16
+#define		NUM_NODES					256
 
 #define		ADMITTED_TRAFFIC_MEMPOOL_SIZE	(BATCH_SIZE * 4 * N_ADMISSION_CORES)
 #define		ADMITTED_TRAFFIC_CACHE_SIZE		BATCH_SIZE

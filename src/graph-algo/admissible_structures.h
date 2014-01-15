@@ -23,8 +23,8 @@
 #define MAX_NODES 256
 #define NODES_SHIFT 8  // 2^NODES_SHIFT = MAX_NODES
 #define MAX_RACKS 16
-#define TOR_SHIFT 5  // number of machines per rack is at most 2^TOR_SHIFT
-#define MAX_NODES_PER_RACK 32  // = 2^TOR_SHIFT
+#define TOR_SHIFT 8  // number of machines per rack is at most 2^TOR_SHIFT
+#define MAX_NODES_PER_RACK 256  // = 2^TOR_SHIFT
 #define BATCH_SIZE 64  // must be consistent with bitmaps in batch_state
 #define BATCH_SHIFT 6  // 2^BATCH_SHIFT = BATCH_SIZE
 #define NONE_AVAILABLE 251

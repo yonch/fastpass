@@ -7,4 +7,4 @@ FNAME=$OUTDIR/fp_$FNAME_DATE.pcap
 
 mkdir -p $OUTDIR
 chmod +x $OUTDIR
-sudo tcpdump -i eth5 "ip proto 222" -n -p -w $FNAME
+sudo tcpdump -i eth0 "ip proto 222" -n -p -w $FNAME

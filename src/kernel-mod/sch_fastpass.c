@@ -724,6 +724,7 @@ static void update_current_timeslot(struct Qdisc *sch, u64 now_real)
 	q->current_timeslot = (now_real * q->tslot_mul) >> q->tslot_shift;
 	q->internal_free_time = max_t(u64, q->internal_free_time, now_monotonic);
 
+
 begin:
 	if (unlikely(wnd_empty(&q->alloc_wnd)))
 		goto done;
@@ -789,9 +790,19 @@ begin:
 done:
 	/* update window around current timeslot */
 	tslot_advance = q->current_timeslot + FASTPASS_WND_LEN - 1 - q->miss_threshold - wnd_head(&q->alloc_wnd);
-	wnd_advance(&q->alloc_wnd, tslot_advance);
-	fp_debug("moved by %llu timeslots to empty timeslot %llu, now tslot %llu\n",
-			tslot_advance, wnd_head(&q->alloc_wnd), q->current_timeslot);
+	if (unlikely((s64)tslot_advance < 0)) {
+		if ((s64)tslot_advance < -4)
+			FASTPASS_WARN("current timeslot moved back a lot: %lld timeslots. new current %llu\n",
+					(s64)tslot_advance, q->current_timeslot);
+		else
+			fp_debug("current timeslot moved back a little: %lld timeslots. new current %llu\n",
+					(s64)tslot_advance, q->current_timeslot);
+	} else {
+		/* tslot advance is non-negative, can call advance */
+		wnd_advance(&q->alloc_wnd, tslot_advance);
+		fp_debug("moved by %llu timeslots to empty timeslot %llu, now tslot %llu\n",
+				tslot_advance, wnd_head(&q->alloc_wnd), q->current_timeslot);
+	}
 
 	/* schedule transmission */
 	if (moved_timeslots > 0) {
@@ -939,8 +950,9 @@ static void handle_alloc(void *param, u32 base_tslot, u16 *dst,
 
 		/* sanity check */
 		if (wnd_is_marked(&q->alloc_wnd, full_tslot)) {
-			FASTPASS_WARN("got ALLOC tslot %llu dst 0x%X but but it was already marked for 0x%llX\n",
-					full_tslot, dst[dst_ind - 1], q->schedule[wnd_pos(full_tslot)]);
+			FASTPASS_WARN("got ALLOC tslot %llu dst 0x%X but but it was already marked for 0x%llX current_tslot %llu base %u now_real %llu\n",
+					full_tslot, dst[dst_ind - 1], q->schedule[wnd_pos(full_tslot)],
+					q->current_timeslot, base_tslot, now_real);
 			continue;
 		}
 

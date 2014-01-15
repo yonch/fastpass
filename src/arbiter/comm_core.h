@@ -6,7 +6,7 @@
 #include <rte_ip.h>
 #include "../protocol/fpproto.h"
 
-#define CONTROLLER_SEND_TIMEOUT_SECS 	0.004
+#define CONTROLLER_SEND_TIMEOUT_SECS 	0.0004
 
 /* The maximum number of admitted time-slots to process in a batch before
  *   sending and receiving packets */
@@ -37,7 +37,7 @@ struct comm_core_cmd {
 
 static inline uint32_t controller_ip(void)
 {
-	return IPv4(192,168,44,100);
+	return IPv4(10,197,55,111);
 }
 
 /**

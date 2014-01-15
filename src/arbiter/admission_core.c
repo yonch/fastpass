@@ -34,7 +34,8 @@ void admission_init_global(struct rte_ring *q_admitted_out)
 				"Cannot init q_head: %s\n", rte_strerror(rte_errno));
 
 	init_admissible_status(&g_admissible_status, OVERSUBSCRIBED,
-			INTER_RACK_CAPACITY, NUM_NODES, q_head, q_admitted_out);
+			INTER_RACK_CAPACITY, OUT_OF_BOUNDARY_CAPACITY, NUM_NODES, q_head,
+			q_admitted_out);
 
 	/* init log */
 	for (i = 0; i < RTE_MAX_LCORE; i++)

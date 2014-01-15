@@ -5,6 +5,7 @@
 #include <stdint.h>
 #include <rte_ip.h>
 #include "../protocol/fpproto.h"
+#include "../protocol/stat_print.h"
 
 #define CONTROLLER_SEND_TIMEOUT_SECS 	0.0004
 
@@ -54,6 +55,6 @@ void exec_comm_core(struct comm_core_cmd * cmd);
 
 void benchmark_cost_of_get_time(void);
 
-void comm_dump_stat(uint16_t node_id, struct fp_proto_stat *stat);
+void comm_dump_stat(uint16_t node_id, struct conn_log_struct *conn_log);
 
 #endif /* CONTROLLER_H_ */

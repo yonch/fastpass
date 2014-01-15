@@ -23,6 +23,7 @@
 #include "bigmap.h"
 #include "admission_core.h"
 #include "fp_timer.h"
+#include "../protocol/stat_print.h"
 
 /* number of elements to keep in the pktdesc local core cache */
 #define PKTDESC_MEMPOOL_CACHE_SIZE		256
@@ -771,7 +772,11 @@ void exec_comm_core(struct comm_core_cmd * cmd)
 	}
 }
 
-void comm_dump_stat(uint16_t node_id, struct fp_proto_stat *stat)
+void comm_dump_stat(uint16_t node_id, struct conn_log_struct *conn_log)
 {
-	fpproto_dump_stats(&end_nodes[node_id].conn, stat);
+	uint64_t now = rte_get_timer_cycles();
+	fpproto_dump_stats(&end_nodes[node_id].conn, &conn_log->stat);
+	conn_log->next_retrans_gap = end_nodes[node_id].timeout_timer.time * TIMER_GRANULARITY - now;
+	conn_log->next_tx_gap = end_nodes[node_id].tx_timer.time * TIMER_GRANULARITY - now;
+	conn_log->pacer_gap = pacer_next_event(&end_nodes[node_id].tx_pacer) - now;
 }

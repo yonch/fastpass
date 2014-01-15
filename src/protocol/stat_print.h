@@ -5,10 +5,15 @@
 #include "fpproto.h"
 #include <stdio.h>
 
+#define CONN_LOG_STRUCT_VERSION		2
+
 struct conn_log_struct {
 	uint16_t version;
 	uint16_t node_id;
 	uint64_t timestamp;
+	int64_t next_retrans_gap;
+	int64_t next_tx_gap;
+	int64_t pacer_gap;
 	struct fp_proto_stat stat;
 };
 
@@ -122,8 +127,16 @@ static inline void fpproto_print_warnings(struct fp_proto_stat* sps)
 
 static inline void fpproto_print_log_struct(struct conn_log_struct *conn_log)
 {
+	if (conn_log->version != CONN_LOG_STRUCT_VERSION) {
+		printf("-- unknown conn_log version number %d, expected %d\n",
+				conn_log->version, CONN_LOG_STRUCT_VERSION);
+		return;
+	}
+
 	printf("\n--\n");
-	printf("node %d timestamp %lu\n", conn_log->node_id, conn_log->timestamp);
+	printf("node %d timestamp %lu next_retrans %ld(cycles) next_tx %ld(cycles) pacer %ld(cycles)\n",
+			conn_log->node_id, conn_log->timestamp, conn_log->next_retrans_gap,
+			conn_log->next_tx_gap, conn_log->pacer_gap);
 	fpproto_print_stats(&conn_log->stat);
 	/* errors */
 	printf("\n errors:");

@@ -720,13 +720,8 @@ static void update_current_timeslot(struct Qdisc *sch, u64 now_real)
 	u64 tslot_advance;
 	u32 moved_timeslots = 0;
 	u64 now_monotonic = fp_monotonic_time_ns();
-	u64 new_timeslot;
 
-	new_timeslot = (now_real * q->tslot_mul) >> q->tslot_shift;
-	if (q->current_timeslot > new_timeslot)
-		FASTPASS_WARN("new timeslot %llu is _before_ current timeslot %llu!\n",
-				new_timeslot, q->current_timeslot);
-	q->current_timeslot = new_timeslot;
+	q->current_timeslot = (now_real * q->tslot_mul) >> q->tslot_shift;
 	q->internal_free_time = max_t(u64, q->internal_free_time, now_monotonic);
 
 
@@ -795,9 +790,19 @@ begin:
 done:
 	/* update window around current timeslot */
 	tslot_advance = q->current_timeslot + FASTPASS_WND_LEN - 1 - q->miss_threshold - wnd_head(&q->alloc_wnd);
-	wnd_advance(&q->alloc_wnd, tslot_advance);
-	fp_debug("moved by %llu timeslots to empty timeslot %llu, now tslot %llu\n",
-			tslot_advance, wnd_head(&q->alloc_wnd), q->current_timeslot);
+	if (unlikely((s64)tslot_advance < 0)) {
+		if ((s64)tslot_advance < -4)
+			FASTPASS_WARN("current timeslot moved back a lot: %lld timeslots. new current %llu\n",
+					(s64)tslot_advance, q->current_timeslot);
+		else
+			fp_debug("current timeslot moved back a little: %lld timeslots. new current %llu\n",
+					(s64)tslot_advance, q->current_timeslot);
+	} else {
+		/* tslot advance is non-negative, can call advance */
+		wnd_advance(&q->alloc_wnd, tslot_advance);
+		fp_debug("moved by %llu timeslots to empty timeslot %llu, now tslot %llu\n",
+				tslot_advance, wnd_head(&q->alloc_wnd), q->current_timeslot);
+	}
 
 	/* schedule transmission */
 	if (moved_timeslots > 0) {

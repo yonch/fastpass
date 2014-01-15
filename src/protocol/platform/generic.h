@@ -31,6 +31,7 @@
 #include <linux/types.h>
 
 #ifdef _RTE_IP_H_
+#include <rte_byteorder.h>
 #define ntohs(x) rte_be_to_cpu_16(x)
 #define ntohl(x) rte_be_to_cpu_32(x)
 #else

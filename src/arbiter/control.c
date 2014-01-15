@@ -114,7 +114,8 @@ void launch_cores(void)
 	path_sel_cmd.q_path_selected = q_path_selected;
 
 	/* launch admission core */
-	rte_eal_remote_launch(exec_path_sel_core, &path_sel_cmd, enabled_lcore[2]);
+	if (N_PATH_SEL_CORES > 0)
+		rte_eal_remote_launch(exec_path_sel_core, &path_sel_cmd, enabled_lcore[2]);
 
 	/*** ADMISSION CORES ***/
 	/* set commands */
@@ -133,7 +134,7 @@ void launch_cores(void)
 	// Set commands
 	comm_cmd.start_time = start_time;
 	comm_cmd.end_time = end_time;
-	comm_cmd.q_allocated = q_path_selected;
+	comm_cmd.q_allocated = ((N_PATH_SEL_CORES > 0) ? q_path_selected : q_admitted);
 
 	/* initialize comm core on this core */
 	comm_init_core(rte_lcore_id(), first_time_slot);

@@ -671,7 +671,7 @@ static void move_timeslot_from_flow(struct Qdisc *sch, struct psched_ratecfg *ra
 	}
 
 	fp_debug("@%llu moved %u out of %u packets from %llu (0x%04llx) path %d\n",
-			q->horizon.timeslot, count, src->qlen + count, src->src_dst_key,
+			q->current_timeslot, count, src->qlen + count, src->src_dst_key,
 			src->src_dst_key, path);
 }
 
@@ -762,8 +762,8 @@ begin:
 	/* Okay can move timeslot! */
 	f = fpq_lookup(q, fp_alloc_node(next_key), false);
 	if (unlikely(f == NULL)) {
-		fp_debug("could not find flow for allocation at time %llu key 0x%llX node 0x%X will force reset\n",
-				q->tslot_start_time, next_key, fp_alloc_node(next_key));
+		fp_debug("could not find flow for allocation at timeslot %llu key 0x%llX node 0x%X will force reset\n",
+				next_nonempty, next_key, fp_alloc_node(next_key));
 		q->stat.flow_not_found_update++;
 		/* This corrupts the status; will force a reset */
 		fpproto_force_reset(fpproto_conn(q));
@@ -895,7 +895,7 @@ static void handle_alloc(void *param, u32 base_tslot, u16 *dst,
 	full_tslot += ((u32)base_tslot - (u32)full_tslot) & 0xFFFFF; /* 20 bits */
 
 	fp_debug("got ALLOC for timeslot %d (full %llu, current %llu), %d destinations, %d timeslots, mask 0x%016llX\n",
-			base_tslot, full_tslot, q->horizon.timeslot, n_dst, n_tslots,
+			base_tslot, full_tslot, q->current_timeslot, n_dst, n_tslots,
 			wnd_get_mask(&q->alloc_wnd, q->current_timeslot+63));
 
 	for (i = 0; i < n_tslots; i++) {
@@ -1622,7 +1622,7 @@ static int fp_tc_init(struct Qdisc *sch, struct nlattr *opt)
 	q->req_min_gap		= 1000;
 	q->ctrl_addr_netorder = htonl(0x7F000001); /* need sensible default? */
 	q->reset_window_us	= 2e6; /* 2 seconds */
-	q->send_timeout_us	= 5000000; /* 5ms timeout */
+	q->send_timeout_us	= 100000; /* 5ms timeout */
 	q->flow_hash_tbl	= NULL;
 	INIT_LIST_HEAD(&q->unreq_flows);
 	INIT_LIST_HEAD(&q->retrans_flows);

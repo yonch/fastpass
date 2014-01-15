@@ -170,7 +170,6 @@ void fpproto_handle_timeout(struct fpproto_conn *conn, u64 now)
 	conn->stat.tasklet_runs++;
 
 	/* notify qdisc of expired timeouts */
-	seqno = conn->earliest_unacked;
 	while (!wnd_empty(&conn->outwnd)) {
 		/* find seqno and timeout of next unacked packet */
 		seqno = wnd_earliest_marked(&conn->outwnd);

@@ -21,8 +21,9 @@ int control_do_queue_allocation(void)
 	}
 
 	if(n_enabled_lcore < N_ADMISSION_CORES + N_COMM_CORES + N_LOG_CORES + N_PATH_SEL_CORES) {
-		rte_exit(EXIT_FAILURE, "Need #alloc + #comm + #log cores (need %d, got %d)\n",
-				N_ADMISSION_CORES + N_COMM_CORES + N_LOG_CORES, n_enabled_lcore);
+		rte_exit(EXIT_FAILURE, "Need #alloc + #comm + #log + #path_sel cores (need %d, got %d)\n",
+				N_ADMISSION_CORES + N_COMM_CORES + N_LOG_CORES + N_PATH_SEL_CORES,
+				n_enabled_lcore);
 	}
 
 	if(n_enabled_port < N_CONTROLLER_PORTS) {
@@ -133,7 +134,7 @@ void launch_cores(void)
 	rte_eal_remote_launch(exec_admission_core, &admission_cmd, enabled_lcore[1]);
 
 	/*** LOG CORE ***/
-	log_cmd.log_gap_ticks = (uint32_t)LOG_GAP_SECS * rte_get_timer_hz();
+	log_cmd.log_gap_ticks = (uint64_t)(LOG_GAP_SECS * rte_get_timer_hz());
 
 	/* launch log core */
 	rte_eal_remote_launch(exec_log_core, &log_cmd,

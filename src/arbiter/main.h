@@ -13,7 +13,6 @@
 #include <rte_mempool.h>
 
 #define RTE_LOGTYPE_BENCHAPP RTE_LOGTYPE_USER1
-#define RTE_LOGTYPE_ARP RTE_LOGTYPE_USER1
 
 #define NB_SOCKETS 8
 

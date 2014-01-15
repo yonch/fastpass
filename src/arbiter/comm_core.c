@@ -48,7 +48,7 @@ struct end_node_state {
 
 	/* pending allocations */
 	struct fp_window pending;
-	uint16_t allocs[MAX_NODES];
+	uint16_t allocs[(1 << FASTPASS_WND_LOG)];
 
 	/* demands */
 	uint32_t demands[MAX_NODES];
@@ -771,3 +771,7 @@ void exec_comm_core(struct comm_core_cmd * cmd)
 	}
 }
 
+void comm_dump_stat(uint16_t node_id, struct fp_proto_stat *stat)
+{
+	fpproto_dump_stats(&end_nodes[node_id].conn, stat);
+}

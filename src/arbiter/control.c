@@ -9,6 +9,7 @@
 #include "comm_core.h"
 #include "admission_core.h"
 #include "path_sel_core.h"
+#include "log_core.h"
 
 int control_do_queue_allocation(void)
 {
@@ -64,6 +65,7 @@ void launch_cores(void)
 	struct comm_core_cmd comm_cmd;
 	struct admission_core_cmd admission_cmd;
 	struct path_sel_core_cmd path_sel_cmd;
+	struct log_core_cmd log_cmd;
 	uint64_t first_time_slot;
 	uint64_t now;
 	struct rte_ring *q_admitted;
@@ -129,6 +131,13 @@ void launch_cores(void)
 
 	/* launch admission core */
 	rte_eal_remote_launch(exec_admission_core, &admission_cmd, enabled_lcore[1]);
+
+	/*** LOG CORE ***/
+	log_cmd.log_gap_ticks = (uint32_t)LOG_GAP_SECS * rte_get_timer_hz();
+
+	/* launch log core */
+	rte_eal_remote_launch(exec_log_core, &log_cmd,
+			enabled_lcore[2 + N_PATH_SEL_CORES]);
 
 	/*** COMM CORES ***/
 	// Set commands

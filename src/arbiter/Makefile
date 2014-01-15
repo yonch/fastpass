@@ -10,6 +10,7 @@ SRCS-y := main.c \
           comm_core.c \
           admission_core.c \
           path_sel_core.c \
+          log_core.c \
           ../protocol/fpproto.c \
           ../graph-algo/admissible_traffic.c \
           ../graph-algo/path_selection.c \

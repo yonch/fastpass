@@ -521,15 +521,6 @@ void flow_inc_alloc(struct fp_sched_data* q, struct fp_flow* f)
 
 	f->alloc_tslots++;
 	q->alloc_tslots++;
-
-	if (unlikely(f->acked_tslots < f->alloc_tslots)) {
-		q->acked_tslots += f->alloc_tslots - f->acked_tslots;
-		f->acked_tslots = f->alloc_tslots;
-	}
-
-	if (unlikely((!flow_in_flowqueue(f))
-			&& (f->requested_tslots != f->demand_tslots)))
-		flowqueue_enqueue_request(q, f);
 }
 
 /**
@@ -695,6 +686,13 @@ void handle_out_of_bounds_allocation(struct Qdisc *sch, u64 src_dst_key)
 		/* This corrupts the status; will force a reset */
 		fpproto_force_reset(fpproto_conn(q));
 		handle_reset((void *)sch); /* manually call callback since fpproto won't call it */
+		return;
+	}
+
+	if (f->alloc_tslots == f->demand_tslots) {
+		q->stat.unwanted_out_of_bounds++;
+		fp_debug("got an out-of-bound packet for flow 0x%llx node 0x%X but demand=alloc=%lu, so will discard\n",
+				src_dst_key, fp_alloc_node(src_dst_key), f->demand_tslots);
 		return;
 	}
 
@@ -991,6 +989,11 @@ static void handle_ack(void *param, struct fpproto_pktdesc *pd)
 			f->acked_tslots = new_acked;
 			fp_debug("acked request of %llu additional slots, flow 0x%04llX, total %llu slots\n",
 					delta, f->src_dst_key, new_acked);
+
+			/* the demand-limiting window might be in effect, re-enqueue flow */
+			if (unlikely((!flow_in_flowqueue(f))
+					&& (f->requested_tslots != f->demand_tslots)))
+				flowqueue_enqueue_request(q, f);
 		}
 	}
 	fpproto_pktdesc_free(pd);
@@ -1089,7 +1092,7 @@ static void send_request(struct Qdisc *sch)
 		f = flowqueue_dequeue(q);
 
 		new_requested = min_t(u64, f->demand_tslots,
-				f->alloc_tslots + FASTPASS_REQUEST_WINDOW_SIZE - 1);
+				f->acked_tslots + FASTPASS_REQUEST_WINDOW_SIZE - 1);
 		if(new_requested <= f->acked_tslots) {
 			q->stat.queued_flow_already_acked++;
 			fp_debug("flow 0x%04llX was in queue, but already fully acked\n",

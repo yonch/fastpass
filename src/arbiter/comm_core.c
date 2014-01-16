@@ -23,6 +23,7 @@
 #include "bigmap.h"
 #include "admission_core.h"
 #include "fp_timer.h"
+#include "../protocol/stat_print.h"
 
 /* number of elements to keep in the pktdesc local core cache */
 #define PKTDESC_MEMPOOL_CACHE_SIZE		256
@@ -233,7 +234,7 @@ static void handle_areq(void *param, u16 *dst_and_count, int n)
 	for (i = 0; i < n; i++) {
 		dst = rte_be_to_cpu_16(dst_and_count[2*i]);
 		count = rte_be_to_cpu_16(dst_and_count[2*i + 1]);
-		if (unlikely(dst > MAX_NODES)) {
+		if (unlikely(!(dst < MAX_NODES))) {
 			comm_log_areq_invalid_dst(node_id, dst);
 			return;
 		}
@@ -771,7 +772,21 @@ void exec_comm_core(struct comm_core_cmd * cmd)
 	}
 }
 
-void comm_dump_stat(uint16_t node_id, struct fp_proto_stat *stat)
+void comm_dump_stat(uint16_t node_id, struct conn_log_struct *conn_log)
 {
-	fpproto_dump_stats(&end_nodes[node_id].conn, stat);
+	int i;
+	uint64_t ctr;
+	struct end_node_state *en = &end_nodes[node_id];
+
+	uint64_t now = rte_get_timer_cycles();
+	fpproto_dump_stats(&en->conn, &conn_log->stat);
+	conn_log->next_retrans_gap = en->timeout_timer.time * TIMER_GRANULARITY - now;
+	conn_log->next_tx_gap = en->tx_timer.time * TIMER_GRANULARITY - now;
+	conn_log->pacer_gap = pacer_next_event(&en->tx_pacer) - now;
+
+	/* dump demands */
+	ctr = 0;
+	for (i = 0; i < MAX_NODES; i++)
+		ctr += en->demands[i];
+	conn_log->demands = ctr;
 }

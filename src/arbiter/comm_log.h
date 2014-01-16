@@ -174,9 +174,9 @@ static inline void comm_log_got_admitted_tslot(uint16_t size, uint64_t timeslot)
 
 #ifdef CONFIG_IP_FASTPASS_DEBUG
 		uint64_t now = fp_get_time_ns(); /* TODO: disable this */
-		COMM_DEBUG("admitted_traffic for %d nodes (tslot %lu, now %lu, diff %ld, counter %lu)\n",
+		COMM_DEBUG("admitted_traffic for %d nodes (tslot %lu, now %lu, diff_tslots %ld, counter %lu)\n",
 				size, timeslot, now,
-				(int64_t)(timeslot * TIMESLOT_LENGTH_NS - now),
+				(int64_t)(timeslot - ((now * TIMESLOT_MUL) >> TIMESLOT_SHIFT)),
 				CL->processed_tslots);
 #endif
 	}

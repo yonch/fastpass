@@ -1,4 +1,6 @@
 /* Licensed under LGPLv2+ - see LICENSE file for details */
+#include "../../../graph-algo/platform.h"
+
 #include <ccan/htable/htable.h>
 #include <ccan/compiler/compiler.h>
 #include <stdlib.h>
@@ -55,7 +57,7 @@ void htable_init(struct htable *ht,
 void htable_clear(struct htable *ht)
 {
 	if (ht->table != &ht->perfect_bit)
-		free((void *)ht->table);
+		fp_free((void *)ht->table);
 	htable_init(ht, ht->rehash, ht->priv);
 }
 
@@ -134,7 +136,7 @@ static COLD bool double_table(struct htable *ht)
 	uintptr_t *oldtable, e;
 
 	oldtable = ht->table;
-	ht->table = calloc(1 << (ht->bits+1), sizeof(size_t));
+        ht->table = fp_calloc(NULL, 1 << (ht->bits+1), sizeof(size_t));
 	if (!ht->table) {
 		ht->table = oldtable;
 		return false;
@@ -160,7 +162,7 @@ static COLD bool double_table(struct htable *ht)
 				ht_add(ht, p, ht->rehash(p, ht->priv));
 			}
 		}
-		free(oldtable);
+		fp_free(oldtable);
 	}
 	ht->deleted = 0;
 	return true;

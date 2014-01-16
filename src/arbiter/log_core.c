@@ -93,7 +93,7 @@ int exec_log_core(void *void_cmd_p)
 
 		/* write log */
 //		for (i = 0; i < MAX_NODES; i++) {
-		for (i = 49; i < 50; i++) {
+		for (i = 49; i < 55; i++) {
 			conn_log.version = CONN_LOG_STRUCT_VERSION;
 			conn_log.node_id = i;
 			conn_log.timestamp = fp_get_time_ns();

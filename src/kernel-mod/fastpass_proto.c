@@ -253,7 +253,7 @@ static void fpproto_destroy_sock(struct sock *sk)
 /**
  * Constructs and sends one packet.
  */
-void fpproto_send_packet(struct sock *sk, struct fpproto_pktdesc *pd)
+struct sk_buff *fpproto_make_skb(struct sock *sk, struct fpproto_pktdesc *pd)
 {
 	struct fastpass_sock *fp = fastpass_sk(sk);
 	struct inet_sock *inet = inet_sk(sk);
@@ -277,6 +277,8 @@ void fpproto_send_packet(struct sock *sk, struct fpproto_pktdesc *pd)
 		FASTPASS_CRIT("got n_areq larger than max! n_areq %d max %d send_reset %d seqno %llu\n",
 				pd->n_areq, FASTPASS_PKT_MAX_AREQ, pd->send_reset,
 				pd->seqno);
+		kfree_skb(skb);
+		return NULL;
 	}
 
 	/* encode the packet from the descriptor */
@@ -285,11 +287,29 @@ void fpproto_send_packet(struct sock *sk, struct fpproto_pktdesc *pd)
 			inet->inet_saddr, inet->inet_daddr, 26);
 
 	/* adjust the size of the skb based on encoded size */
-	if (unlikely((payload_len > FASTPASS_MAX_PAYLOAD) || (payload_len < 0)))
+	if (unlikely((payload_len > FASTPASS_MAX_PAYLOAD) || (payload_len < 0))) {
 		FASTPASS_CRIT("invalid packet encoding! len %d max %u n_areq %d send_reset %d seqno %llu\n",
 				payload_len, FASTPASS_MAX_PAYLOAD, pd->n_areq, pd->send_reset,
 				pd->seqno);
+		kfree_skb(skb);
+		return NULL;
+	}
+
 	skb_put(skb, payload_len);
+	return skb;
+
+alloc_err:
+	fp->stat.skb_alloc_error++;
+	fp_debug("could not alloc skb of size %d\n",
+			FASTPASS_MAX_PAYLOAD + max_header);
+	return NULL;
+}
+
+void fpproto_send_skb(struct sock *sk, struct sk_buff *skb)
+{
+	struct fastpass_sock *fp = fastpass_sk(sk);
+	struct inet_sock *inet = inet_sk(sk);
+	int err;
 
 	fp_debug("sending packet\n");
 
@@ -307,12 +327,6 @@ void fpproto_send_packet(struct sock *sk, struct fpproto_pktdesc *pd)
 
 	bh_unlock_sock(sk);
 	return;
-
-alloc_err:
-	fp->stat.skb_alloc_error++;
-	fp_debug("could not alloc skb of size %d\n",
-			FASTPASS_MAX_PAYLOAD + max_header);
-	/* no need to unlock */
 }
 
 static int fpproto_sk_init(struct sock *sk)

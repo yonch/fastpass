@@ -1131,10 +1131,26 @@ static void send_request(struct Qdisc *sch)
 out:
 	req_timer_sending_request(q, now_monotonic);
 
-	spin_unlock_bh(root_lock);
+	if (likely(pkt != NULL)) {
+		struct sock *sk = q->ctrl_sock->sk;
+		struct sk_buff *skb;
 
-	if (likely(pkt != NULL))
-		fpproto_send_packet(q->ctrl_sock->sk, pkt);
+		/* make the skb -- keep the lock here so the pkt_desc doesn't timeout
+		 * underneath us */
+		skb = fpproto_make_skb(sk, pkt);
+
+		/* unlock the qdisc so packets could traverse the stack */
+		spin_unlock_bh(root_lock);
+
+		/* send the packets */
+		if (likely(skb != NULL))
+			fpproto_send_skb(sk, skb);
+	} else {
+		/* remember to unlock even when not sending packets */
+		spin_unlock_bh(root_lock);
+	}
+
+	/* caution: no qdisc locked held at this point */
 
 	return;
 

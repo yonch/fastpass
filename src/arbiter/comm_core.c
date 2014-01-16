@@ -398,6 +398,7 @@ comm_rx(struct rte_mbuf *m, uint8_t portid)
 	struct end_node_state *en;
 	uint16_t ether_type;
 	uint16_t ip_total_len;
+	uint16_t ip_hdr_len;
 
 	eth_hdr = rte_pktmbuf_mtod(m, struct ether_hdr *);
 	ipv4_hdr = (struct ipv4_hdr *)(rte_pktmbuf_mtod(m, unsigned char *)
@@ -424,6 +425,7 @@ comm_rx(struct rte_mbuf *m, uint8_t portid)
 	}
 
 	ip_total_len = rte_be_to_cpu_16(ipv4_hdr->total_length);
+	ip_hdr_len = ipv4_hdr->version_ihl & 0xF;
 
 	if (unlikely(sizeof(struct ether_hdr) + ip_total_len > rte_pktmbuf_data_len(m))) {
 		comm_log_rx_truncated_pkt(ip_total_len, rte_pktmbuf_data_len(m),
@@ -431,6 +433,11 @@ comm_rx(struct rte_mbuf *m, uint8_t portid)
 		goto cleanup;
 	}
 
+	if (unlikely(ip_hdr_len < 5 || ip_total_len < 4 * ip_hdr_len)) {
+		comm_log_rx_truncated_pkt(ip_total_len, rte_pktmbuf_data_len(m),
+				ipv4_hdr->src_addr);
+		goto cleanup;
+	}
 
 	req_src = fp_map_ip_to_id(ipv4_hdr->src_addr);
 	en = &end_nodes[req_src];
@@ -738,7 +745,7 @@ void exec_comm_core(struct comm_core_cmd * cmd)
 	fp_init_timers(&core->tx_timers, rte_get_timer_cycles());
 
 	/* MAIN LOOP */
-	while (rte_get_timer_cycles() < cmd->end_time) {
+	while (1) {
 		/* read packets from RX queues */
 		do_rx_burst(qconf);
 

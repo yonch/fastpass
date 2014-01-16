@@ -43,7 +43,9 @@ void __exit fpproto_unregister(void);
 
 void fpproto_set_qdisc(struct sock *sk, struct Qdisc *new_qdisc);
 
-void fpproto_send_packet(struct sock *sk, struct fpproto_pktdesc *pkt);
+struct sk_buff *fpproto_make_skb(struct sock *sk, struct fpproto_pktdesc *pkt);
+
+void fpproto_send_skb(struct sock *sk, struct sk_buff *skb);
 
 static inline struct fastpass_hdr *fastpass_hdr(
 		const struct sk_buff *skb)

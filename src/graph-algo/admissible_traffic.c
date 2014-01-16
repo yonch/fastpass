@@ -132,6 +132,8 @@ static void process_new_requests(struct admissible_status *status,
         		core, status, current_bin);
     }
 
+    return;
+
 process_head:
     // Add new requests to the appropriate working bin
 	while (fp_ring_dequeue(status->q_head, (void **)&edge) == 0) {

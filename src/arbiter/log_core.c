@@ -54,6 +54,9 @@ void print_comm_log(uint16_t lcore_id)
 	if (cl->dequeue_admitted_failed)
 		printf("\n  %lu times couldn't dequeue a struct admitted_traffic!",
 				cl->dequeue_admitted_failed);
+	if (cl->error_encoding_packet)
+		printf("\n  %lu times couldn't encode packet (due to bug?)",
+				cl->error_encoding_packet);
 
 	printf("\n warnings:");
 	if (cl->alloc_fell_off_window)

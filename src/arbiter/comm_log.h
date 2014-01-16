@@ -47,6 +47,7 @@ struct comm_log {
 	uint64_t neg_acks_with_alloc;
 	uint64_t neg_ack_destinations;
 	uint64_t neg_ack_timeslots;
+	uint64_t error_encoding_packet;
 
 };
 
@@ -85,6 +86,14 @@ static inline void comm_log_tx_cannot_allocate_mbuf(uint32_t dst_ip) {
 	CL->tx_cannot_alloc_mbuf++;
 	COMM_DEBUG("core %d could not allocate TX mbuf for packet to IP "
 			"0x%Xu\n",rte_lcore_id(), rte_be_to_cpu_32(dst_ip));
+}
+
+static inline void comm_log_error_encoding_packet(uint32_t dst_ip,
+		uint16_t node_id, int32_t error_code) {
+	(void)dst_ip; (void)node_id; (void)error_code;
+	CL->error_encoding_packet++;
+	COMM_DEBUG("error encoding packet for node_id %d got error %d\n",
+			node_id, error_code);
 }
 
 static inline void comm_log_rx_non_ipv4_packet(uint8_t portid) {

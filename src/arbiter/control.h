@@ -13,7 +13,7 @@
 #define EXPT_RUN_MASK (LAUNCH_CONTROLLER_EXPT)
 
 #define N_CONTROLLER_PORTS		1
-#define N_ADMISSION_CORES		1
+#define N_ADMISSION_CORES		6
 #define N_PATH_SEL_CORES		0
 #define N_COMM_CORES			1
 #define N_LOG_CORES				1
@@ -31,7 +31,7 @@
 #define		INIT_MAX_TIME_NS		(200*1000*1000)
 
 /* how many seconds in between writes to log */
-#define		LOG_GAP_SECS		2
+#define		LOG_GAP_SECS		0.5
 
 #define RTE_LOGTYPE_CONTROL RTE_LOGTYPE_USER1
 #define CONTROL_DEBUG(a...) RTE_LOG(DEBUG, CONTROL, ##a)

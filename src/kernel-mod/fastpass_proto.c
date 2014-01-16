@@ -10,12 +10,14 @@
 #include <linux/kernel.h>
 #include <linux/errno.h>
 #include <linux/slab.h>
+#include <linux/netdevice.h>
 #include <net/protocol.h>
 #include <net/ip.h>
 #include <net/inet_common.h>
 #include <net/inet_hashtables.h>
 #include <net/sch_generic.h>
 #include <net/pkt_sched.h>
+#include <net/sock.h>
 
 #include "fastpass_proto.h"
 #include "../protocol/platform.h"
@@ -255,8 +257,8 @@ void fpproto_send_packet(struct sock *sk, struct fpproto_pktdesc *pd)
 {
 	struct fastpass_sock *fp = fastpass_sk(sk);
 	struct inet_sock *inet = inet_sk(sk);
-	const int max_header = sk->sk_prot->max_header;
 	int payload_len;
+	const int max_header = MAX_HEADER;
 	struct sk_buff *skb = NULL;
 	int err;
 	u8 *data;
@@ -271,11 +273,22 @@ void fpproto_send_packet(struct sock *sk, struct fpproto_pktdesc *pd)
 	/* set skb fastpass packet size */
 	skb_reset_transport_header(skb);
 
+	if (unlikely(pd->n_areq > FASTPASS_PKT_MAX_AREQ)) {
+		FASTPASS_CRIT("got n_areq larger than max! n_areq %d max %d send_reset %d seqno %llu\n",
+				pd->n_areq, FASTPASS_PKT_MAX_AREQ, pd->send_reset,
+				pd->seqno);
+	}
+
 	/* encode the packet from the descriptor */
 	data = &skb->data[0];
 	payload_len = fpproto_encode_packet(&fp->conn, pd, data, FASTPASS_MAX_PAYLOAD,
 			inet->inet_saddr, inet->inet_daddr, 26);
+
 	/* adjust the size of the skb based on encoded size */
+	if (unlikely((payload_len > FASTPASS_MAX_PAYLOAD) || (payload_len < 0)))
+		FASTPASS_CRIT("invalid packet encoding! len %d max %u n_areq %d send_reset %d seqno %llu\n",
+				payload_len, FASTPASS_MAX_PAYLOAD, pd->n_areq, pd->send_reset,
+				pd->seqno);
 	skb_put(skb, payload_len);
 
 	fp_debug("sending packet\n");

@@ -324,7 +324,7 @@ make_packet(struct end_node_state *en, struct fpproto_pktdesc *pd)
 	struct ipv4_hdr *ipv4_hdr;
 	unsigned char *payload_ptr;
 	uint32_t ipv4_length;
-	uint32_t data_len;
+	int32_t data_len;
 
 	// Allocate packet on the current socket
 	m = rte_pktmbuf_alloc(tx_pktmbuf_pool[socket_id]);
@@ -362,6 +362,9 @@ make_packet(struct end_node_state *en, struct fpproto_pktdesc *pd)
 	/* encode fastpass payload */
 	data_len = fpproto_encode_packet(&en->conn, pd, payload_ptr,
 			FASTPASS_MAX_PAYLOAD, en->controller_ip, en->dst_ip, 26);
+	if (data_len < 0) {
+		comm_log_error_encoding_packet(en->dst_ip, en - end_nodes, data_len);
+	}
 
 	/* adjust packet size */
 	ipv4_length = sizeof(struct ipv4_hdr) + data_len;

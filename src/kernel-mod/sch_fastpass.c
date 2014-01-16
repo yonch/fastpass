@@ -25,6 +25,7 @@
 #include <linux/time.h>
 #include <linux/bitops.h>
 #include <linux/version.h>
+#include <linux/ip.h>
 #include <net/netlink.h>
 #include <net/pkt_sched.h>
 #include <net/sock.h>
@@ -426,6 +427,7 @@ static struct fp_flow *fpq_classify(struct sk_buff *skb, struct fp_sched_data *q
 	__be16 proto = skb->protocol;
 	int nhoff = skb_network_offset(skb);
 	int band;
+	struct flow_keys keys;
 	u64 src_dst_key;
 
 	/* warning: no starvation prevention... */
@@ -447,6 +449,26 @@ static struct fp_flow *fpq_classify(struct sk_buff *skb, struct fp_sched_data *q
 		if (!iph || iph->ihl < 5)
 			goto cannot_classify;
 
+		if (!skb_flow_dissect(skb, &keys))
+			goto cannot_classify;
+
+
+#if LINUX_VERSION_CODE != KERNEL_VERSION(3,2,45)
+		/* special case for important packets, let through with high priority */
+		if (unlikely(keys.ip_proto == IPPROTO_UDP)) {
+			/* NTP packets */
+			if (unlikely(keys.port16[1] == htons(123))) {
+				q->stat.ntp_pkts++;
+				return &q->internal;
+			}
+			/* PTP packets are port 319,320 */
+			if (unlikely(((ntohs(keys.port16[1]) - 1) & ~1) == 318)) {
+				q->stat.ptp_pkts++;
+				return &q->internal;
+			}
+		}
+#endif
+
 		src_dst_key = iph->saddr;
 		break;
 	}
@@ -464,14 +486,6 @@ static struct fp_flow *fpq_classify(struct sk_buff *skb, struct fp_sched_data *q
 	default:
 		goto cannot_classify;
 	}
-
-#if 0
-	/* special case for NTP packets, let them through with high priority */
-	if (unlikely(keys.ip_proto == IPPROTO_UDP && keys.port16[1] == htons(123))) {
-		q->stat.ntp_pkts++;
-		return &q->internal;
-	}
-#endif
 
 	/* get the skb's key (src_dst_key) */
 	src_dst_key = fp_map_ip_to_id(src_dst_key);

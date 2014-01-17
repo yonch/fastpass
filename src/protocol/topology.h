@@ -11,7 +11,7 @@
 #define MAX_RACKS 16
 #define TOR_SHIFT 8  // number of machines per rack is at most 2^TOR_SHIFT
 #define MAX_NODES_PER_RACK 256  // = 2^TOR_SHIFT
-#define OUT_OF_BOUNDARY_NODE_ID MAX_NODES  // highest node id
+#define OUT_OF_BOUNDARY_NODE_ID (MAX_NODES-1)  // highest node id
 
 #define FB_RACK_PERFECT_HASH_CONST	0x33
 

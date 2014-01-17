@@ -62,19 +62,6 @@ struct end_node_state {
 	struct fp_pacer tx_pacer;
 };
 
-/*
- * Per-comm-core state
- * @alloc_enc_space: space used to encode ALLOCs, set to zeros when not inside
- *    the ALLOC code.
- */
-struct comm_core_state {
-	uint8_t alloc_enc_space[MAX_NODES * MAX_PATHS];
-	uint64_t latest_timeslot;
-
-	struct fp_timers timeout_timers;
-	struct fp_timers tx_timers;
-};
-
 /* whether we should output verbose debugging */
 bool fastpass_debug;
 
@@ -85,7 +72,7 @@ struct comm_log comm_core_logs[RTE_MAX_LCORE];
 static struct end_node_state end_nodes[MAX_NODES];
 
 /* per-core information */
-static struct comm_core_state core_state[RTE_MAX_LCORE];
+struct comm_core_state ccore_state[RTE_MAX_LCORE];
 
 /* fpproto_pktdesc pool */
 struct rte_mempool* pktdesc_pool[NB_SOCKETS];
@@ -143,10 +130,10 @@ void comm_init_core(uint16_t lcore_id, uint64_t first_time_slot)
 	socketid = rte_lcore_to_socket_id(lcore_id);
 
 	/* initialize the space for encoding ALLOCs */
-	memset(&core_state[lcore_id].alloc_enc_space, 0,
-			sizeof(core_state[lcore_id].alloc_enc_space));
+	memset(&ccore_state[lcore_id].alloc_enc_space, 0,
+			sizeof(ccore_state[lcore_id].alloc_enc_space));
 
-	core_state[lcore_id].latest_timeslot = first_time_slot - 1;
+	ccore_state[lcore_id].latest_timeslot = first_time_slot - 1;
 
 	/* initialize mempool for pktdescs */
 	if (pktdesc_pool[socketid] == NULL) {
@@ -210,7 +197,7 @@ static void set_retrans_timer(void *param, u64 when)
 	uint16_t node_id = en - end_nodes;
 	uint64_t now = rte_get_timer_cycles();
 	const unsigned lcore_id = rte_lcore_id();
-	struct comm_core_state *core = &core_state[lcore_id];
+	struct comm_core_state *core = &ccore_state[lcore_id];
 
 	COMM_DEBUG("setting timer now %lu when %llu (diff=%lld)\n", now, when, (when-now));
 	fp_timer_reset(&core->timeout_timers, &en->timeout_timer, when);
@@ -302,7 +289,7 @@ static void trigger_request(struct end_node_state *en)
 	uint64_t now = rte_get_timer_cycles();
 	u32 node_id = en - end_nodes;
 	const unsigned lcore_id = rte_lcore_id();
-	struct comm_core_state *core = &core_state[lcore_id];
+	struct comm_core_state *core = &ccore_state[lcore_id];
 
 	if (pacer_trigger(&en->tx_pacer, now)) {
 	  COMM_DEBUG("setting trigger timer now %lu when %llu (diff=%lld)\n", now, 
@@ -407,6 +394,8 @@ comm_rx(struct rte_mbuf *m, uint8_t portid)
 			     + sizeof(struct ether_hdr) + sizeof(struct ipv4_hdr));
 
 	ether_type = rte_be_to_cpu_16(eth_hdr->ether_type);
+
+	comm_log_rx_pkt(rte_pktmbuf_data_len(m));
 
 	if (unlikely(ether_type == ETHER_TYPE_ARP)) {
 		print_arp(m, portid);
@@ -663,7 +652,7 @@ out:
 static inline void tx_end_node(struct end_node_state *en)
 {
 	const unsigned lcore_id = rte_lcore_id();
-	struct comm_core_state *core = &core_state[lcore_id];
+	struct comm_core_state *core = &ccore_state[lcore_id];
 	uint32_t node_ind = en - end_nodes;
 	struct rte_mbuf *out_pkt;
 	struct fpproto_pktdesc *pd;
@@ -709,7 +698,7 @@ void exec_comm_core(struct comm_core_cmd * cmd)
 	uint8_t portid, queueid;
 	struct lcore_conf *qconf;
 	const unsigned lcore_id = rte_lcore_id();
-	struct comm_core_state *core = &core_state[lcore_id];
+	struct comm_core_state *core = &ccore_state[lcore_id];
 	struct list_head lst = LIST_HEAD_INIT(lst);
 	struct end_node_state *en;
 	uint64_t now;

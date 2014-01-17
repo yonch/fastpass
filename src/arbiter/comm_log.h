@@ -22,6 +22,7 @@
  */
 struct comm_log {
 	uint64_t rx_pkts;
+	uint64_t rx_bytes;
 	uint64_t rx_batches;
 	uint64_t rx_non_empty_batches;
 	uint64_t tx_cannot_alloc_mbuf;
@@ -79,6 +80,10 @@ static inline void comm_log_processed_batch(int nb_rx, uint64_t rx_time) {
 				rx_time, nb_rx, CL->rx_batches, CL->rx_pkts);
 		CL->rx_non_empty_batches++;
 	}
+}
+
+static inline void comm_log_rx_pkt(uint32_t size) {
+	CL->rx_bytes += size;
 }
 
 static inline void comm_log_tx_cannot_allocate_mbuf(uint32_t dst_ip) {

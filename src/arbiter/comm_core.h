@@ -6,6 +6,9 @@
 #include <rte_ip.h>
 #include "../protocol/fpproto.h"
 #include "../protocol/stat_print.h"
+#include "../graph-algo/admissible_structures.h"
+#include "fp_timer.h"
+#include "main.h"
 
 #define CONTROLLER_SEND_TIMEOUT_SECS 	0.0004
 
@@ -35,6 +38,20 @@ struct comm_core_cmd {
 
 	struct rte_ring *q_allocated;
 };
+
+/*
+ * Per-comm-core state
+ * @alloc_enc_space: space used to encode ALLOCs, set to zeros when not inside
+ *    the ALLOC code.
+ */
+struct comm_core_state {
+	uint8_t alloc_enc_space[MAX_NODES * MAX_PATHS];
+	uint64_t latest_timeslot;
+
+	struct fp_timers timeout_timers;
+	struct fp_timers tx_timers;
+};
+extern struct comm_core_state ccore_state[RTE_MAX_LCORE];
 
 static inline uint32_t controller_ip(void)
 {

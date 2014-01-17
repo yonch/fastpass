@@ -5,9 +5,9 @@
 #include "platform/generic.h"
 
 //#define MAX_NODES 1024
-//#define NODES_SHIFT 10  // 2^NODES_SHIFT = MAX_NODES
+//#define FP_NODES_SHIFT 10  // 2^FP_NODES_SHIFT = MAX_NODES
 #define MAX_NODES 256
-#define NODES_SHIFT 8  // 2^NODES_SHIFT = MAX_NODES
+#define FP_NODES_SHIFT 8  // 2^FP_NODES_SHIFT = MAX_NODES
 #define MAX_RACKS 16
 #define TOR_SHIFT 8  // number of machines per rack is at most 2^TOR_SHIFT
 #define MAX_NODES_PER_RACK 256  // = 2^TOR_SHIFT

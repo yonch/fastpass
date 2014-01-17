@@ -346,7 +346,7 @@ void reset_admissible_status(struct admissible_status *status, bool oversubscrib
 // Get the index of this flow in the status data structure
 static inline
 uint32_t get_status_index(uint16_t src, uint16_t dst) {
-    return (src << NODES_SHIFT) + dst;
+    return (src << FP_NODES_SHIFT) + dst;
 }
 
 // Resets the flow for this src/dst pair

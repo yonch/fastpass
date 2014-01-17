@@ -26,9 +26,10 @@
 void print_comm_log(uint16_t lcore_id)
 {
 	struct comm_log *cl = &comm_core_logs[lcore_id];
-	printf("\ncomm_log lcore %d", lcore_id);
-	printf("\n  RX %lu pkts in %lu batches (%lu non-empty batches)",
-			cl->rx_pkts, cl->rx_batches, cl->rx_non_empty_batches);
+	struct comm_core_state *ccs = &ccore_state[enabled_lcore[0]];
+	printf("\ncomm_log lcore %d timeslot 0x%lX", lcore_id, ccs->latest_timeslot);
+	printf("\n  RX %lu pkts, %lu bytes in %lu batches (%lu non-empty batches)",
+			cl->rx_pkts, cl->rx_bytes, cl->rx_batches, cl->rx_non_empty_batches);
 	printf("\n  %lu non-IPv4, %lu IPv4 non-fastpass",
 			cl->rx_non_ipv4_pkts, cl->rx_ipv4_non_fastpss_pkts);
 	printf("\n  %lu demand increases, %lu demand remained",

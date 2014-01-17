@@ -41,6 +41,7 @@
 #include "../protocol/platform.h"
 #include "../protocol/pacer.h"
 #include "../protocol/window.h"
+#include "../protocol/topology.h"
 
 /*
  * FastPass client qdisc
@@ -421,14 +422,28 @@ static struct fp_flow *fpq_lookup(struct fp_sched_data *q, u64 src_dst_key,
 	return f;
 }
 
+static inline u64 get_mac(struct sk_buff *skb)
+{
+	struct ethhdr *ethh;
+	u64 res;
+
+	ethh = (struct ethhdr *)skb_mac_header(skb);
+	res = ((u64)ntohs(*(__be16 *)&ethh->h_dest[0]) << 32)
+				 | ntohl(*(__be32 *)&ethh->h_dest[2]);
+//	FASTPASS_WARN("got ethernet %02X:%02X:%02X:%02X:%02X:%02X parsed 0x%012llX node_id %u\n",
+//			ethh->h_dest[0],ethh->h_dest[1],ethh->h_dest[2],ethh->h_dest[3],
+//			ethh->h_dest[4],ethh->h_dest[5], res, fp_map_mac_to_id(res));
+	return res;
+}
+
 /* returns the flow for the given packet, allocates a new flow if needed */
 static struct fp_flow *fpq_classify(struct sk_buff *skb, struct fp_sched_data *q)
 {
 	__be16 proto = skb->protocol;
-	int nhoff = skb_network_offset(skb);
 	int band;
 	struct flow_keys keys;
 	u64 src_dst_key;
+	u64 masked_mac;
 
 	/* warning: no starvation prevention... */
 	band = prio2band[skb->priority & TC_PRIO_MAX];
@@ -440,69 +455,68 @@ static struct fp_flow *fpq_classify(struct sk_buff *skb, struct fp_sched_data *q
 		return &q->internal;
 	}
 
+	// ARP packets should not count as classify errors
 	switch (proto) {
-	case __constant_htons(ETH_P_IP): {
-		const struct iphdr *iph;
-		struct iphdr _iph;
+	case __constant_htons(ETH_P_ARP):
+		q->stat.arp_pkts++;
+		return &q->internal;
 
-		iph = skb_header_pointer(skb, nhoff, sizeof(_iph), &_iph);
-		if (!iph || iph->ihl < 5)
-			goto cannot_classify;
-
-		if (!skb_flow_dissect(skb, &keys))
-			goto cannot_classify;
-
-
-#if LINUX_VERSION_CODE != KERNEL_VERSION(3,2,45)
-		/* special case for important packets, let through with high priority */
-		if (unlikely(keys.ip_proto == IPPROTO_UDP)) {
-			/* NTP packets */
-			if (unlikely(keys.port16[1] == htons(123))) {
-				q->stat.ntp_pkts++;
-				return &q->internal;
-			}
-			/* PTP packets are port 319,320 */
-			if (unlikely(((ntohs(keys.port16[1]) - 1) & ~1) == 318)) {
-				q->stat.ptp_pkts++;
-				return &q->internal;
-			}
+	case __constant_htons(ETH_P_1588):
+	case __constant_htons(ETH_P_ALL):
+		/* Special case the PTP broadcasts: MAC 01:1b:19:00:00:00 */
+		if (likely(get_mac(skb) == 0x011b19000000)) {
+			q->stat.ptp_pkts++;
+			return &q->internal;
 		}
-#endif
+		goto cannot_classify;
 
-		src_dst_key = iph->saddr;
-		break;
-	}
-	case __constant_htons(ETH_P_IPV6): {
-		const struct ipv6hdr *iph;
-		struct ipv6hdr _iph;
+	case __constant_htons(ETH_P_IPV6):
+	case __constant_htons(ETH_P_IP):
+		goto ipv4_ipv6;
 
-		iph = skb_header_pointer(skb, nhoff, sizeof(_iph), &_iph);
-		if (!iph)
-			goto cannot_classify;
-
-		src_dst_key = iph->saddr.in6_u.u6_addr32[3];
-		break;
-	}
 	default:
 		goto cannot_classify;
 	}
 
+ipv4_ipv6:
+	/* special cases for PTP and NTP over IP */
+	if (!skb_flow_dissect(skb, &keys))
+		goto cannot_classify;
+
+	/* special case for important packets, let through with high priority */
+	if (unlikely(keys.ip_proto == IPPROTO_UDP)) {
+		/* NTP packets */
+		if (unlikely(keys.port16[1] == htons(123))) {
+			q->stat.ntp_pkts++;
+			return &q->internal;
+		}
+		/* PTP packets are port 319,320 */
+		if (unlikely(((ntohs(keys.port16[1]) - 1) & ~1) == 318)) {
+			q->stat.ptp_pkts++;
+			return &q->internal;
+		}
+	}
+
+	/* get MAC address */
+	src_dst_key = get_mac(skb);
+
 	/* get the skb's key (src_dst_key) */
-	src_dst_key = fp_map_ip_to_id(src_dst_key);
+	masked_mac = src_dst_key & MANUFACTURER_MAC_MASK;
+	if (unlikely((masked_mac == VRRP_SWITCH_MAC_PREFIX)
+			  || (masked_mac == CISCO_SWITCH_MAC_PREFIX)))
+		src_dst_key = OUT_OF_BOUNDARY_NODE_ID;
+	else
+		src_dst_key = fp_map_mac_to_id(src_dst_key);
 
 	q->stat.data_pkts++;
 	return fpq_lookup(q, src_dst_key, true);
 
 cannot_classify:
-	// ARP packets should not count as classify errors
-	if (unlikely(skb->protocol != htons(ETH_P_ARP))) {
-		q->stat.classify_errors++;
-		fp_debug("cannot classify packet with protocol %u:\n", skb->protocol);
-		print_hex_dump(KERN_DEBUG, "cannot classify: ", DUMP_PREFIX_OFFSET,
-				16, 1, skb->data, min_t(size_t, skb->len, 64), false);
-	} else {
-		q->stat.arp_pkts++;
-	}
+	q->stat.classify_errors++;
+	fp_debug("cannot classify packet with protocol %u:\n", skb->protocol);
+	print_hex_dump(KERN_DEBUG, "cannot classify: ", DUMP_PREFIX_OFFSET,
+			16, 1, skb->data, min_t(size_t, skb->len, 64), false);
+
 	return &q->internal;
 }
 

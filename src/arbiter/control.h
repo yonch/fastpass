@@ -13,7 +13,7 @@
 #define EXPT_RUN_MASK (LAUNCH_CONTROLLER_EXPT)
 
 #define N_CONTROLLER_PORTS		1
-#define N_ADMISSION_CORES		6
+#define N_ADMISSION_CORES		4
 #define N_PATH_SEL_CORES		0
 #define N_COMM_CORES			1
 #define N_LOG_CORES				1
@@ -21,11 +21,11 @@
 #define NUM_RACKS				1
 
 /* how many timeslots before allocated timeslot to start processing it */
-#define		PREALLOC_DURATION_TIMESLOTS		10
+#define		PREALLOC_DURATION_TIMESLOTS		40
 
 /* getting timeslot from time is ((NOW_NS * MUL) >> SHIFT) */
 #define		TIMESLOT_MUL		1
-#define		TIMESLOT_SHIFT		13
+#define		TIMESLOT_SHIFT		11
 
 /* give the controller some time to initialize before starting allocation */
 #define		INIT_MAX_TIME_NS		(200*1000*1000)

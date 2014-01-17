@@ -22,6 +22,7 @@
  */
 struct comm_log {
 	uint64_t rx_pkts;
+	uint64_t rx_bytes;
 	uint64_t rx_batches;
 	uint64_t rx_non_empty_batches;
 	uint64_t tx_cannot_alloc_mbuf;
@@ -79,6 +80,10 @@ static inline void comm_log_processed_batch(int nb_rx, uint64_t rx_time) {
 				rx_time, nb_rx, CL->rx_batches, CL->rx_pkts);
 		CL->rx_non_empty_batches++;
 	}
+}
+
+static inline void comm_log_rx_pkt(uint32_t size) {
+	CL->rx_bytes += size;
 }
 
 static inline void comm_log_tx_cannot_allocate_mbuf(uint32_t dst_ip) {
@@ -174,9 +179,9 @@ static inline void comm_log_got_admitted_tslot(uint16_t size, uint64_t timeslot)
 
 #ifdef CONFIG_IP_FASTPASS_DEBUG
 		uint64_t now = fp_get_time_ns(); /* TODO: disable this */
-		COMM_DEBUG("admitted_traffic for %d nodes (tslot %lu, now %lu, diff %ld, counter %lu)\n",
+		COMM_DEBUG("admitted_traffic for %d nodes (tslot %lu, now %lu, diff_tslots %ld, counter %lu)\n",
 				size, timeslot, now,
-				(int64_t)(timeslot * TIMESLOT_LENGTH_NS - now),
+				(int64_t)(timeslot - ((now * TIMESLOT_MUL) >> TIMESLOT_SHIFT)),
 				CL->processed_tslots);
 #endif
 	}

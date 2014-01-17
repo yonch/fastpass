@@ -17,14 +17,15 @@
 #include "atomic.h"
 #include "fp_ring.h"
 #include "platform.h"
+#include "../protocol/topology.h"
 
-#define MAX_NODES 1024
-#define NODES_SHIFT 10  // 2^NODES_SHIFT = MAX_NODES
-//#define MAX_NODES 256
-//#define NODES_SHIFT 8  // 2^NODES_SHIFT = MAX_NODES
-#define MAX_RACKS 16
-#define TOR_SHIFT 5  // number of machines per rack is at most 2^TOR_SHIFT
-#define MAX_NODES_PER_RACK 32  // = 2^TOR_SHIFT
+//#define MAX_NODES 1024
+//#define NODES_SHIFT 10  // 2^NODES_SHIFT = MAX_NODES
+////#define MAX_NODES 256
+////#define NODES_SHIFT 8  // 2^NODES_SHIFT = MAX_NODES
+//#define MAX_RACKS 16
+//#define TOR_SHIFT 5  // number of machines per rack is at most 2^TOR_SHIFT
+//#define MAX_NODES_PER_RACK 32  // = 2^TOR_SHIFT
 #define BATCH_SIZE 64  // must be consistent with bitmaps in batch_state
 #define BATCH_SHIFT 6  // 2^BATCH_SHIFT = BATCH_SIZE
 #define NONE_AVAILABLE 251
@@ -33,9 +34,8 @@
 #define LARGE_BIN_SIZE (MAX_NODES * MAX_NODES) // TODO: try smaller values
 #define NUM_BINS_SHIFT 8
 #define NUM_BINS 256 // 2^NUM_BINS_SHIFT
-#define NUM_CORES 1
 #define NUM_SRC_DST_PAIRS (MAX_NODES * (MAX_NODES + 1))  // include dst == out of boundary
-#define OUT_OF_BOUNDARY_NODE_ID MAX_NODES  // highest node id
+//#define OUT_OF_BOUNDARY_NODE_ID MAX_NODES  // highest node id
 #define MAX_DSTS MAX_NODES + 1  // include dst == out of boundary
 #define MAX_SRCS MAX_NODES
 
@@ -354,7 +354,7 @@ void reset_admissible_status(struct admissible_status *status, bool oversubscrib
 // Get the index of this flow in the status data structure
 static inline
 uint32_t get_status_index(uint16_t src, uint16_t dst) {
-    return (src << NODES_SHIFT) + dst;
+    return (src << FP_NODES_SHIFT) + dst;
 }
 
 // Resets the flow for this src/dst pair

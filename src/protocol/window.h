@@ -216,8 +216,8 @@ static inline u64 wnd_earliest_marked(struct fp_window *wnd)
 	result = (wnd->head & ~(BITS_PER_LONG-1)) - (word_offset * BITS_PER_LONG)
 			+ __ffs(tmp);
 
-	FASTPASS_BUG_ON(!wnd_is_marked(wnd, result));
-	FASTPASS_BUG_ON(wnd_at_or_before(wnd, result - 1) != -1);
+	// FASTPASS_BUG_ON(!wnd_is_marked(wnd, result));
+	// FASTPASS_BUG_ON(wnd_at_or_before(wnd, result - 1) != -1);
 
 	return result;
 }

@@ -41,6 +41,7 @@
 #include "../protocol/platform.h"
 #include "../protocol/pacer.h"
 #include "../protocol/window.h"
+#include "../protocol/topology.h"
 
 /*
  * FastPass client qdisc
@@ -429,6 +430,8 @@ static struct fp_flow *fpq_classify(struct sk_buff *skb, struct fp_sched_data *q
 	int band;
 	struct flow_keys keys;
 	u64 src_dst_key;
+	struct ethhdr *ethh;
+	u64 masked_mac;
 
 	/* warning: no starvation prevention... */
 	band = prio2band[skb->priority & TC_PRIO_MAX];
@@ -440,8 +443,8 @@ static struct fp_flow *fpq_classify(struct sk_buff *skb, struct fp_sched_data *q
 		return &q->internal;
 	}
 
-	switch (proto) {
-	case __constant_htons(ETH_P_IP): {
+	/* special cases for PTP and NTP over IP */
+	if (proto == __constant_htons(ETH_P_IP)) {
 		const struct iphdr *iph;
 		struct iphdr _iph;
 
@@ -451,9 +454,6 @@ static struct fp_flow *fpq_classify(struct sk_buff *skb, struct fp_sched_data *q
 
 		if (!skb_flow_dissect(skb, &keys))
 			goto cannot_classify;
-
-
-#if LINUX_VERSION_CODE != KERNEL_VERSION(3,2,45)
 		/* special case for important packets, let through with high priority */
 		if (unlikely(keys.ip_proto == IPPROTO_UDP)) {
 			/* NTP packets */
@@ -467,28 +467,29 @@ static struct fp_flow *fpq_classify(struct sk_buff *skb, struct fp_sched_data *q
 				return &q->internal;
 			}
 		}
-#endif
-
-		src_dst_key = iph->saddr;
-		break;
 	}
-	case __constant_htons(ETH_P_IPV6): {
-		const struct ipv6hdr *iph;
-		struct ipv6hdr _iph;
 
-		iph = skb_header_pointer(skb, nhoff, sizeof(_iph), &_iph);
-		if (!iph)
-			goto cannot_classify;
+	/* get MAC address */
+	ethh = (struct ethhdr *)skb_mac_header(skb);
+	src_dst_key = ((u64)ntohs(*(__be16 *)&ethh->h_dest[0]) << 32)
+				 | ntohl(*(__be32 *)&ethh->h_dest[2]);
+	FASTPASS_WARN("got ethernet %02X:%02X:%02X:%02X:%02X:%02X parsed 0x%012llX\n",
+			ethh->h_dest[0],ethh->h_dest[1],ethh->h_dest[2],ethh->h_dest[3],
+			ethh->h_dest[4],ethh->h_dest[5], src_dst_key);
 
-		src_dst_key = iph->saddr.in6_u.u6_addr32[3];
-		break;
-	}
-	default:
-		goto cannot_classify;
+	/* Special case the PTP broadcasts: MAC 01:1b:19:00:00:00 */
+	if (unlikely(src_dst_key == 0x011b19000000)) {
+		q->stat.ptp_pkts++;
+		return &q->internal;
 	}
 
 	/* get the skb's key (src_dst_key) */
-	src_dst_key = fp_map_ip_to_id(src_dst_key);
+	masked_mac = src_dst_key & MANUFACTURER_MAC_MASK;
+	if (unlikely((masked_mac == VRRP_SWITCH_MAC_PREFIX)
+			  || (masked_mac == CISCO_SWITCH_MAC_PREFIX)))
+		src_dst_key = OUT_OF_BOUNDARY_NODE_ID;
+	else
+		src_dst_key = fp_map_mac_to_id(src_dst_key);
 
 	q->stat.data_pkts++;
 	return fpq_lookup(q, src_dst_key, true);

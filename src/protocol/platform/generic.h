@@ -21,6 +21,8 @@
 	 time_before_eq64(a, c))
 #endif
 
+#define fp_jhash_3words 	jhash_3words
+
 #else
 
 #include <stdio.h>

@@ -71,10 +71,6 @@ void launch_cores(void)
 	uint64_t now;
 	struct rte_ring *q_admitted;
 	struct rte_ring *q_path_selected;
-	uint16_t first_comm_core = 0;
-	uint16_t first_admission_core = first_comm_core + N_COMM_CORES;
-	uint16_t first_path_sel_core = first_admission_core + N_ADMISSION_CORES;
-	uint16_t first_log_core = first_path_sel_core + N_PATH_SEL_CORES;
 
 	rte_timer_subsystem_init();
 
@@ -101,7 +97,7 @@ void launch_cores(void)
 		rte_exit(EXIT_FAILURE,
 				"Cannot init q_admitted: %s\n", rte_strerror(rte_errno));
 
-	/* create q_admitted_out */
+	/* create q_path_selected_out */
 	q_path_selected = rte_ring_create("q_path_selected",
 			2 * ADMITTED_TRAFFIC_MEMPOOL_SIZE, 0, 0);
 	if (q_path_selected == NULL)
@@ -123,17 +119,17 @@ void launch_cores(void)
 	/* launch admission core */
 	if (N_PATH_SEL_CORES > 0)
 		rte_eal_remote_launch(exec_path_sel_core, &path_sel_cmd,
-				enabled_lcore[first_path_sel_core]);
+				enabled_lcore[FIRST_PATH_SEL_CORE]);
 
 	/*** ADMISSION CORES ***/
 	/* initialize core structures */
 	for (i = 0; i < N_ADMISSION_CORES; i++) {
-		uint16_t lcore_id = enabled_lcore[first_admission_core + i];
+		uint16_t lcore_id = enabled_lcore[FIRST_ADMISSION_CORE + i];
 		admission_init_core(lcore_id);
 	}
 
 	for (i = 0; i < N_ADMISSION_CORES; i++) {
-		uint16_t lcore_id = enabled_lcore[first_admission_core + i];
+		uint16_t lcore_id = enabled_lcore[FIRST_ADMISSION_CORE + i];
 
 		/* set commands */
 		admission_cmd[i].start_time = start_time;
@@ -150,7 +146,7 @@ void launch_cores(void)
 
 	/* launch log core */
 	rte_eal_remote_launch(exec_log_core, &log_cmd,
-			enabled_lcore[first_log_core]);
+			enabled_lcore[FIRST_LOG_CORE]);
 
 	/*** COMM CORES ***/
 	// Set commands

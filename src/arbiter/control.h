@@ -18,6 +18,13 @@
 #define N_COMM_CORES			1
 #define N_LOG_CORES				1
 
+/* Core indices */
+#define FIRST_COMM_CORE			0
+#define FIRST_ADMISSION_CORE	(FIRST_COMM_CORE + N_COMM_CORES)
+#define FIRST_PATH_SEL_CORE		(FIRST_ADMISSION_CORE + N_ADMISSION_CORES)
+#define FIRST_LOG_CORE			(FIRST_PATH_SEL_CORE + N_PATH_SEL_CORES)
+
+
 #define NUM_RACKS				1
 
 /* how many timeslots before allocated timeslot to start processing it */

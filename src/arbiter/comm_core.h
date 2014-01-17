@@ -14,7 +14,7 @@
 
 /* The maximum number of admitted time-slots to process in a batch before
  *   sending and receiving packets */
-#define MAX_ADMITTED_PER_LOOP		8
+#define MAX_ADMITTED_PER_LOOP		(4*BATCH_SIZE)
 
 /* maximum number of paths possible */
 #define MAX_PATHS					4
@@ -24,6 +24,9 @@
 #define NODE_MAX_BURST				1.5
 /* minimum time between packets */
 #define NODE_MIN_TRIGGER_GAP_SEC	1e-6
+
+/* The buffer size when writing to q_head */
+#define Q_HEAD_WRITE_BUFFER_SIZE		(32*1024)
 
 /**
  * Specifications for controller thread
@@ -50,6 +53,8 @@ struct comm_core_state {
 
 	struct fp_timers timeout_timers;
 	struct fp_timers tx_timers;
+	void *q_head_write_buffer[Q_HEAD_WRITE_BUFFER_SIZE];
+	uint32_t q_head_buf_len;
 };
 extern struct comm_core_state ccore_state[RTE_MAX_LCORE];
 

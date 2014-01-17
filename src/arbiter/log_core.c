@@ -13,6 +13,7 @@
 #include "control.h"
 #include "comm_core.h"
 #include "admission_core.h"
+#include "admission_log.h"
 #include "../protocol/fpproto.h"
 #include "../protocol/platform.h"
 #include "../graph-algo/admissible_structures.h"
@@ -23,11 +24,32 @@
 #define RTE_LOGTYPE_LOGGING RTE_LOGTYPE_USER1
 #define LOGGING_ERR(a...) RTE_LOG(CRIT, LOGGING, ##a)
 
+static struct comm_log saved_comm_log;
+
 void print_comm_log(uint16_t lcore_id)
 {
 	struct comm_log *cl = &comm_core_logs[lcore_id];
+	struct comm_log *sv = &saved_comm_log;
 	struct comm_core_state *ccs = &ccore_state[enabled_lcore[0]];
-	printf("\ncomm_log lcore %d timeslot 0x%lX", lcore_id, ccs->latest_timeslot);
+	u64 now_real = fp_get_time_ns();
+	u64 now_timeslot = (now_real * TIMESLOT_MUL) >> TIMESLOT_SHIFT;
+
+	printf("\ncomm_log lcore %d timeslot 0x%lX (now_timeslot 0x%llX, now - served %lld)",
+			lcore_id, ccs->latest_timeslot, now_timeslot,
+			(s64)(now_timeslot - ccs->latest_timeslot));
+
+#define D(X) (cl->X - sv->X)
+	printf("\n  RX %lu pkts, %lu bytes in %lu batches (%lu non-empty batches)",
+			D(rx_pkts), D(rx_bytes), D(rx_batches), D(rx_non_empty_batches));
+	printf("\n  %lu demand increases, %lu demand remained, %lu neg-ack with alloc, %lu demands",
+			D(demand_increased), D(demand_remained), D(neg_acks_with_alloc),
+			D(neg_ack_timeslots));
+	printf("\n  processed %lu tslots (%lu non-empty) with %lu node-tslots",
+			D(processed_tslots), D(non_empty_tslots), D(occupied_node_tslots));
+	printf("\n  TX %lu pkts, %lu triggers", D(tx_pkt), D(triggered_send));
+#undef D
+	printf("\n");
+
 	printf("\n  RX %lu pkts, %lu bytes in %lu batches (%lu non-empty batches)",
 			cl->rx_pkts, cl->rx_bytes, cl->rx_batches, cl->rx_non_empty_batches);
 	printf("\n  %lu non-IPv4, %lu IPv4 non-fastpass",
@@ -62,7 +84,31 @@ void print_comm_log(uint16_t lcore_id)
 	printf("\n warnings:");
 	if (cl->alloc_fell_off_window)
 		printf("\n  %lu alloc fell off window", cl->alloc_fell_off_window);
+	if (cl->flush_buffer_in_add_backlog)
+		printf("\n  %lu buffer flushes in add backlog (buffer might be too small)",
+				cl->flush_buffer_in_add_backlog);
 	printf("\n");
+
+	memcpy(&saved_comm_log, &comm_core_logs[lcore_id], sizeof(saved_comm_log));
+
+}
+
+void print_global_admission_log() {
+	struct admission_statistics *st = &g_admissible_status.stat;
+	printf("\nadmission core");
+	printf("\n  enqueue waits: %lu q_head, %lu q_urgent, %lu q_admitted, %lu q_bin",
+			st->wait_for_space_in_q_head, st->wait_for_space_in_q_urgent,
+			st->wait_for_space_in_q_admitted_out, st->wait_for_space_in_q_bin_out);
+	printf("\n  %lu delay in passing token", st->waiting_to_pass_token);
+	printf("\n  %lu pacing wait", st->pacing_wait);
+	printf("\n  %lu wait for q_bin_in", st->wait_for_q_bin_in);
+	printf("\n");
+}
+
+void print_admission_core_log(uint16_t lcore) {
+	struct admission_log *al = &admission_core_logs[lcore];
+	printf("admission lcore %d: %lu failed alloc\n",
+			lcore, al->failed_admitted_traffic_alloc);
 }
 
 int exec_log_core(void *void_cmd_p)
@@ -85,12 +131,20 @@ int exec_log_core(void *void_cmd_p)
 		return -1;
 	}
 
+	/* copy baseline statistics */
+	memcpy(&saved_comm_log, &comm_core_logs[enabled_lcore[FIRST_COMM_CORE]],
+			sizeof(saved_comm_log));
+
 	while (1) {
 		/* wait until proper time */
 		while (next_ticks > rte_get_timer_cycles())
 			rte_pause();
 
-		print_comm_log(enabled_lcore[0]);
+		print_comm_log(enabled_lcore[FIRST_COMM_CORE]);
+		print_global_admission_log();
+		for (i = 0; i < N_ADMISSION_CORES; i++)
+			print_admission_core_log(enabled_lcore[FIRST_ADMISSION_CORE+i]);
+		fflush(stdout);
 
 		/* write log */
 //		for (i = 0; i < MAX_NODES; i++) {

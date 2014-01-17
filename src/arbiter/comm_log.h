@@ -49,7 +49,7 @@ struct comm_log {
 	uint64_t neg_ack_destinations;
 	uint64_t neg_ack_timeslots;
 	uint64_t error_encoding_packet;
-
+	uint64_t flush_buffer_in_add_backlog;
 };
 
 extern struct comm_log comm_core_logs[RTE_MAX_LCORE];
@@ -241,6 +241,10 @@ static inline void comm_log_neg_ack(uint16_t src, uint16_t n_dsts,
 	CL->neg_ack_timeslots += n_tslots;
 	COMM_DEBUG("neg ack node %d seqno %lX affected %d dsts %u timeslots\n",
 			src, seqno, n_dsts, n_tslots);
+}
+
+static inline void comm_log_flushed_buffer_in_add_backlog() {
+	CL->flush_buffer_in_add_backlog++;
 }
 
 #undef CL

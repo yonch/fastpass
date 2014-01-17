@@ -135,6 +135,8 @@ void comm_init_core(uint16_t lcore_id, uint64_t first_time_slot)
 
 	ccore_state[lcore_id].latest_timeslot = first_time_slot - 1;
 
+	ccore_state[lcore_id].q_head_buf_len = 0;
+
 	/* initialize mempool for pktdescs */
 	if (pktdesc_pool[socketid] == NULL) {
 		rte_snprintf(s, sizeof(s), "pktdesc_pool_%d", socketid);
@@ -205,10 +207,47 @@ static void set_retrans_timer(void *param, u64 when)
 	comm_log_set_timer(node_id, when, when - now);
 }
 
+static void flush_q_head_buffer(struct comm_core_state *core)
+{
+	uint32_t remaining = core->q_head_buf_len;
+	void **edge_p = &core->q_head_write_buffer[0];
+	int rc;
+
+	while(remaining > 0) {
+		rc = rte_ring_enqueue_burst(g_admissible_status.q_head,
+				edge_p, remaining);
+		if (unlikely(rc < 0))
+			rte_exit(EXIT_FAILURE, "got negative value (%d) from rte_ring_enqueue_burst, should never happen\n", rc);
+		remaining -= rc;
+		edge_p += rc;
+	}
+
+	core->q_head_buf_len = 0;
+}
+
+
+static void add_backlog_buffered(struct comm_core_state *core,
+		struct admissible_status *status, uint16_t src, uint16_t dst,
+        uint16_t demand_tslots)
+{
+	void *edge;
+
+	if (add_backlog_no_enqueue(status, src, dst, demand_tslots, &edge) == true) {
+		/* need to add to q_head, will do so through buffer */
+		core->q_head_write_buffer[core->q_head_buf_len++] = edge;
+
+		if (unlikely(core->q_head_buf_len == Q_HEAD_WRITE_BUFFER_SIZE)) {
+			flush_q_head_buffer(core);
+			comm_log_flushed_buffer_in_add_backlog();
+		}
+	}
+}
+
 static void handle_areq(void *param, u16 *dst_and_count, int n)
 {
 	int i;
 	struct end_node_state *en = (struct end_node_state *)param;
+	struct comm_core_state *core = &ccore_state[rte_lcore_id()];
 	u16 dst, count;
 	u32 demand;
 	u32 orig_demand;
@@ -232,7 +271,8 @@ static void handle_areq(void *param, u16 *dst_and_count, int n)
 		demand_diff = (s32)demand - (s32)orig_demand;
 		if (demand_diff > 0) {
 			comm_log_demand_increased(node_id, dst, orig_demand, demand, demand_diff);
-			add_backlog(&g_admissible_status, node_id, dst, demand_diff);
+			add_backlog_buffered(core, &g_admissible_status,
+					node_id, dst, demand_diff);
 			en->demands[dst] = demand;
 			num_increases++;
 		} else {
@@ -258,6 +298,7 @@ static void handle_reset(void *param)
 static void handle_neg_ack(void *param, struct fpproto_pktdesc *pd)
 {
 	struct end_node_state *en = (struct end_node_state *)param;
+	struct comm_core_state *core = &ccore_state[rte_lcore_id()];
 	uint16_t node_id = en - end_nodes;
 	uint32_t total_timeslots = 0;
 	uint16_t dst;
@@ -267,7 +308,7 @@ static void handle_neg_ack(void *param, struct fpproto_pktdesc *pd)
 	for (i = 0; i < pd->n_dsts; i++) {
 		dst = pd->dsts[i] % NUM_NODES;
 		dst_count = pd->dst_counts[i];
-		add_backlog(&g_admissible_status, node_id, dst, dst_count);
+		add_backlog_buffered(core, &g_admissible_status, node_id, dst, dst_count);
 		total_timeslots += dst_count;
 		comm_log_neg_ack_increased_backlog(node_id, dst, dst_count, pd->seqno);
 	}
@@ -542,7 +583,7 @@ static inline void process_allocated_traffic(struct comm_core_state *core,
 				tslot -= gap;
 				uint16_t thrown_alloc = en->allocs[wnd_pos(tslot)];
 				/* throw away that timeslot, but make sure we reallocate */
-				add_backlog(&g_admissible_status, src,
+				add_backlog_buffered(core, &g_admissible_status, src,
 						thrown_alloc % MAX_NODES, 1);
 				wnd_clear(wnd, tslot);
 
@@ -763,6 +804,10 @@ void exec_comm_core(struct comm_core_cmd * cmd)
 
 		/* Process newly allocated timeslots */
 		process_allocated_traffic(core, cmd->q_allocated);
+
+		/* RX, retrans timers, and new traffic might push traffic into the
+		 * q_head buffer; flush it now. */
+		flush_q_head_buffer(core);
 
 		/* process tx timers */
 		fp_timer_get_expired(&core->tx_timers, now, &lst);

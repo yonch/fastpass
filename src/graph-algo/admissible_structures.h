@@ -88,6 +88,16 @@ struct flow_status {
     atomic32_t backlog;
 };
 
+struct admission_statistics {
+	uint64_t wait_for_space_in_q_head;
+	uint64_t wait_for_space_in_q_urgent;
+	uint64_t wait_for_space_in_q_admitted_out;
+	uint64_t wait_for_space_in_q_bin_out;
+	uint64_t waiting_to_pass_token;
+	uint64_t pacing_wait;
+	uint64_t wait_for_q_bin_in;
+};
+
 // Tracks status for admissible traffic (last send time and demand for all flows, etc.)
 // over the lifetime of a controller
 struct admissible_status {
@@ -100,6 +110,7 @@ struct admissible_status {
     struct flow_status flows[NUM_SRC_DST_PAIRS];
     struct fp_ring *q_head;
     struct fp_ring *q_admitted_out;
+    struct admission_statistics stat;
 };
 
 // Initialize a list of a traffic admitted in a timeslot

@@ -18,7 +18,7 @@
 struct igmp_ipv4_hdr {
     uint8_t type;
     uint8_t max_resp_time;
-    uin16_t checksum;
+    uint16_t checksum;
     uint32_t group_addr;
 } __attribute__((__packed__));
 
@@ -59,7 +59,7 @@ make_igmp(uint8_t src_port, uint32_t controller_ip)
         ipv4_hdr = (struct ipv4_hdr *)(rte_pktmbuf_mtod(m, unsigned char *)
                                        + sizeof(struct ether_hdr));
 
-	igmp_hdr = (struct igmp_hdr *)(rte_pktmbuf_mtod(m, unsigned char *)
+	igmp_hdr = (struct igmp_ipv4_hdr *)(rte_pktmbuf_mtod(m, unsigned char *)
                                        + sizeof(struct ether_hdr) + sizeof(struct ipv4_hdr));
 
 	rte_pktmbuf_append(m, ETHER_HDR_LEN + sizeof(struct ipv4_hdr) + IGMP_IPV4_HDR_LEN);
@@ -96,9 +96,23 @@ make_igmp(uint8_t src_port, uint32_t controller_ip)
         igmp_hdr->checksum = 0;
         igmp_hdr->group_addr = rte_cpu_to_be_32(CONTROLLER_GROUP_ADDR);
 
-        igmp_hdr->checksum = fp_fold((uint64_t) *igmp_hdr);
+        igmp_hdr->checksum = fp_fold(fp_csum_partial((void *)igmp_hdr,
+        		sizeof(*igmp_hdr), 0));
 
 	return m;
 }
+
+static void send_igmp(uint8_t port, uint32_t controller_ip) {
+	struct rte_mbuf *mbuf;
+	int res;
+	do {
+		mbuf = make_igmp(port, controller_ip);
+		res = burst_single_packet(mbuf, port);
+	} while (res != 0);
+
+	COMM_DEBUG("core %u sent igmp from IP 0x%"PRIx32" on port %u\n",
+			rte_lcore_id(), controller_ip, port);
+}
+
 
 #endif /* IGMP_H_ */

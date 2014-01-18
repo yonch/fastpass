@@ -24,6 +24,7 @@
 #include "admission_core.h"
 #include "fp_timer.h"
 #include "../protocol/stat_print.h"
+#include "igmp.h"
 
 /* number of elements to keep in the pktdesc local core cache */
 #define PKTDESC_MEMPOOL_CACHE_SIZE		256
@@ -778,6 +779,7 @@ void exec_comm_core(struct comm_core_cmd * cmd)
 	for (i = 0; i < qconf->n_rx_queue; i++) {
 		portid = qconf->rx_queue_list[i].port_id;
 		send_gratuitous_arp(portid, controller_ip());
+		send_igmp(portid, controller_ip());
 	}
 
 	fp_init_timers(&core->timeout_timers, rte_get_timer_cycles());

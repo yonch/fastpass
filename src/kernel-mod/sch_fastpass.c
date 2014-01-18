@@ -88,6 +88,7 @@ struct fp_flow {
 	u64		requested_tslots;	/* highest requested timeslots */
 	u64		acked_tslots;		/* highest requested timeslots that was acked*/
 	u64		alloc_tslots;		/* total received allocations */
+	u64		used_tslots;		/* timeslots in which packets moved */
 	int		qlen;				/* number of packets in flow queue */
 
 	s64		credit;				/* time remaining in the last scheduled timeslot */
@@ -155,6 +156,7 @@ struct fp_sched_data {
 	u64		requested_tslots;	/* highest requested timeslots */
 	u64		alloc_tslots;		/* total received allocations */
 	u64		acked_tslots;		/* total acknowledged requests */
+	u64		used_tslots;
 
 	/* statistics */
 	struct fp_sched_stat stat;
@@ -163,7 +165,6 @@ struct fp_sched_data {
 static struct kmem_cache *fp_flow_cachep __read_mostly;
 
 static void handle_reset(void *param);
-
 
 static inline struct fpproto_conn *fpproto_conn(struct fp_sched_data *q)
 {
@@ -538,15 +539,13 @@ static struct sk_buff *flow_dequeue_skb(struct Qdisc *sch, struct fp_flow *flow)
 	return skb;
 }
 
+void flow_inc_used(struct fp_sched_data *q, struct fp_flow* f, u64 amount) {
+	f->used_tslots += amount;
+	q->used_tslots += amount;
+}
+
 void flow_inc_alloc(struct fp_sched_data* q, struct fp_flow* f)
 {
-	if (unlikely(f->alloc_tslots == f->demand_tslots)) {
-		fp_debug("got an allocation over demand, flow 0x%04llX, demand %llu\n",
-				f->src_dst_key, f->demand_tslots);
-		q->stat.unwanted_alloc++;
-		return;
-	}
-
 	f->alloc_tslots++;
 	q->alloc_tslots++;
 }
@@ -556,10 +555,10 @@ void flow_inc_alloc(struct fp_sched_data* q, struct fp_flow* f)
  *   Maintains the necessary invariants, e.g. adds the flow to the unreq_flows
  *   list if necessary
  */
-static void flow_inc_demand(struct fp_sched_data *q, struct fp_flow *f)
+static void flow_inc_demand(struct fp_sched_data *q, struct fp_flow *f, u64 amount)
 {
-	f->demand_tslots++;
-	q->demand_tslots++;
+	f->demand_tslots += amount;
+	q->demand_tslots += amount;
 
 	if (!flow_in_flowqueue(f))
 		/* flow not on scheduling queue yet, enqueue */
@@ -588,12 +587,12 @@ static bool flow_enqueue_skb(struct Qdisc *sch, struct fp_flow *flow,
 
 	if (flow != &q->internal) {
 		/* if credit relates to an old slot, discard it */
-		if (unlikely(flow->demand_tslots == flow->alloc_tslots))
+		if (unlikely(flow->demand_tslots == flow->used_tslots))
 			flow->credit = 0;
 
 		/* check if need to request a new slot */
 		if (cost > flow->credit) {
-			flow_inc_demand(q, flow);
+			flow_inc_demand(q, flow, 1);
 			flow->credit = q->tslot_len_approx;
 		}
 		flow->credit -= cost;
@@ -695,42 +694,6 @@ static void move_timeslot_from_flow(struct Qdisc *sch, struct psched_ratecfg *ra
 }
 
 /**
- * Handles cases where a flow was allocated but we cannot fulfill it, either
- *    because the time has passed or is too far in the future.
- */
-void handle_out_of_bounds_allocation(struct Qdisc *sch, u64 src_dst_key)
-{
-	struct fp_sched_data *q = qdisc_priv(sch);
-	struct fp_flow *f = fpq_lookup(q, fp_alloc_node(src_dst_key), false);
-
-	if (f == NULL) {
-		/*
-		 * Couldn't find the flow. The allocation was either for an invalid
-		 *    destination, or was not needed and the flow was garbage-collected.
-		 */
-		q->stat.flow_not_found_oob++;
-		fp_debug("could not find flow with key 0x%llX node 0x%X will force reset\n",
-				src_dst_key, fp_alloc_node(src_dst_key));
-		/* This corrupts the status; will force a reset */
-		fpproto_force_reset(fpproto_conn(q));
-		handle_reset((void *)sch); /* manually call callback since fpproto won't call it */
-		return;
-	}
-
-	if (f->alloc_tslots == f->demand_tslots) {
-		q->stat.unwanted_out_of_bounds++;
-		fp_debug("got an out-of-bound packet for flow 0x%llx node 0x%X but demand=alloc=%lu, so will discard\n",
-				src_dst_key, fp_alloc_node(src_dst_key), f->demand_tslots);
-		return;
-	}
-
-	/* flow will need to re-request a slot*/
-	flow_inc_demand(q, f);
-	/* we mark that we were allocated this timeslot */
-	flow_inc_alloc(q, f);
-}
-
-/**
  * Change the qdisc state from its old time slot to the time slot at time @now.
  *
  * At the end of the function, the window tail (edge) will be at
@@ -762,31 +725,7 @@ begin:
 	if (unlikely(time_after64(next_nonempty, q->current_timeslot + q->max_preload)))
 		goto done; /* won't move it */
 
-	/* is alloc too far in the past? */
-	if (unlikely(time_before64(next_nonempty, q->current_timeslot - q->miss_threshold))) {
-		q->stat.missed_timeslots++;
-		fp_debug("missed timeslot %llu by %llu timeslots, rescheduling\n",
-				next_nonempty, q->current_timeslot - next_nonempty);
-		handle_out_of_bounds_allocation(sch, next_key);
-		wnd_clear(&q->alloc_wnd, next_nonempty);
-		goto begin;
-	}
-
-	if (time_after64(q->internal_free_time, now_monotonic + q->max_dev_backlog_ns)) {
-		/* queue full, cannot move flow */
-		if (next_nonempty > q->current_timeslot)
-			goto done; /* maybe later */
-
-		/* timeslots are late and backlog is full. will reschedule */
-		q->stat.backlog_too_high++;
-		fp_debug("backlog too high processing timeslot %llu at %llu, rescheduling key 0x%llX\n",
-				next_nonempty, q->current_timeslot, next_key);
-		handle_out_of_bounds_allocation(sch, next_key);
-		wnd_clear(&q->alloc_wnd, next_nonempty);
-		goto begin;
-	}
-
-	/* Okay can move timeslot! */
+	/* look up the flow of this allocation */
 	f = fpq_lookup(q, fp_alloc_node(next_key), false);
 	if (unlikely(f == NULL)) {
 		fp_debug("could not find flow for allocation at timeslot %llu key 0x%llX node 0x%X will force reset\n",
@@ -798,20 +737,67 @@ begin:
 		return;
 	}
 
-	move_timeslot_from_flow(sch, &q->data_rate, f, &q->internal,
-			fp_alloc_path(next_key));
+	/* is this an allocation we don't need? (redundant) */
+	if (unlikely(f->used_tslots == f->demand_tslots)) {
+		if (next_nonempty > q->current_timeslot)
+			goto done; /* maybe we'll get more packets by that time */
+
+		/* discard it */
+		f->alloc_tslots--;
+		q->stat.unwanted_alloc++;
+		fp_debug("got an allocation over demand, flow 0x%04llX, demand %llu\n",
+				f->src_dst_key, f->demand_tslots);
+		wnd_clear(&q->alloc_wnd, next_nonempty);
+		goto begin;
+	}
+
+	/* now we know that we need the allocation */
+
+	/* is alloc too far in the past? */
+	if (unlikely(time_before64(next_nonempty, q->current_timeslot - q->miss_threshold))) {
+		q->stat.missed_timeslots++;
+		fp_debug("missed timeslot %llu by %llu timeslots, rescheduling\n",
+				next_nonempty, q->current_timeslot - next_nonempty);
+		goto reschedule_timeslot_and_continue;
+	}
+
+	if (time_after64(q->internal_free_time, now_monotonic + q->max_dev_backlog_ns)) {
+		/* queue full, cannot move flow */
+		if (next_nonempty > q->current_timeslot)
+			goto done; /* maybe later queue will drain */
+
+		/* timeslots are late and backlog is full. will reschedule */
+		q->stat.backlog_too_high++;
+		fp_debug("backlog too high processing timeslot %llu at %llu, rescheduling key 0x%llX\n",
+				next_nonempty, q->current_timeslot, next_key);
+		goto reschedule_timeslot_and_continue;
+	}
+
+	/* Okay can move timeslot! */
+
+	/* clear the allocation */
 	wnd_clear(&q->alloc_wnd, next_nonempty);
-	flow_inc_alloc(q,f);
-	moved_timeslots++;
+	move_timeslot_from_flow(sch, &q->data_rate, f, &q->internal,
+							fp_alloc_path(next_key));
+
+	/* mark that we used a timeslot */
+	flow_inc_used(q, f, 1);
 
 	/* statistics */
-	q->stat.used_timeslots++;
+	moved_timeslots++;
+	q->stat.sucessful_timeslots++;
 	if (next_nonempty < q->current_timeslot)
 		q->stat.late_enqueue++;
 	if (next_nonempty > q->current_timeslot)
 		q->stat.early_enqueue++;
 
 	goto begin; /* try another timeslot */
+
+reschedule_timeslot_and_continue:
+	flow_inc_used(q, f, 1);
+	flow_inc_demand(q, f, 1);
+	wnd_clear(&q->alloc_wnd, next_nonempty);
+	goto begin; /* try the next timeslot */
 
 done:
 	/* update window around current timeslot */
@@ -859,12 +845,16 @@ static void handle_reset(void *param)
 	u32 base_idx = src_dst_key_hash(fp_monotonic_time_ns()) >> (32 - q->hash_tbl_log);
 	u32 mask = (1U << q->hash_tbl_log) - 1;
 
+	/* reset future allocations */
+	wnd_reset(&q->alloc_wnd, q->current_timeslot);
+
 	q->flows = 0;
 	q->inactive_flows = 0;		/* will remain 0 when we're done */
 	q->demand_tslots = 0;
 	q->requested_tslots = 0;	/* will remain 0 when we're done */
 	q->alloc_tslots = 0;		/* will remain 0 when we're done */
 	q->acked_tslots = 0; 		/* will remain 0 when we're done */
+	q->used_tslots = 0; 		/* will remain 0 when we're done */
 
 	/* for each cell in hash table: */
 	for (idx = 0; idx < (1U << q->hash_tbl_log); idx++) {
@@ -879,7 +869,7 @@ static void handle_reset(void *param)
 			f = container_of(cur, struct fp_flow, fp_node);
 
 			/* can we garbage-collect this flow? */
-			if (f->demand_tslots == f->alloc_tslots) {
+			if (f->demand_tslots == f->used_tslots) {
 				/* yes, let's gc */
 				FASTPASS_BUG_ON(f->qlen != 0);
 				FASTPASS_BUG_ON(f->state != FLOW_UNQUEUED);
@@ -892,10 +882,11 @@ static void handle_reset(void *param)
 			}
 
 			/* has timeslots pending, rebase counters to 0 */
-			f->demand_tslots -= f->alloc_tslots;
+			f->demand_tslots -= f->used_tslots;
 			f->alloc_tslots = 0;
 			f->acked_tslots = 0;
 			f->requested_tslots = 0;
+			f->used_tslots = 0;
 
 			q->flows++;
 			q->demand_tslots += f->demand_tslots;
@@ -923,11 +914,15 @@ static void handle_alloc(void *param, u32 base_tslot, u16 *dst,
 	int dst_ind;
 	u64 full_tslot;
 	u64 now_real = fp_get_time_ns();
+	u16 node_id;
 
 	/* every alloc should be ACKed */
 	trigger_tx(q);
 
+	/* update the flow window so we have space to allocate into */
 	update_current_timeslot(sch, now_real);
+
+	/* find full timeslot value of the ALLOC */
 	full_tslot = q->current_timeslot - (1ULL << 18); /* 1/4 back, 3/4 front */
 	full_tslot += ((u32)base_tslot - (u32)full_tslot) & 0xFFFFF; /* 20 bits */
 
@@ -936,6 +931,8 @@ static void handle_alloc(void *param, u32 base_tslot, u16 *dst,
 			wnd_get_mask(&q->alloc_wnd, q->current_timeslot+63));
 
 	for (i = 0; i < n_tslots; i++) {
+		struct fp_flow *f;
+
 		spec = tslots[i];
 		dst_ind = spec >> 4;
 
@@ -962,15 +959,13 @@ static void handle_alloc(void *param, u32 base_tslot, u16 *dst,
 
 		if (unlikely(wnd_seq_before(&q->alloc_wnd, full_tslot))) {
 			q->stat.alloc_too_late++;
-			handle_out_of_bounds_allocation(sch, dst[dst_ind - 1]);
-			fp_debug("-X- already gone, will reschedule\n");
+			fp_debug("-X- already gone, dropping\n");
 			continue;
 		}
 
 		if (unlikely(wnd_seq_after(&q->alloc_wnd, full_tslot))) {
 			q->stat.alloc_premature++;
-			handle_out_of_bounds_allocation(sch, dst[dst_ind - 1]);
-			fp_debug("-X- too futuristic, will reschedule\n");
+			fp_debug("-X- too futuristic, dropping\n");
 			continue;
 		}
 
@@ -982,9 +977,22 @@ static void handle_alloc(void *param, u32 base_tslot, u16 *dst,
 			continue;
 		}
 
+		node_id = fp_alloc_node(dst[dst_ind - 1]);
+		f = fpq_lookup(q, node_id, false);
+		if (unlikely(f == NULL)) {
+			FASTPASS_WARN("couldn't find flow 0x%X from alloc. will reset\n",
+					node_id);
+			q->stat.alloc_flow_not_found++;
+			/* This corrupts the status; will force a reset */
+			fpproto_force_reset(fpproto_conn(q));
+			handle_reset((void *)sch); /* manually call callback since fpproto won't call it */
+			return;
+		}
+
 		/* okay, allocate */
 		wnd_mark(&q->alloc_wnd, full_tslot);
 		q->schedule[wnd_pos(full_tslot)] = dst[dst_ind - 1];
+		flow_inc_alloc(q, f);
 	}
 
 	fp_debug("mask after: 0x%016llX\n",
@@ -992,6 +1000,64 @@ static void handle_alloc(void *param, u32 base_tslot, u16 *dst,
 
 	/* enqueue latest timeslots if possible */
 	update_current_timeslot(sch, now_real);
+}
+
+static void handle_areq(void *param, u16 *dst_and_count, int n)
+{
+	struct Qdisc *sch = (struct Qdisc *)param;
+	struct fp_sched_data *q = qdisc_priv(sch);
+	struct fp_flow *f;
+	int i;
+	u16 dst;
+	u16 count_low;
+	u64 count;
+
+	for (i = 0; i < n; i++) {
+		dst = ntohs(dst_and_count[2*i]);
+		count_low = ntohs(dst_and_count[2*i + 1]);
+
+		f = fpq_lookup(q, dst, false);
+		if (unlikely(f == NULL)) {
+			FASTPASS_WARN("couldn't find flow 0x%X from alloc report. will reset\n",
+					dst);
+			q->stat.alloc_report_flow_not_found++;
+			/* This corrupts the status; will force a reset */
+			fpproto_force_reset(fpproto_conn(q));
+			handle_reset((void *)sch); /* manually call callback since fpproto won't call it */
+			return;
+		}
+
+		/* get full count */
+		/* TODO: if there is reordering (and many packets since last acked),
+		 * 	  q->acked_tslots might be larger than the controller intended! */
+		count = f->acked_tslots - (1 << 16) + 1;
+		count += (u16)(count_low - count);
+
+		/* update counts */
+		if ((s64)(count - f->alloc_tslots) > 0) {
+			u64 n_lost = count - f->alloc_tslots;
+
+			if (unlikely((s64)(count - f->requested_tslots) > 0)) {
+				FASTPASS_WARN("got an alloc report for dst %d larger than requested (%llu > %llu), will reset\n",
+						dst, count, f->requested_tslots);
+				q->stat.alloc_report_larger_than_requested++;
+				/* This corrupts the status; will force a reset */
+				fpproto_force_reset(fpproto_conn(q));
+				handle_reset((void *)sch); /* manually call callback since fpproto won't call it */
+				return;
+			}
+
+			fp_debug("controller allocated %llu our allocated %llu, will increase demand by %llu\n",
+					count, f->alloc_tslots, n_lost);
+
+			q->alloc_tslots += n_lost;
+			f->alloc_tslots += n_lost;
+			q->stat.timeslots_assumed_lost += n_lost;
+
+			flow_inc_used(q, f, n_lost);
+			flow_inc_demand(q, f, n_lost);
+		}
+	}
 }
 
 static void handle_ack(void *param, struct fpproto_pktdesc *pd)
@@ -1254,6 +1320,7 @@ struct fpproto_ops fastpass_sch_proto_ops = {
 	.handle_alloc	= &handle_alloc,
 	.handle_ack		= &handle_ack,
 	.handle_neg_ack	= &handle_neg_ack,
+	.handle_areq	= &handle_areq,
 	.trigger_request= &trigger_tx_voidp,
 	.set_timer		= &set_retrans_timer,
 	.cancel_timer	= &cancel_retrans_timer,
@@ -1806,6 +1873,7 @@ static int fp_tc_dump_stats(struct Qdisc *sch, struct gnet_dump *d)
 		.requested_tslots	= q->requested_tslots,
 		.alloc_tslots		= q->alloc_tslots,
 		.acked_tslots		= q->acked_tslots,
+		.used_tslots		= q->used_tslots,
 	};
 
 	memset(&st.sched_stats[0], 0, TC_FASTPASS_SCHED_STAT_MAX_BYTES);

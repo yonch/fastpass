@@ -787,6 +787,7 @@ struct tc_fastpass_qd_stats {
 	__u64	requested_tslots;
 	__u64	alloc_tslots;
 	__u64	acked_tslots;
+	__u64	used_tslots;
 
 	__u8	sched_stats[TC_FASTPASS_SCHED_STAT_MAX_BYTES];
 	__u8	socket_stats[TC_FASTPASS_SOCKET_STAT_MAX_BYTES];

@@ -810,7 +810,26 @@ int fpproto_encode_packet(struct fpproto_conn *conn,
 		remaining_len -= 8;
 	}
 
-#ifdef FASTPASS_ENDPOINT
+#ifdef FASTPASS_CONTROLLER
+	if (pd->alloc_tslot > 0) {
+		/* ALLOC type short */
+		*(__be16 *)curp = htons((FASTPASS_PTYPE_ALLOC << 12)
+								| (pd->n_dsts << 8)
+								|  ((pd->alloc_tslot + 1) / 2));
+		curp += 2;
+		*(__be16 *)curp = htons(pd->base_tslot);
+		curp += 2;
+		for (i = 0; i < pd->n_dsts; i++) {
+			*(__be16 *)curp = htons(pd->dsts[i]);
+			curp += 2;
+		}
+		memcpy(curp, pd->tslot_desc, pd->alloc_tslot);
+		curp += pd->alloc_tslot;
+	}
+	(void) i; (void) areq; (void)conn; (void)max_len; /* TODO, fix this better */
+#endif
+
+	/* Must encode the A-REQ *after* allocations for correct endnode handling */
 	if (pd->n_areq > 0) {
 		if (unlikely(remaining_len < 2 + 4 * pd->n_areq))
 			return -3;
@@ -830,24 +849,6 @@ int fpproto_encode_packet(struct fpproto_conn *conn,
 			remaining_len -= 4;
 		}
 	}
-#else
-	if (pd->alloc_tslot > 0) {
-		/* ALLOC type short */
-		*(__be16 *)curp = htons((FASTPASS_PTYPE_ALLOC << 12)
-								| (pd->n_dsts << 8)
-								|  ((pd->alloc_tslot + 1) / 2));
-		curp += 2;
-		*(__be16 *)curp = htons(pd->base_tslot);
-		curp += 2;
-		for (i = 0; i < pd->n_dsts; i++) {
-			*(__be16 *)curp = htons(pd->dsts[i]);
-			curp += 2;
-		}
-		memcpy(curp, pd->tslot_desc, pd->alloc_tslot);
-		curp += pd->alloc_tslot;
-	}
-	(void) i; (void) areq; (void)conn; (void)max_len; /* TODO, fix this better */
-#endif
 
 	if (curp - pkt < min_size) {
 		if (unlikely(remaining_len < min_size - (curp - pkt)))

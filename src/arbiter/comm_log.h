@@ -50,6 +50,12 @@ struct comm_log {
 	uint64_t neg_ack_timeslots;
 	uint64_t error_encoding_packet;
 	uint64_t flush_buffer_in_add_backlog;
+	uint64_t neg_ack_triggered_reports;
+	uint64_t reports_triggered;
+	uint64_t total_demand;
+	uint64_t acks_without_alloc;
+	uint64_t acks_with_alloc;
+	uint64_t total_acked_timeslots;
 };
 
 extern struct comm_log comm_core_logs[RTE_MAX_LCORE];
@@ -146,6 +152,7 @@ static inline void comm_log_demand_increased(uint32_t node_id,
 		uint32_t dst, uint32_t orig_demand, uint32_t demand, int32_t demand_diff) {
 	(void)node_id;(void)dst;(void)orig_demand;(void)demand;(void)demand_diff;
 	CL->demand_increased++;
+	CL->total_demand += demand_diff;
 	COMM_DEBUG("demand for flow src %u dst %u increased by %d (from %u to %u)\n",
 			node_id, dst, demand_diff, orig_demand, demand);
 }
@@ -230,8 +237,8 @@ static inline void comm_log_neg_ack_increased_backlog(uint16_t src,
 }
 
 static inline void comm_log_neg_ack(uint16_t src, uint16_t n_dsts,
-		uint32_t n_tslots, uint64_t seqno) {
-	(void)src;(void)n_dsts;(void)n_tslots;(void)seqno;
+		uint32_t n_tslots, uint64_t seqno, uint32_t num_triggered) {
+	(void)src;(void)n_dsts;(void)n_tslots;(void)seqno;(void)num_triggered;
 	if (n_dsts == 0) {
 		CL->neg_acks_without_alloc++;
 		return;
@@ -239,8 +246,28 @@ static inline void comm_log_neg_ack(uint16_t src, uint16_t n_dsts,
 	CL->neg_acks_with_alloc++;
 	CL->neg_ack_destinations += n_dsts;
 	CL->neg_ack_timeslots += n_tslots;
-	COMM_DEBUG("neg ack node %d seqno %lX affected %d dsts %u timeslots\n",
+	CL->neg_ack_triggered_reports += num_triggered;
+	COMM_DEBUG("neg ack node %d seqno %lX triggered %u reports and affected %d dsts %u timeslots\n",
 			src, seqno, n_dsts, n_tslots);
+}
+
+static inline void comm_log_ack(uint16_t src, uint16_t n_dsts,
+		uint32_t n_tslots, uint64_t seqno) {
+	(void)src;(void)n_dsts;(void)n_tslots;(void)seqno;
+	if (n_dsts == 0) {
+		CL->acks_without_alloc++;
+		return;
+	}
+	CL->acks_with_alloc++;
+	CL->total_acked_timeslots += n_tslots;
+	COMM_DEBUG("ack node %d seqno %lX affected %d dsts %u timeslots\n",
+			src, seqno, n_dsts, n_tslots);
+}
+
+static inline void comm_log_triggered_report(uint16_t src, uint16_t dst) {
+	(void)src;(void)dst;
+	CL->reports_triggered++;
+	COMM_DEBUG("triggered report of total allocs from %d to %d\n", src, dst);
 }
 
 static inline void comm_log_flushed_buffer_in_add_backlog() {

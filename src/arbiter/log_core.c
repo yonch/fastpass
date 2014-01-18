@@ -41,12 +41,15 @@ void print_comm_log(uint16_t lcore_id)
 #define D(X) (cl->X - sv->X)
 	printf("\n  RX %lu pkts, %lu bytes in %lu batches (%lu non-empty batches)",
 			D(rx_pkts), D(rx_bytes), D(rx_batches), D(rx_non_empty_batches));
-	printf("\n  %lu demand increases, %lu demand remained, %lu neg-ack with alloc, %lu demands",
-			D(demand_increased), D(demand_remained), D(neg_acks_with_alloc),
+	printf("\n  %lu total demand from %lu demand increases %lu demand remained, %lu neg-ack with alloc, %lu demands",
+			D(total_demand), D(demand_increased), D(demand_remained), D(neg_acks_with_alloc),
 			D(neg_ack_timeslots));
+	printf("\n  %lu informative acks for %lu allocations, %lu non-informative",
+			D(acks_with_alloc), D(total_acked_timeslots), D(acks_without_alloc));
 	printf("\n  processed %lu tslots (%lu non-empty) with %lu node-tslots",
 			D(processed_tslots), D(non_empty_tslots), D(occupied_node_tslots));
-	printf("\n  TX %lu pkts, %lu triggers", D(tx_pkt), D(triggered_send));
+	printf("\n  TX %lu pkts, %lu triggers, %lu report-triggers",
+			D(tx_pkt), D(triggered_send), D(reports_triggered));
 #undef D
 	printf("\n");
 
@@ -54,13 +57,17 @@ void print_comm_log(uint16_t lcore_id)
 			cl->rx_pkts, cl->rx_bytes, cl->rx_batches, cl->rx_non_empty_batches);
 	printf("\n  %lu non-IPv4, %lu IPv4 non-fastpass",
 			cl->rx_non_ipv4_pkts, cl->rx_ipv4_non_fastpss_pkts);
-	printf("\n  %lu demand increases, %lu demand remained",
-			cl->demand_increased, cl->demand_remained);
+	printf("\n  %lu total demand from %lu demand increases, %lu demand remained",
+			cl->total_demand, cl->demand_increased, cl->demand_remained);
+	printf("\n  %lu informative acks for %lu allocations, %lu non-informative",
+			cl->acks_with_alloc, cl->total_acked_timeslots, cl->acks_without_alloc);
 	printf("\n  handled %lu resets", cl->handle_reset);
 
 	printf("\n  processed %lu tslots (%lu non-empty) with %lu node-tslots",
 			cl->processed_tslots, cl->non_empty_tslots, cl->occupied_node_tslots);
-	printf("\n  TX %lu pkts, %lu triggers", cl->tx_pkt, cl->triggered_send);
+	printf("\n  TX %lu pkts, %lu triggers, %lu report-triggers (%lu due to neg-acks(",
+			cl->tx_pkt, cl->triggered_send, cl->reports_triggered, 
+			cl->neg_ack_triggered_reports);
 	printf("\n  set %lu timers, canceled %lu, expired %lu",
 			cl->timer_set, cl->timer_cancel, cl->retrans_timer_expired);
 	printf("\n  neg acks: %lu without alloc, %lu with alloc with %lu timeslots to %lu dsts",

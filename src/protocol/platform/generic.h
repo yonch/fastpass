@@ -225,6 +225,17 @@ do_last:
 	return (u32)sum + (u32)(sum >> 32);    /* add the overflow */
 }
 
+static inline uint16_t fp_fold(uint64_t sum64)
+{
+    uint32_t sum32;
+
+    /* now fold */
+    sum64 = (u32)sum64 + (sum64 >> 32); /* could have overflow on bit 32 */
+    sum32 = sum64 + (sum64 >> 32);    /* add the overflow */
+    sum32 = (u16)sum32 + (sum32 >> 16); /* could have overflow on bit 16 */
+    return ~((u16)sum32 + (u16)(sum32 >> 16)); /* add the overflow */
+}
+
 static inline uint16_t fp_csum_tcpudp_magic(uint32_t saddr, uint32_t daddr,
 		uint16_t len, uint16_t proto, uint32_t sum32)
 {
@@ -232,10 +243,7 @@ static inline uint16_t fp_csum_tcpudp_magic(uint32_t saddr, uint32_t daddr,
 	sum64 += saddr + daddr + ((len + proto) << 8);
 
 	/* now fold */
-	sum64 = (u32)sum64 + (sum64 >> 32); /* could have overflow on bit 32 */
-	sum32 = sum64 + (sum64 >> 32);    /* add the overflow */
-	sum32 = (u16)sum32 + (sum32 >> 16); /* could have overflow on bit 16 */
-	return ~((u16)sum32 + (u16)(sum32 >> 16)); /* add the overflow */
+	return fp_fold(sum64);
 }
 
 #endif /* __KERNEL__ */

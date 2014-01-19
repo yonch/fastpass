@@ -92,6 +92,8 @@ struct fp_flow {
 	int		qlen;				/* number of packets in flow queue */
 
 	s64		credit;				/* time remaining in the last scheduled timeslot */
+
+	u64		last_moved_timeslot; /* timeslot when packets last moved to internal */
 };
 
 struct fp_timeslot_horizon {
@@ -417,6 +419,7 @@ static struct fp_flow *fpq_lookup(struct fp_sched_data *q, u64 src_dst_key,
 	rb_link_node(&f->fp_node, parent, p);
 	rb_insert_color(&f->fp_node, root);
 	f->state = FLOW_UNQUEUED;
+	f->last_moved_timeslot = 0;
 
 	q->flows++;
 	q->inactive_flows++;
@@ -782,6 +785,7 @@ begin:
 
 	/* mark that we used a timeslot */
 	flow_inc_used(q, f, 1);
+	f->last_moved_timeslot = next_nonempty;
 
 	/* statistics */
 	moved_timeslots++;

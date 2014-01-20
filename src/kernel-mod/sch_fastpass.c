@@ -768,7 +768,6 @@ begin:
 	}
 
 	/* Okay can move timeslot! */
-<<<<<<< HEAD
 	f = fpq_lookup(q, fp_alloc_node(next_key), false);
 	if (unlikely(f == NULL)) {
 		fp_debug("could not find flow for allocation at timeslot %llu key 0x%llX node 0x%X will force reset\n",
@@ -779,8 +778,6 @@ begin:
 		handle_reset((void *)sch); /* manually call callback since fpproto won't call it */
 		return;
 	}
-=======
->>>>>>> cbe73f265e1272c79c94c993ade92c83a87ff79e
 
 	/* clear the allocation */
 	wnd_clear(&q->alloc_wnd, next_nonempty);

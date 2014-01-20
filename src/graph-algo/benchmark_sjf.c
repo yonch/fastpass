@@ -74,8 +74,7 @@ int main(void)
 {
     uint16_t i, j, k;
 
-    // keep duration less than 65536 or else Poisson wont work correctly due to sorting
-    // also keep both durations an even number of batches so that bin pointers return to queue_0
+    // keep both durations an even number of batches so that bin pointers return to queue_0
     uint32_t warm_up_duration = ((10000 + 127) / 128) * 128;
     uint32_t duration = warm_up_duration + ((50000 + 127) / 128) * 128;
     double mean = 10; // Mean request size and inter-arrival time

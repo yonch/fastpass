@@ -29,6 +29,7 @@ struct comm_log {
 	uint64_t rx_non_ipv4_pkts;
 	uint64_t rx_ipv4_non_fastpss_pkts;
 	uint64_t tx_pkt;
+	uint64_t tx_bytes;
 	uint64_t pktdesc_alloc_failed;
 	uint64_t rx_truncated_pkt;
 	uint64_t areq_invalid_dst;
@@ -119,10 +120,12 @@ static inline void comm_log_rx_ip_non_fastpass_pkt(uint8_t portid) {
 	COMM_DEBUG("got an IPv4 non-fastpass packet on portid %d\n", portid);
 }
 
-static inline void comm_log_tx_pkt(uint32_t node_id, uint64_t when) {
+static inline void comm_log_tx_pkt(uint32_t node_id, uint64_t when,
+		uint32_t n_bytes) {
 	(void)node_id;
 	(void)when;
 	CL->tx_pkt++;
+	CL->tx_bytes += n_bytes;
 	COMM_DEBUG("sending a packet to node ID %u at time %lu\n", node_id, when);
 }
 

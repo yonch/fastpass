@@ -853,11 +853,11 @@ static inline void tx_end_node(struct end_node_state *en)
 	if (unlikely(out_pkt == NULL))
 		return; /* pd committed, will get retransmitted on timeout */
 
+	/* log sent packet */
+	comm_log_tx_pkt(node_ind, now, rte_pktmbuf_data_len(out_pkt));
+
 	/* send on port */
 	send_packet_via_queue(out_pkt, en->dst_port);
-
-	/* log sent packet */
-	comm_log_tx_pkt(node_ind, now);
 }
 
 void exec_comm_core(struct comm_core_cmd * cmd)

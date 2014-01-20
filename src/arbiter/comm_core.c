@@ -35,6 +35,8 @@
 #define ALLOC_REPORT_QUEUE_SIZE		(1UL << (FP_NODES_SHIFT + 1))
 #define ALLOC_REPORT_QUEUE_MASK		(ALLOC_REPORT_QUEUE_SIZE - 1)
 
+#define IGMP_SEND_INTERVAL_SEC		10
+
 /**
  * A queue to know which reports to send to the end node
  */
@@ -871,6 +873,7 @@ void exec_comm_core(struct comm_core_cmd * cmd)
 	struct end_node_state *en;
 	uint64_t now;
 	struct fp_timer *tim;
+    uint64_t last_igmp = rte_get_timer_cycles();
 
 	qconf = &lcore_conf[lcore_id];
 
@@ -938,9 +941,15 @@ void exec_comm_core(struct comm_core_cmd * cmd)
 			tx_end_node(en);
 		}
 
-		/* Flush queued packets */
+        if (now - last_igmp > IGMP_SEND_INTERVAL_SEC * rte_get_timer_hz()) {
+          last_igmp = now;
+          send_igmp(portid, controller_ip());
+        }
+
+        /* Flush queued packets */
 		for (i = 0; i < n_enabled_port; i++)
 			send_queued_packets(enabled_port[i]);
+
 	}
 }
 

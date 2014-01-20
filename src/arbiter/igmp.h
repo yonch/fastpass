@@ -77,7 +77,7 @@ make_igmp(uint8_t src_port, uint32_t controller_ip)
 	ipv4_hdr->type_of_service = 0;
         ipv4_hdr->total_length = rte_cpu_to_be_16(sizeof(struct ipv4_hdr) + IGMP_IPV4_HDR_LEN);
 	ipv4_hdr->packet_id = 0;
-	ipv4_hdr->fragment_offset = 0;
+	ipv4_hdr->fragment_offset = htons(0x4000);
 	ipv4_hdr->time_to_live = 1;
 	ipv4_hdr->next_proto_id = IPPROTO_IGMP;
 	// ipv4_hdr->hdr_checksum will be calculated in HW

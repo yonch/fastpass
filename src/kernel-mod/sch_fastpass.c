@@ -547,12 +547,6 @@ void flow_inc_used(struct fp_sched_data *q, struct fp_flow* f, u64 amount) {
 	q->used_tslots += amount;
 }
 
-void flow_inc_alloc(struct fp_sched_data* q, struct fp_flow* f)
-{
-	f->alloc_tslots++;
-	q->alloc_tslots++;
-}
-
 /**
  * Increase the number of unrequested packets for the flow.
  *   Maintains the necessary invariants, e.g. adds the flow to the unreq_flows
@@ -745,11 +739,8 @@ begin:
 		if (next_nonempty > q->current_timeslot)
 			goto done; /* maybe we'll get more packets by that time */
 
-		/* discard it */
-		f->alloc_tslots--;
-		q->stat.unwanted_alloc++;
-		fp_debug("got an allocation over demand, flow 0x%04llX, demand %llu\n",
-				f->src_dst_key, f->demand_tslots);
+		/* an unwanted alloc. it would have been added to statistics at the
+		 * time it arrived in handle_alloc. just ignore */
 		wnd_clear(&q->alloc_wnd, next_nonempty);
 		goto begin;
 	}
@@ -996,7 +987,17 @@ static void handle_alloc(void *param, u32 base_tslot, u16 *dst,
 		/* okay, allocate */
 		wnd_mark(&q->alloc_wnd, full_tslot);
 		q->schedule[wnd_pos(full_tslot)] = dst[dst_ind - 1];
-		flow_inc_alloc(q, f);
+		if (f->used_tslots != f->demand_tslots) {
+			f->alloc_tslots++;
+			q->alloc_tslots++;
+		} else {
+			/* alloc arrived that was considered dead, we keep it in
+			 *  q->schedule so it might at least reduce latency if demand
+			 *  increases later */
+			q->stat.unwanted_alloc++;
+			fp_debug("got an allocation over demand, flow 0x%04llX, demand %llu\n",
+					f->src_dst_key, f->demand_tslots);
+		}
 	}
 
 	fp_debug("mask after: 0x%016llX\n",
@@ -1032,9 +1033,10 @@ static void handle_areq(void *param, u16 *dst_and_count, int n)
 		}
 
 		/* get full count */
-		/* TODO: if there is reordering (and many packets since last acked),
-		 * 	  q->acked_tslots might be larger than the controller intended! */
-		count = f->acked_tslots - (1 << 16) + 1;
+		/* TODO: This is not perfectly safe. For example, if there is a big
+		 * outage and the controller thinks it had produced many timeslots, this
+		 * can go out of sync */
+		count = f->alloc_tslots - (1 << 15);
 		count += (u16)(count_low - count);
 
 		/* update counts */
@@ -1857,6 +1859,45 @@ struct __fp_check_sizes {
 	      TC_FASTPASS_PROTO_STAT_MAX_BYTES - sizeof(struct fp_proto_stat)];
 };
 
+/*
+ * Prints flow status
+ */
+static void dump_flow_info(struct fp_sched_data *q, bool only_active)
+{
+	struct rb_node *cur, *next;
+	struct rb_root *root;
+	struct fp_flow *f;
+	u32 idx;
+	u32 num_printed = 0;
+
+	printk(KERN_DEBUG "fastpass flows (only_active=%d):\n", only_active);
+
+	/* for each cell in hash table: */
+	for (idx = 0; idx < (1U << q->hash_tbl_log); idx++) {
+		root = &q->flow_hash_tbl[idx];
+		next = rb_first(root); /* we traverse tree in-order */
+
+		/* while haven't finished traversing rbtree: */
+		while (next != NULL) {
+			cur = next;
+			next = rb_next(cur);
+
+			f = container_of(cur, struct fp_flow, fp_node);
+
+			if (f->qlen == 0 && only_active)
+				continue;
+
+			num_printed++;
+			printk(KERN_DEBUG "flow 0x%04llX demand %llu requested %llu acked %llu alloc %llu used %llu qlen %d credit %lld last_moved 0x%llX state %d\n",
+					f->src_dst_key, f->demand_tslots, f->requested_tslots,
+					f->acked_tslots, f->alloc_tslots, f->used_tslots, f->qlen,
+					f->credit, f->last_moved_timeslot, f->state);
+		}
+	}
+
+	printk(KERN_DEBUG "fastpass printed %u flows\n", num_printed);
+}
+
 /* dumps statistics to netlink skb (part of qdisc API) */
 static int fp_tc_dump_stats(struct Qdisc *sch, struct gnet_dump *d)
 {
@@ -1893,6 +1934,11 @@ static int fp_tc_dump_stats(struct Qdisc *sch, struct gnet_dump *d)
 		memcpy(&st.socket_stats[0], &fp->stat, sizeof(fp->stat));
 		fpproto_dump_stats(conn, (struct fp_proto_stat *)&st.proto_stats);
 	}
+
+#if 0
+	dump_flow_info(q, false);
+#endif
+
 	return gnet_stats_copy_app(d, &st, sizeof(st));
 }
 

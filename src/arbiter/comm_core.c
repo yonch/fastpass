@@ -726,7 +726,8 @@ static inline void fill_packet_report(struct comm_core_state *core,
 	}
 
 	/* if report queue is still not empty, we should trigger another packet */
-	trigger_request(en);
+	if (!report_empty(&en->report_queue))
+		trigger_request(en);
 }
 
 /**

@@ -181,9 +181,6 @@ void get_admissible_traffic(struct admission_core_state *core,
     process_new_requests(status, core, 0);
 
     for (bin = 0; bin < NUM_BINS; bin++) {
-
-        /* TODO: wait for start time */
- 
         /* process new requests until bin_in arrives */
 	while (fp_ring_dequeue(queue_in, (void **)&bin_in) != 0)
             process_new_requests(status, core, bin);
@@ -202,9 +199,27 @@ void get_admissible_traffic(struct admission_core_state *core,
         core->temporary_bins[bin] = bin_in;
     }
 
+    /* Output admitted traffic, but continue to process new requests until
+       time to output */
     for (bin = 0; bin < BATCH_SIZE; bin++) {
+        /* wait for start time */
+        if (bin % 4 == 0) {
+            uint64_t start_timeslot = first_timeslot + bin;
+    	    uint64_t now_timeslot;
+            
+            do {
+                /* process requests */
+                process_new_requests(status, core, bin);
+                /* at least until the next core finishes allocating */
+                /* and we reach the start time */
+                now_timeslot = (fp_get_time_ns() * tslot_mul) >> tslot_shift;
+            } while (!core->is_head || (now_timeslot < start_timeslot));
+        }
+
         /* enqueue the allocated traffic for this timeslot */
     	fp_ring_enqueue(status->q_admitted_out, core->admitted[bin]);
+        /* disallow further allocations to that timeslot */
+    	core->batch_state.allowed_mask <<= 1;
     }
 
     /* hand over token to next core. this should happen after enqueuing _all_

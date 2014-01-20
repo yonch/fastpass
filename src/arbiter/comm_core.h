@@ -10,7 +10,7 @@
 #include "fp_timer.h"
 #include "main.h"
 
-#define CONTROLLER_SEND_TIMEOUT_SECS 	0.0004
+#define CONTROLLER_SEND_TIMEOUT_SECS 	0.0001
 
 /* The maximum number of admitted time-slots to process in a batch before
  *   sending and receiving packets */
@@ -23,7 +23,7 @@
 /* maximum burst of egress packets to a single node (must be >1, can be fraction) */
 #define NODE_MAX_BURST				1.5
 /* minimum time between packets */
-#define NODE_MIN_TRIGGER_GAP_SEC	1e-6
+#define NODE_MIN_TRIGGER_GAP_SEC	2e-6
 
 /* The buffer size when writing to q_head */
 #define Q_HEAD_WRITE_BUFFER_SIZE		(32*1024)

@@ -28,11 +28,11 @@
 #define NUM_RACKS				1
 
 /* how many timeslots before allocated timeslot to start processing it */
-#define		PREALLOC_DURATION_TIMESLOTS		40
+#define		PREALLOC_DURATION_TIMESLOTS		80
 
 /* getting timeslot from time is ((NOW_NS * MUL) >> SHIFT) */
-#define		TIMESLOT_MUL		1
-#define		TIMESLOT_SHIFT		11
+#define		TIMESLOT_MUL		3
+#define		TIMESLOT_SHIFT		12
 
 /* give the controller some time to initialize before starting allocation */
 #define		INIT_MAX_TIME_NS		(200*1000*1000)

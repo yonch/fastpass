@@ -28,8 +28,8 @@
 #define LARGE_BIN_SIZE (MAX_NODES * MAX_NODES) // TODO: try smaller values
 #define NUM_BINS_SHIFT 8
 #define NUM_BINS 256 // 2^NUM_BINS_SHIFT
-#define NUM_SRC_DST_PAIRS (MAX_NODES * (MAX_NODES + 1))  // include dst == out of boundary
-#define MAX_DSTS MAX_NODES + 1  // include dst == out of boundary
+#define NUM_SRC_DST_PAIRS (MAX_NODES * (MAX_NODES))  // include dst == out of boundary
+#define MAX_DSTS MAX_NODES  // include dst == out of boundary
 #define MAX_SRCS MAX_NODES
 
 struct admitted_edge {

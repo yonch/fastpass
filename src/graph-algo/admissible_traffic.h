@@ -15,6 +15,12 @@
 #define URGENT_Q_HEAD_TOKEN		(~0UL)
 
 
+/**
+ * Returns true if @out_edge should be enqueued to q_head
+ */
+bool add_backlog_no_enqueue(struct admissible_status *status, uint16_t src,
+        uint16_t dst, uint16_t backlog_increase, void **out_edge);
+
 // Increase the backlog from src to dst
 void add_backlog(struct admissible_status *status,
                        uint16_t src, uint16_t dst,
@@ -77,5 +83,24 @@ uint16_t bin_index_from_timeslot(uint64_t last_allocated,
 #ifndef unlikely
 #define unlikely(x)  __builtin_expect((x),0)
 #endif /* unlikely */
+
+// Helper method for testing in Python. Enqueues the head token.
+static inline
+void enqueue_head_token(struct fp_ring *ring) {
+    assert(ring != NULL);
+
+    fp_ring_enqueue(ring, (void *) URGENT_Q_HEAD_TOKEN);
+}
+
+// Helper method for testing in Python. Dequeues and returns an admitted traffic struct.
+static inline
+struct admitted_traffic *dequeue_admitted_traffic(struct admissible_status *status) {
+    assert(status != NULL);
+
+    struct admitted_traffic *traffic;
+    fp_ring_dequeue(status->q_admitted_out, (void **)&traffic);
+
+    return traffic;
+}
 
 #endif /* ADMISSIBLE_TRAFFIC_H_ */

@@ -10,7 +10,7 @@ CCFLAGS += -DNO_DPDK
 	$(CC) $(CCFLAGS) -c $< -fPIC
 
 # Dependency rules for non-file targets
-all: swig_graph swig_eulersplit swig_kapoorrizzi swig_structures swig_admissible swig_path_selection
+all: swig_graph swig_eulersplit swig_kapoorrizzi swig_structures swig_admissible swig_path_selection swig_fp_ring
 clean:
 	rm -f *.o *.so *_wrap.c *~ *.py *.pyc
 
@@ -45,5 +45,9 @@ swig_path_selection: path_selection.o
 	gcc $(CCFLAGS) -fPIC -c path_selection_wrap.c -o path_selection_wrap.o -I/usr/include/python2.7
 	g++ -shared path_selection_wrap.o -o _pathselection.so path_selection.o euler_split.o -lpython2.7 -fPIC
 
+swig_fp_ring:
+	swig -DNO_DPDK -python fp_ring.i
+	gcc $(CCFLAGS) -fPIC -c fp_ring_wrap.c -o fp_ring_wrap.o -I/usr/include/python2.7
+	g++ -shared fp_ring_wrap.o -o _fpring.so -lpython2.7 -fPIC
 
 

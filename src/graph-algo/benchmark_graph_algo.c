@@ -347,8 +347,8 @@ int main(int argc, char **argv)
 
     /* init queues */
     q_bin = fp_ring_create(NUM_BINS_SHIFT);
-    q_urgent = fp_ring_create(2 * NODES_SHIFT + 1);
-    q_head = fp_ring_create(2 * NODES_SHIFT);
+    q_urgent = fp_ring_create(2 * FP_NODES_SHIFT + 1);
+    q_head = fp_ring_create(2 * FP_NODES_SHIFT);
     q_admitted_out = fp_ring_create(BATCH_SHIFT);
     if (!q_bin) exit(-1);
     if (!q_urgent) exit(-1);
@@ -362,7 +362,7 @@ int main(int argc, char **argv)
     }
 
     /* init global status */
-    status = create_admissible_status(false, 0, 0, q_head, q_admitted_out);
+    status = create_admissible_status(false, 0, 0, 0, q_head, q_admitted_out);
 
     /* make allocated_traffic containers */
     admitted_batch = malloc(sizeof(struct admitted_traffic *) * BATCH_SIZE);
@@ -372,8 +372,6 @@ int main(int argc, char **argv)
         for (i = 0; i < BATCH_SIZE; i++) {
             admitted_batch[i] = create_admitted_traffic();
             if (!admitted_batch[i]) exit(-1);
-            if (admitted_batch[i] == NULL)
-                return -1;
         }
     }
     else {
@@ -385,8 +383,6 @@ int main(int argc, char **argv)
         for (i = 0; i < duration - warm_up_duration; i++) {
             all_admitted[i] = create_admitted_traffic();
             if (!all_admitted[i]) exit(-1);
-            if (all_admitted[i] == NULL)
-                return -1;
         }
     }
 
@@ -410,12 +406,12 @@ int main(int argc, char **argv)
             // Initialize data structures
             if (benchmark_type == ADMISSIBLE) {
                 num_nodes = sizes[j];
-                reset_admissible_status(status, false, 0, num_nodes);
+                reset_admissible_status(status, false, 0, 0, num_nodes);
             }
             else if (benchmark_type == PATH_SELECTION) {
                 num_nodes = NUM_NODES_P;
                 inter_rack_capacity = capacities[j];
-                reset_admissible_status(status, true, inter_rack_capacity,
+                reset_admissible_status(status, true, inter_rack_capacity, 0,
                                         num_nodes);
                 fraction = fraction * ((double) inter_rack_capacity) / MAX_NODES_PER_RACK;
             }

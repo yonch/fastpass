@@ -34,7 +34,8 @@ void admission_init_global(struct rte_ring *q_admitted_out)
 				"Cannot init q_head: %s\n", rte_strerror(rte_errno));
 
 	init_admissible_status(&g_admissible_status, OVERSUBSCRIBED,
-			INTER_RACK_CAPACITY, NUM_NODES, q_head, q_admitted_out);
+			INTER_RACK_CAPACITY, OUT_OF_BOUNDARY_CAPACITY, NUM_NODES, q_head,
+			q_admitted_out);
 
 	/* init log */
 	for (i = 0; i < RTE_MAX_LCORE; i++)
@@ -43,7 +44,7 @@ void admission_init_global(struct rte_ring *q_admitted_out)
 	/* init q_bin */
 	for (i = 0; i < N_ADMISSION_CORES; i++) {
 		rte_snprintf(s, sizeof(s), "q_bin_%d", i);
-		q_bin[i] = rte_ring_create(s, 2 * BATCH_SIZE, 0, 0);
+		q_bin[i] = rte_ring_create(s, 4 * NUM_BINS, 0, 0);
 		if (q_bin[i] == NULL)
 			rte_exit(EXIT_FAILURE,
 					"Cannot init q_bin[%d]: %s\n", i, rte_strerror(rte_errno));
@@ -64,7 +65,8 @@ void admission_init_global(struct rte_ring *q_admitted_out)
 		if (bin == NULL)
 			rte_exit(EXIT_FAILURE, "Cannot create bin %d to initialize q_bin[0]", i);
 
-		rte_ring_enqueue(q_bin[0], (void *)bin);
+		if (rte_ring_enqueue(q_bin[0], (void *)bin) != 0)
+			rte_exit(EXIT_FAILURE, "Couldn't enqueue initial bins!\n");
 	}
 
 }
@@ -124,7 +126,8 @@ int exec_admission_core(void *void_cmd_p)
 	if (core_ind == 0)
 		rte_ring_enqueue(q_urgent[core_ind], (void*)URGENT_Q_HEAD_TOKEN);
 
-	ADMISSION_DEBUG("starting allocations\n");
+	ADMISSION_DEBUG("core %d admission %d starting allocations\n",
+			rte_lcore_id(), core_ind);
 
 	/* do allocation loop */
 	while (1) {

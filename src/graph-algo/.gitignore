@@ -1,5 +1,6 @@
 test_euler_split
 benchmark_graph_algo
+benchmark_sjf
 test_bin_computation
 .settings/language.settings.xml
 rdtsc

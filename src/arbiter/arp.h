@@ -33,6 +33,15 @@ struct arp_ipv4_hdr {
 
 #define ARP_IPV4_HDR_LEN (sizeof(struct arp_ipv4_hdr))
 
+#define RTE_LOGTYPE_ARP RTE_LOGTYPE_USER1
+
+#ifdef CONFIG_IP_FASTPASS_DEBUG
+#define ARP_INFO(a...) RTE_LOG(INFO, ARP, ##a)
+#else
+#define ARP_INFO(a...)
+#endif
+
+
 static inline struct rte_mbuf *
 make_arp(uint8_t src_port, uint8_t oper, struct ether_addr *sha, uint32_t spa,
 		struct ether_addr *tha, uint32_t tpa)
@@ -105,7 +114,7 @@ static void send_gratuitous_arp(uint16_t port, uint32_t ip) {
 		res = burst_single_packet(mbuf, port);
 	} while (res != 0);
 
-	RTE_LOG(INFO, ARP, "core %u sent gratuitous ARP for IP 0x%"PRIx32" on port %u\n",
+	ARP_INFO("core %u sent gratuitous ARP for IP 0x%"PRIx32" on port %u\n",
 			rte_lcore_id(), ip, port);
 }
 
@@ -119,7 +128,7 @@ static void print_arp(struct rte_mbuf *m, uint16_t portid) {
 	uint8_t *sha = &arp_hdr->sha.addr_bytes[0];
 	uint8_t *tha = &arp_hdr->tha.addr_bytes[0];
 
-	RTE_LOG(INFO, ARP, "core %u got ARP: port=%u sha=%02hhx:%02hhx:%02hhx:%02hhx:%02hhx:%02hhx spa=0x%"PRIx32
+	ARP_INFO("core %u got ARP: port=%u sha=%02hhx:%02hhx:%02hhx:%02hhx:%02hhx:%02hhx spa=0x%"PRIx32
 			" tha=%02hhx:%02hhx:%02hhx:%02hhx:%02hhx:%02hhx tpa=0x%"PRIx32"\n",
 			rte_lcore_id(), portid,
 			sha[0], sha[1], sha[2], sha[3], sha[4], sha[5], rte_be_to_cpu_32(arp_hdr->spa),

@@ -26,7 +26,10 @@ struct igmp_ipv4_hdr {
 #define TYPE_MEMBERSHIP_REPORT 0x16
 #define CONTROLLER_GROUP_ADDR 0xEF010101
 
+
 #define IGMP_IPV4_HDR_LEN (sizeof(struct igmp_ipv4_hdr))
+
+#define RTE_LOGTYPE_IGMP RTE_LOGTYPE_USER1
 
 #ifdef CONFIG_IP_FASTPASS_DEBUG
 #define IGMP_INFO(a...) RTE_LOG(INFO, IGMP, ##a)

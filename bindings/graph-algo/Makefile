@@ -10,7 +10,7 @@ CCFLAGS += -DNO_DPDK
 	$(CC) $(CCFLAGS) -c $< -fPIC
 
 # Dependency rules for non-file targets
-all: swig_graph swig_eulersplit swig_kapoorrizzi swig_structures swig_admissible swig_path_selection swig_fp_ring
+all: swig_graph swig_eulersplit swig_kapoorrizzi swig_structures swig_admissible swig_structures_sjf swig_admissible_sjf swig_path_selection swig_fp_ring
 clean:
 	rm -f *.o *.so *_wrap.c *~ *.py *.pyc
 
@@ -39,6 +39,16 @@ swig_admissible: admissible_traffic.o
 	swig -python admissible.i
 	gcc $(CCFLAGS) -fPIC -c admissible_wrap.c -o admissible_wrap.o -I/usr/include/python2.7
 	g++ -shared admissible_wrap.o -o _admissible.so admissible_traffic.o -lpython2.7 -fPIC
+
+swig_structures_sjf:
+	swig -python structures_sjf.i
+	gcc $(CCFLAGS) -fPIC -c structures_sjf_wrap.c -o structures_sjf_wrap.o -I/usr/include/python2.7
+	g++ -shared structures_sjf_wrap.o -o _structuressjf.so -lpython2.7 -fPIC
+
+swig_admissible_sjf: admissible_traffic_sjf.o
+	swig -python admissible_sjf.i
+	gcc $(CCFLAGS) -fPIC -c admissible_sjf_wrap.c -o admissible_sjf_wrap.o -I/usr/include/python2.7
+	g++ -shared admissible_sjf_wrap.o -o _admissiblesjf.so admissible_traffic_sjf.o -lpython2.7 -fPIC
 
 swig_path_selection: path_selection.o
 	swig -python path_selection.i

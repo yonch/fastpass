@@ -17,15 +17,9 @@
 #include "atomic.h"
 #include "fp_ring.h"
 #include "platform.h"
+
 #include "../protocol/topology.h"
 
-//#define MAX_NODES 1024
-//#define NODES_SHIFT 10  // 2^NODES_SHIFT = MAX_NODES
-////#define MAX_NODES 256
-////#define NODES_SHIFT 8  // 2^NODES_SHIFT = MAX_NODES
-//#define MAX_RACKS 16
-//#define TOR_SHIFT 5  // number of machines per rack is at most 2^TOR_SHIFT
-//#define MAX_NODES_PER_RACK 32  // = 2^TOR_SHIFT
 #define BATCH_SIZE 64  // must be consistent with bitmaps in batch_state
 #define BATCH_SHIFT 6  // 2^BATCH_SHIFT = BATCH_SIZE
 #define NONE_AVAILABLE 251
@@ -34,9 +28,8 @@
 #define LARGE_BIN_SIZE (MAX_NODES * MAX_NODES) // TODO: try smaller values
 #define NUM_BINS_SHIFT 8
 #define NUM_BINS 256 // 2^NUM_BINS_SHIFT
-#define NUM_SRC_DST_PAIRS (MAX_NODES * (MAX_NODES + 1))  // include dst == out of boundary
-//#define OUT_OF_BOUNDARY_NODE_ID MAX_NODES  // highest node id
-#define MAX_DSTS MAX_NODES + 1  // include dst == out of boundary
+#define NUM_SRC_DST_PAIRS (MAX_NODES * (MAX_NODES))  // include dst == out of boundary
+#define MAX_DSTS MAX_NODES
 #define MAX_SRCS MAX_NODES
 
 struct admitted_edge {
@@ -96,6 +89,16 @@ struct flow_status {
     atomic32_t backlog;
 };
 
+struct admission_statistics {
+	uint64_t wait_for_space_in_q_head;
+	uint64_t wait_for_space_in_q_urgent;
+	uint64_t wait_for_space_in_q_admitted_out;
+	uint64_t wait_for_space_in_q_bin_out;
+	uint64_t waiting_to_pass_token;
+	uint64_t pacing_wait;
+	uint64_t wait_for_q_bin_in;
+};
+
 // Tracks status for admissible traffic (last send time and demand for all flows, etc.)
 // over the lifetime of a controller
 struct admissible_status {
@@ -108,6 +111,7 @@ struct admissible_status {
     struct flow_status flows[NUM_SRC_DST_PAIRS];
     struct fp_ring *q_head;
     struct fp_ring *q_admitted_out;
+    struct admission_statistics stat;
 };
 
 // Initialize a list of a traffic admitted in a timeslot

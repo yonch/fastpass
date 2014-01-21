@@ -23,8 +23,8 @@ class Test(unittest.TestCase):
 
         # initialization
         q_bin = fpring.fp_ring_create(structuressjf.NUM_BINS_SHIFT)
-        q_urgent = fpring.fp_ring_create(2 * structuressjf.NODES_SHIFT + 1)
-        q_head = fpring.fp_ring_create(2 * structuressjf.NODES_SHIFT)
+        q_urgent = fpring.fp_ring_create(2 * structuressjf.FP_NODES_SHIFT + 1)
+        q_head = fpring.fp_ring_create(2 * structuressjf.FP_NODES_SHIFT)
         q_admitted_out= fpring.fp_ring_create(structuressjf.BATCH_SHIFT)
         core = structuressjf.create_admission_core_state()
         structuressjf.alloc_core_init(core, q_bin, q_bin, q_urgent, q_urgent)
@@ -64,8 +64,8 @@ class Test(unittest.TestCase):
  
         # initialization
         q_bin = fpring.fp_ring_create(structuressjf.NUM_BINS_SHIFT)
-        q_urgent = fpring.fp_ring_create(2 * structuressjf.NODES_SHIFT + 1)
-        q_head = fpring.fp_ring_create(2 * structuressjf.NODES_SHIFT)
+        q_urgent = fpring.fp_ring_create(2 * structuressjf.FP_NODES_SHIFT + 1)
+        q_head = fpring.fp_ring_create(2 * structuressjf.FP_NODES_SHIFT)
         q_admitted_out= fpring.fp_ring_create(structuressjf.BATCH_SHIFT)
         core = structuressjf.create_admission_core_state()
         structuressjf.alloc_core_init(core, q_bin, q_bin, q_urgent, q_urgent)
@@ -114,8 +114,8 @@ class Test(unittest.TestCase):
 
         # initialization
         q_bin = fpring.fp_ring_create(structuressjf.NUM_BINS_SHIFT)
-        q_urgent = fpring.fp_ring_create(2 * structuressjf.NODES_SHIFT + 1)
-        q_head = fpring.fp_ring_create(2 * structuressjf.NODES_SHIFT)
+        q_urgent = fpring.fp_ring_create(2 * structuressjf.FP_NODES_SHIFT + 1)
+        q_head = fpring.fp_ring_create(2 * structuressjf.FP_NODES_SHIFT)
         q_admitted_out= fpring.fp_ring_create(structuressjf.BATCH_SHIFT)
         core = structuressjf.create_admission_core_state()
         structuressjf.alloc_core_init(core, q_bin, q_bin, q_urgent, q_urgent)
@@ -186,8 +186,8 @@ class Test(unittest.TestCase):
 
         # initialization
         q_bin = fpring.fp_ring_create(structuressjf.NUM_BINS_SHIFT)
-        q_urgent = fpring.fp_ring_create(2 * structuressjf.NODES_SHIFT + 1)
-        q_head = fpring.fp_ring_create(2 * structuressjf.NODES_SHIFT)
+        q_urgent = fpring.fp_ring_create(2 * structuressjf.FP_NODES_SHIFT + 1)
+        q_head = fpring.fp_ring_create(2 * structuressjf.FP_NODES_SHIFT)
         q_admitted_out= fpring.fp_ring_create(structuressjf.BATCH_SHIFT)
         core = structuressjf.create_admission_core_state()
         structuressjf.alloc_core_init(core, q_bin, q_bin, q_urgent, q_urgent)
@@ -262,8 +262,8 @@ class Test(unittest.TestCase):
 
         # initialization
         q_bin = fpring.fp_ring_create(structuressjf.NUM_BINS_SHIFT)
-        q_urgent = fpring.fp_ring_create(2 * structuressjf.NODES_SHIFT + 1)
-        q_head = fpring.fp_ring_create(2 * structuressjf.NODES_SHIFT)
+        q_urgent = fpring.fp_ring_create(2 * structuressjf.FP_NODES_SHIFT + 1)
+        q_head = fpring.fp_ring_create(2 * structuressjf.FP_NODES_SHIFT)
         q_admitted_out= fpring.fp_ring_create(structuressjf.BATCH_SHIFT)
         core = structuressjf.create_admission_core_state()
         structuressjf.alloc_core_init(core, q_bin, q_bin, q_urgent, q_urgent)
@@ -311,8 +311,8 @@ class Test(unittest.TestCase):
 
         # initialization
         q_bin = fpring.fp_ring_create(structuressjf.NUM_BINS_SHIFT)
-        q_urgent = fpring.fp_ring_create(2 * structuressjf.NODES_SHIFT + 1)
-        q_head = fpring.fp_ring_create(2 * structuressjf.NODES_SHIFT)
+        q_urgent = fpring.fp_ring_create(2 * structuressjf.FP_NODES_SHIFT + 1)
+        q_head = fpring.fp_ring_create(2 * structuressjf.FP_NODES_SHIFT)
         q_admitted_out= fpring.fp_ring_create(structuressjf.BATCH_SHIFT)
         core = structuressjf.create_admission_core_state()
         structuressjf.alloc_core_init(core, q_bin, q_bin, q_urgent, q_urgent)

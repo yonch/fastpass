@@ -53,8 +53,8 @@ class admissible_runner(object):
     def run_round_robin_admissible(self):
         # initialization
         q_bin = fpring.fp_ring_create(structures.NUM_BINS_SHIFT)
-        q_urgent = fpring.fp_ring_create(2 * structures.NODES_SHIFT + 1)
-        q_head = fpring.fp_ring_create(2 * structures.NODES_SHIFT)
+        q_urgent = fpring.fp_ring_create(2 * structures.FP_NODES_SHIFT + 1)
+        q_head = fpring.fp_ring_create(2 * structures.FP_NODES_SHIFT)
         q_admitted_out= fpring.fp_ring_create(structures.BATCH_SHIFT)
 
         core = structures.create_admission_core_state()
@@ -122,8 +122,8 @@ class admissible_runner(object):
     def run_shortest_job_first_admissible(self):
         # initialization
         q_bin = fpring.fp_ring_create(structuressjf.NUM_BINS_SHIFT)
-        q_urgent = fpring.fp_ring_create(2 * structuressjf.NODES_SHIFT + 1)
-        q_head = fpring.fp_ring_create(2 * structuressjf.NODES_SHIFT)
+        q_urgent = fpring.fp_ring_create(2 * structuressjf.FP_NODES_SHIFT + 1)
+        q_head = fpring.fp_ring_create(2 * structuressjf.FP_NODES_SHIFT)
         q_admitted_out= fpring.fp_ring_create(structuressjf.BATCH_SHIFT)
 
         core = structuressjf.create_admission_core_state()

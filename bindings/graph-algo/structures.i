@@ -1,6 +1,7 @@
 %module structures
 
 %{
+#include "../../src/protocol/topology.h"
 #include "../../src/graph-algo/admissible_structures.h"
 %}
 
@@ -8,4 +9,5 @@
 
 #define __attribute__(x)
 
+%include "../../src/protocol/topology.h"
 %include "../../src/graph-algo/admissible_structures.h"

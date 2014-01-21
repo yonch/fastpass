@@ -23,8 +23,8 @@ class Test(unittest.TestCase):
 
         # initialization
         q_bin = fpring.fp_ring_create(structures.NUM_BINS_SHIFT)
-        q_urgent = fpring.fp_ring_create(2 * structures.NODES_SHIFT + 1)
-        q_head = fpring.fp_ring_create(2 * structures.NODES_SHIFT)
+        q_urgent = fpring.fp_ring_create(2 * structures.FP_NODES_SHIFT + 1)
+        q_head = fpring.fp_ring_create(2 * structures.FP_NODES_SHIFT)
         q_admitted_out= fpring.fp_ring_create(structures.BATCH_SHIFT)
         core = structures.create_admission_core_state()
         structures.alloc_core_init(core, q_bin, q_bin, q_urgent, q_urgent)
@@ -64,8 +64,8 @@ class Test(unittest.TestCase):
  
         # initialization
         q_bin = fpring.fp_ring_create(structures.NUM_BINS_SHIFT)
-        q_urgent = fpring.fp_ring_create(2 * structures.NODES_SHIFT + 1)
-        q_head = fpring.fp_ring_create(2 * structures.NODES_SHIFT)
+        q_urgent = fpring.fp_ring_create(2 * structures.FP_NODES_SHIFT + 1)
+        q_head = fpring.fp_ring_create(2 * structures.FP_NODES_SHIFT)
         q_admitted_out= fpring.fp_ring_create(structures.BATCH_SHIFT)
         core = structures.create_admission_core_state()
         structures.alloc_core_init(core, q_bin, q_bin, q_urgent, q_urgent)
@@ -106,8 +106,8 @@ class Test(unittest.TestCase):
 
         # initialization
         q_bin = fpring.fp_ring_create(structures.NUM_BINS_SHIFT)
-        q_urgent = fpring.fp_ring_create(2 * structures.NODES_SHIFT + 1)
-        q_head = fpring.fp_ring_create(2 * structures.NODES_SHIFT)
+        q_urgent = fpring.fp_ring_create(2 * structures.FP_NODES_SHIFT + 1)
+        q_head = fpring.fp_ring_create(2 * structures.FP_NODES_SHIFT)
         q_admitted_out= fpring.fp_ring_create(structures.BATCH_SHIFT)
         core = structures.create_admission_core_state()
         structures.alloc_core_init(core, q_bin, q_bin, q_urgent, q_urgent)
@@ -180,8 +180,8 @@ class Test(unittest.TestCase):
 
         # initialization
         q_bin = fpring.fp_ring_create(structures.NUM_BINS_SHIFT)
-        q_urgent = fpring.fp_ring_create(2 * structures.NODES_SHIFT + 1)
-        q_head = fpring.fp_ring_create(2 * structures.NODES_SHIFT)
+        q_urgent = fpring.fp_ring_create(2 * structures.FP_NODES_SHIFT + 1)
+        q_head = fpring.fp_ring_create(2 * structures.FP_NODES_SHIFT)
         q_admitted_out= fpring.fp_ring_create(structures.BATCH_SHIFT)
         core = structures.create_admission_core_state()
         structures.alloc_core_init(core, q_bin, q_bin, q_urgent, q_urgent)
@@ -256,8 +256,8 @@ class Test(unittest.TestCase):
 
         # initialization
         q_bin = fpring.fp_ring_create(structures.NUM_BINS_SHIFT)
-        q_urgent = fpring.fp_ring_create(2 * structures.NODES_SHIFT + 1)
-        q_head = fpring.fp_ring_create(2 * structures.NODES_SHIFT)
+        q_urgent = fpring.fp_ring_create(2 * structures.FP_NODES_SHIFT + 1)
+        q_head = fpring.fp_ring_create(2 * structures.FP_NODES_SHIFT)
         q_admitted_out= fpring.fp_ring_create(structures.BATCH_SHIFT)
         core = structures.create_admission_core_state()
         structures.alloc_core_init(core, q_bin, q_bin, q_urgent, q_urgent)
@@ -305,8 +305,8 @@ class Test(unittest.TestCase):
 
         # initialization
         q_bin = fpring.fp_ring_create(structures.NUM_BINS_SHIFT)
-        q_urgent = fpring.fp_ring_create(2 * structures.NODES_SHIFT + 1)
-        q_head = fpring.fp_ring_create(2 * structures.NODES_SHIFT)
+        q_urgent = fpring.fp_ring_create(2 * structures.FP_NODES_SHIFT + 1)
+        q_head = fpring.fp_ring_create(2 * structures.FP_NODES_SHIFT)
         q_admitted_out= fpring.fp_ring_create(structures.BATCH_SHIFT)
         core = structures.create_admission_core_state()
         structures.alloc_core_init(core, q_bin, q_bin, q_urgent, q_urgent)
@@ -354,8 +354,8 @@ class Test(unittest.TestCase):
 
         # initialization
         q_bin = fpring.fp_ring_create(structures.NUM_BINS_SHIFT)
-        q_urgent = fpring.fp_ring_create(2 * structures.NODES_SHIFT + 1)
-        q_head = fpring.fp_ring_create(2 * structures.NODES_SHIFT)
+        q_urgent = fpring.fp_ring_create(2 * structures.FP_NODES_SHIFT + 1)
+        q_head = fpring.fp_ring_create(2 * structures.FP_NODES_SHIFT)
         q_admitted_out= fpring.fp_ring_create(structures.BATCH_SHIFT)
         core = structures.create_admission_core_state()
         structures.alloc_core_init(core, q_bin, q_bin, q_urgent, q_urgent)

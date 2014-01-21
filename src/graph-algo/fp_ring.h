@@ -68,7 +68,7 @@ static inline int fp_ring_dequeue(struct fp_ring *ring, void **obj_p) {
 }
 
 static inline
-int fp_ring_dequeue_burst(struct rte_ring *r, void **obj_table, unsigned n) {
+int fp_ring_dequeue_burst(struct fp_ring *r, void **obj_table, unsigned n) {
 	int rc = 0;
 	int i;
 	for (i = 0; i < n; i++) {

@@ -780,8 +780,11 @@ int fpproto_encode_packet(struct fpproto_conn *conn,
 	struct fastpass_areq *areq;
 
 	u8 *curp = pkt;
+	u32 remaining_len = max_len;
 
 	/* header */
+	if (unlikely(remaining_len < 8))
+		return -1;
 	*(__be16 *)curp = htons((u16)(pd->seqno));
 	curp += 2;
 	*(__be16 *)curp = htons((u16)(pd->ack_seq));
@@ -790,33 +793,24 @@ int fpproto_encode_packet(struct fpproto_conn *conn,
 	curp += 2;
 	*(__be16 *)curp = 0; /* checksum */
 	curp += 2;
+	remaining_len -= 8;
 
 	/* RESET */
 	if (pd->send_reset) {
 		u32 hi_word;
+
+		if (unlikely(remaining_len < 8))
+			return -2;
+
 		hi_word = (FASTPASS_PTYPE_RESET << 28) |
 					((pd->reset_timestamp >> 32) & 0x00FFFFFF);
 		*(__be32 *)curp = htonl(hi_word);
 		*(__be32 *)(curp + 4) = htonl((u32)pd->reset_timestamp);
 		curp += 8;
+		remaining_len -= 8;
 	}
 
-#ifdef FASTPASS_ENDPOINT
-	if (pd->n_areq > 0) {
-		/* A-REQ type short */
-		*(__be16 *)curp = htons((FASTPASS_PTYPE_AREQ << 12) |
-						  (pd->n_areq & 0x3F));
-		curp += 2;
-
-		/* A-REQ requests */
-		for (i = 0; i < pd->n_areq; i++) {
-			areq = (struct fastpass_areq *)curp;
-			areq->dst = htons((__be16)pd->areq[i].src_dst_key);
-			areq->count = htons((u16)pd->areq[i].tslots);
-			curp += 4;
-		}
-	}
-#else
+#ifdef FASTPASS_CONTROLLER
 	if (pd->alloc_tslot > 0) {
 		/* ALLOC type short */
 		*(__be16 *)curp = htons((FASTPASS_PTYPE_ALLOC << 12)
@@ -835,7 +829,30 @@ int fpproto_encode_packet(struct fpproto_conn *conn,
 	(void) i; (void) areq; (void)conn; (void)max_len; /* TODO, fix this better */
 #endif
 
+	/* Must encode the A-REQ *after* allocations for correct endnode handling */
+	if (pd->n_areq > 0) {
+		if (unlikely(remaining_len < 2 + 4 * pd->n_areq))
+			return -3;
+
+		/* A-REQ type short */
+		*(__be16 *)curp = htons((FASTPASS_PTYPE_AREQ << 12) |
+						  (pd->n_areq & 0x3F));
+		curp += 2;
+		remaining_len -= 2;
+
+		/* A-REQ requests */
+		for (i = 0; i < pd->n_areq; i++) {
+			areq = (struct fastpass_areq *)curp;
+			areq->dst = htons((__be16)pd->areq[i].src_dst_key);
+			areq->count = htons((u16)pd->areq[i].tslots);
+			curp += 4;
+			remaining_len -= 4;
+		}
+	}
+
 	if (curp - pkt < min_size) {
+		if (unlikely(remaining_len < min_size - (curp - pkt)))
+			return -4;
 		/* add padding */
 		memset(curp, 0, min_size - (curp - pkt));
 		curp = pkt + min_size;
@@ -848,7 +865,10 @@ int fpproto_encode_packet(struct fpproto_conn *conn,
 	fp_debug("encoded pkt with seq 0x%llX ack_seq 0x%llX checksum 0x%04X len %ld\n",
 			pd->seqno, pd->ack_seq, *(__be16 *)(pkt + 6), curp - pkt);
 
-	return curp - pkt;
+	if (unlikely((int)(curp - pkt) > max_len))
+		return -5;
+
+	return (int)(curp - pkt);
 }
 
 void fpproto_dump_stats(struct fpproto_conn *conn, struct fp_proto_stat *stat)

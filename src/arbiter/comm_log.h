@@ -22,12 +22,14 @@
  */
 struct comm_log {
 	uint64_t rx_pkts;
+	uint64_t rx_bytes;
 	uint64_t rx_batches;
 	uint64_t rx_non_empty_batches;
 	uint64_t tx_cannot_alloc_mbuf;
 	uint64_t rx_non_ipv4_pkts;
 	uint64_t rx_ipv4_non_fastpss_pkts;
 	uint64_t tx_pkt;
+	uint64_t tx_bytes;
 	uint64_t pktdesc_alloc_failed;
 	uint64_t rx_truncated_pkt;
 	uint64_t areq_invalid_dst;
@@ -47,7 +49,14 @@ struct comm_log {
 	uint64_t neg_acks_with_alloc;
 	uint64_t neg_ack_destinations;
 	uint64_t neg_ack_timeslots;
-
+	uint64_t error_encoding_packet;
+	uint64_t flush_buffer_in_add_backlog;
+	uint64_t neg_ack_triggered_reports;
+	uint64_t reports_triggered;
+	uint64_t total_demand;
+	uint64_t acks_without_alloc;
+	uint64_t acks_with_alloc;
+	uint64_t total_acked_timeslots;
 };
 
 extern struct comm_log comm_core_logs[RTE_MAX_LCORE];
@@ -80,11 +89,23 @@ static inline void comm_log_processed_batch(int nb_rx, uint64_t rx_time) {
 	}
 }
 
+static inline void comm_log_rx_pkt(uint32_t size) {
+	CL->rx_bytes += size;
+}
+
 static inline void comm_log_tx_cannot_allocate_mbuf(uint32_t dst_ip) {
 	(void)dst_ip;
 	CL->tx_cannot_alloc_mbuf++;
 	COMM_DEBUG("core %d could not allocate TX mbuf for packet to IP "
 			"0x%Xu\n",rte_lcore_id(), rte_be_to_cpu_32(dst_ip));
+}
+
+static inline void comm_log_error_encoding_packet(uint32_t dst_ip,
+		uint16_t node_id, int32_t error_code) {
+	(void)dst_ip; (void)node_id; (void)error_code;
+	CL->error_encoding_packet++;
+	COMM_DEBUG("error encoding packet for node_id %d got error %d\n",
+			node_id, error_code);
 }
 
 static inline void comm_log_rx_non_ipv4_packet(uint8_t portid) {
@@ -99,10 +120,12 @@ static inline void comm_log_rx_ip_non_fastpass_pkt(uint8_t portid) {
 	COMM_DEBUG("got an IPv4 non-fastpass packet on portid %d\n", portid);
 }
 
-static inline void comm_log_tx_pkt(uint32_t node_id, uint64_t when) {
+static inline void comm_log_tx_pkt(uint32_t node_id, uint64_t when,
+		uint32_t n_bytes) {
 	(void)node_id;
 	(void)when;
 	CL->tx_pkt++;
+	CL->tx_bytes += n_bytes;
 	COMM_DEBUG("sending a packet to node ID %u at time %lu\n", node_id, when);
 }
 
@@ -132,6 +155,7 @@ static inline void comm_log_demand_increased(uint32_t node_id,
 		uint32_t dst, uint32_t orig_demand, uint32_t demand, int32_t demand_diff) {
 	(void)node_id;(void)dst;(void)orig_demand;(void)demand;(void)demand_diff;
 	CL->demand_increased++;
+	CL->total_demand += demand_diff;
 	COMM_DEBUG("demand for flow src %u dst %u increased by %d (from %u to %u)\n",
 			node_id, dst, demand_diff, orig_demand, demand);
 }
@@ -165,9 +189,9 @@ static inline void comm_log_got_admitted_tslot(uint16_t size, uint64_t timeslot)
 
 #ifdef CONFIG_IP_FASTPASS_DEBUG
 		uint64_t now = fp_get_time_ns(); /* TODO: disable this */
-		COMM_DEBUG("admitted_traffic for %d nodes (tslot %lu, now %lu, diff %ld, counter %lu)\n",
+		COMM_DEBUG("admitted_traffic for %d nodes (tslot %lu, now %lu, diff_tslots %ld, counter %lu)\n",
 				size, timeslot, now,
-				(int64_t)(timeslot * TIMESLOT_LENGTH_NS - now),
+				(int64_t)(timeslot - ((now * TIMESLOT_MUL) >> TIMESLOT_SHIFT)),
 				CL->processed_tslots);
 #endif
 	}
@@ -216,8 +240,8 @@ static inline void comm_log_neg_ack_increased_backlog(uint16_t src,
 }
 
 static inline void comm_log_neg_ack(uint16_t src, uint16_t n_dsts,
-		uint32_t n_tslots, uint64_t seqno) {
-	(void)src;(void)n_dsts;(void)n_tslots;(void)seqno;
+		uint32_t n_tslots, uint64_t seqno, uint32_t num_triggered) {
+	(void)src;(void)n_dsts;(void)n_tslots;(void)seqno;(void)num_triggered;
 	if (n_dsts == 0) {
 		CL->neg_acks_without_alloc++;
 		return;
@@ -225,8 +249,32 @@ static inline void comm_log_neg_ack(uint16_t src, uint16_t n_dsts,
 	CL->neg_acks_with_alloc++;
 	CL->neg_ack_destinations += n_dsts;
 	CL->neg_ack_timeslots += n_tslots;
-	COMM_DEBUG("neg ack node %d seqno %lX affected %d dsts %u timeslots\n",
+	CL->neg_ack_triggered_reports += num_triggered;
+	COMM_DEBUG("neg ack node %d seqno %lX triggered %u reports and affected %d dsts %u timeslots\n",
 			src, seqno, n_dsts, n_tslots);
+}
+
+static inline void comm_log_ack(uint16_t src, uint16_t n_dsts,
+		uint32_t n_tslots, uint64_t seqno) {
+	(void)src;(void)n_dsts;(void)n_tslots;(void)seqno;
+	if (n_dsts == 0) {
+		CL->acks_without_alloc++;
+		return;
+	}
+	CL->acks_with_alloc++;
+	CL->total_acked_timeslots += n_tslots;
+	COMM_DEBUG("ack node %d seqno %lX affected %d dsts %u timeslots\n",
+			src, seqno, n_dsts, n_tslots);
+}
+
+static inline void comm_log_triggered_report(uint16_t src, uint16_t dst) {
+	(void)src;(void)dst;
+	CL->reports_triggered++;
+	COMM_DEBUG("triggered report of total allocs from %d to %d\n", src, dst);
+}
+
+static inline void comm_log_flushed_buffer_in_add_backlog() {
+	CL->flush_buffer_in_add_backlog++;
 }
 
 #undef CL

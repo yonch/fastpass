@@ -107,8 +107,8 @@ int main(void)
 
     /* init queues */
     q_bin = fp_ring_create(NUM_BINS_SHIFT);
-    q_urgent = fp_ring_create(2 * NODES_SHIFT + 1);
-    q_head = fp_ring_create(2 * NODES_SHIFT);
+    q_urgent = fp_ring_create(2 * FP_NODES_SHIFT + 1);
+    q_head = fp_ring_create(2 * FP_NODES_SHIFT);
     q_admitted_out = fp_ring_create(BATCH_SHIFT);
     if (!q_bin) exit(-1);
     if (!q_urgent) exit(-1);

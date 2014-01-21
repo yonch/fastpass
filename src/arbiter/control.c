@@ -64,7 +64,7 @@ void launch_cores(void)
 	static uint64_t end_time;
 	int i; (void)i;
 	struct comm_core_cmd comm_cmd;
-	struct admission_core_cmd admission_cmd;
+	struct admission_core_cmd admission_cmd[N_ADMISSION_CORES];
 	struct path_sel_core_cmd path_sel_cmd;
 	struct log_core_cmd log_cmd;
 	uint64_t first_time_slot;
@@ -97,7 +97,7 @@ void launch_cores(void)
 		rte_exit(EXIT_FAILURE,
 				"Cannot init q_admitted: %s\n", rte_strerror(rte_errno));
 
-	/* create q_admitted_out */
+	/* create q_path_selected_out */
 	q_path_selected = rte_ring_create("q_path_selected",
 			2 * ADMITTED_TRAFFIC_MEMPOOL_SIZE, 0, 0);
 	if (q_path_selected == NULL)
@@ -118,27 +118,35 @@ void launch_cores(void)
 
 	/* launch admission core */
 	if (N_PATH_SEL_CORES > 0)
-		rte_eal_remote_launch(exec_path_sel_core, &path_sel_cmd, enabled_lcore[2]);
+		rte_eal_remote_launch(exec_path_sel_core, &path_sel_cmd,
+				enabled_lcore[FIRST_PATH_SEL_CORE]);
 
 	/*** ADMISSION CORES ***/
-	/* set commands */
-	admission_cmd.start_time = start_time;
-	admission_cmd.end_time = end_time;
-	admission_cmd.admission_core_index = 0;
-	admission_cmd.start_timeslot = first_time_slot;
-
 	/* initialize core structures */
-	admission_init_core(enabled_lcore[1]);
+	for (i = 0; i < N_ADMISSION_CORES; i++) {
+		uint16_t lcore_id = enabled_lcore[FIRST_ADMISSION_CORE + i];
+		admission_init_core(lcore_id);
+	}
 
-	/* launch admission core */
-	rte_eal_remote_launch(exec_admission_core, &admission_cmd, enabled_lcore[1]);
+	for (i = 0; i < N_ADMISSION_CORES; i++) {
+		uint16_t lcore_id = enabled_lcore[FIRST_ADMISSION_CORE + i];
+
+		/* set commands */
+		admission_cmd[i].start_time = start_time;
+		admission_cmd[i].end_time = end_time;
+		admission_cmd[i].admission_core_index = i;
+		admission_cmd[i].start_timeslot = first_time_slot + i * BATCH_SIZE;
+
+		/* launch admission core */
+		rte_eal_remote_launch(exec_admission_core, &admission_cmd[i], lcore_id);
+	}
 
 	/*** LOG CORE ***/
 	log_cmd.log_gap_ticks = (uint64_t)(LOG_GAP_SECS * rte_get_timer_hz());
 
 	/* launch log core */
 	rte_eal_remote_launch(exec_log_core, &log_cmd,
-			enabled_lcore[2 + N_PATH_SEL_CORES]);
+			enabled_lcore[FIRST_LOG_CORE]);
 
 	/*** COMM CORES ***/
 	// Set commands

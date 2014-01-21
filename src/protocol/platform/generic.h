@@ -21,6 +21,8 @@
 	 time_before_eq64(a, c))
 #endif
 
+#define fp_jhash_3words 	jhash_3words
+
 #else
 
 #include <stdio.h>
@@ -28,7 +30,22 @@
 #include <stdlib.h>
 #include <stdint.h>
 #include <stdbool.h>
+
+#ifdef __APPLE__
+#include <sys/types.h>
+
+typedef unsigned long long __u64;
+typedef long long __s64;
+typedef uint32_t __u32;
+typedef uint32_t __be32;
+typedef uint32_t __wsum;
+typedef uint16_t __u16;
+typedef uint16_t __be16;
+typedef uint16_t __sum16;
+
+#else
 #include <linux/types.h>
+#endif
 
 #ifdef _RTE_IP_H_
 #include <rte_byteorder.h>
@@ -44,11 +61,11 @@
 
 #else
 #ifndef unlikely
-#define unlikely
+#define unlikely(x)  (x)
 #endif
 
 #ifndef likely
-#define likely
+#define likely(x) (x)
 #endif
 #endif
 
@@ -94,17 +111,6 @@ typedef uint32_t u32;
 typedef int32_t s32;
 typedef uint16_t u16;
 typedef uint8_t u8;
-
-#if 0
-typedef unsigned long long __u64;
-typedef long long __s64;
-typedef uint32_t __u32;
-typedef uint32_t __be32;
-typedef uint32_t __wsum;
-typedef uint16_t __u16;
-typedef uint16_t __be16;
-typedef uint16_t __sum16;
-#endif
 
 /* kernel.h */
 #define max_t(type, x, y) ({			\
@@ -223,6 +229,17 @@ do_last:
 	return (u32)sum + (u32)(sum >> 32);    /* add the overflow */
 }
 
+static inline uint16_t fp_fold(uint64_t sum64)
+{
+    uint32_t sum32;
+
+    /* now fold */
+    sum64 = (u32)sum64 + (sum64 >> 32); /* could have overflow on bit 32 */
+    sum32 = sum64 + (sum64 >> 32);    /* add the overflow */
+    sum32 = (u16)sum32 + (sum32 >> 16); /* could have overflow on bit 16 */
+    return ~((u16)sum32 + (u16)(sum32 >> 16)); /* add the overflow */
+}
+
 static inline uint16_t fp_csum_tcpudp_magic(uint32_t saddr, uint32_t daddr,
 		uint16_t len, uint16_t proto, uint32_t sum32)
 {
@@ -230,10 +247,7 @@ static inline uint16_t fp_csum_tcpudp_magic(uint32_t saddr, uint32_t daddr,
 	sum64 += saddr + daddr + ((len + proto) << 8);
 
 	/* now fold */
-	sum64 = (u32)sum64 + (sum64 >> 32); /* could have overflow on bit 32 */
-	sum32 = sum64 + (sum64 >> 32);    /* add the overflow */
-	sum32 = (u16)sum32 + (sum32 >> 16); /* could have overflow on bit 16 */
-	return ~((u16)sum32 + (u16)(sum32 >> 16)); /* add the overflow */
+	return fp_fold(sum64);
 }
 
 #endif /* __KERNEL__ */

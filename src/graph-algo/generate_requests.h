@@ -72,6 +72,42 @@ void get_next_request(struct request_generator *gen, struct request *req) {
         req->dst++;  // Don't send to self
 }
 
+// Helper method for benchmarking schedule quality in Python
+static inline
+struct request *create_next_request(struct request_generator *gen) {
+    assert(gen != NULL);
+    
+    struct request *req = malloc(sizeof(struct request));
+    if (req == NULL)
+        return NULL;
+
+    get_next_request(gen, req);
+
+    return req;
+}
+
+// Helper method for testing in Python
+static inline
+void destroy_request(struct request *req) {
+    assert(req != NULL);
+
+    free(req);
+}
+
+// Helper method for testing in Python
+static inline
+struct request_generator *create_request_generator(double mean_t_btwn_requests,
+                                                   double start_time,
+                                                   uint16_t num_nodes) {
+    struct request_generator *gen = malloc(sizeof(struct request_generator));
+    if (gen == NULL)
+        return NULL;
+
+    init_request_generator(gen, mean_t_btwn_requests, start_time, num_nodes);
+
+    return gen;
+}
+
 // Generate a sequence of requests with Poisson arrival times, puts them in edges
 // Returns the number of requests generated
 static inline

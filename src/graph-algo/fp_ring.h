@@ -43,13 +43,15 @@ struct fp_ring *fp_ring_create(uint32_t log_size) {
 
 // Insert new bin to the back of this backlog queue
 static inline
-void fp_ring_enqueue(struct fp_ring *ring, void *elem) {
+int fp_ring_enqueue(struct fp_ring *ring, void *elem) {
 	assert(ring != NULL);
 	assert(elem != NULL);
 	assert(ring->tail != ring->head - ring->mask - 1);
 
 	ring->elem[ring->tail & ring->mask] = elem;
 	ring->tail++;
+        
+        return 0;
 }
 
 /**
@@ -68,7 +70,7 @@ static inline int fp_ring_dequeue(struct fp_ring *ring, void **obj_p) {
 }
 
 static inline
-int fp_ring_dequeue_burst(struct rte_ring *r, void **obj_table, unsigned n) {
+int fp_ring_dequeue_burst(struct fp_ring *r, void **obj_table, unsigned n) {
 	int rc = 0;
 	int i;
 	for (i = 0; i < n; i++) {

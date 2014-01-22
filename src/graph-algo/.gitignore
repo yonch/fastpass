@@ -4,3 +4,5 @@ benchmark_sjf
 test_bin_computation
 .settings/language.settings.xml
 rdtsc
+Rplots*
+*.csv

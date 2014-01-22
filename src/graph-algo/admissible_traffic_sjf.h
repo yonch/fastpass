@@ -14,6 +14,11 @@
 
 #define URGENT_Q_HEAD_TOKEN		(~0UL)
 
+/**
+ * Returns true if @out_edge should be enqueued to q_head
+ */
+bool add_backlog_no_enqueue(struct admissible_status *status, uint16_t src,
+                            uint16_t dst, uint16_t backlog_increase, void **out_edge);
 
 // Increase the backlog from src to dst
 void add_backlog(struct admissible_status *status,

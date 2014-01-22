@@ -488,14 +488,26 @@ ipv4_ipv6:
 		goto cannot_classify;
 
 	/* special case for important packets, let through with high priority */
+	if (unlikely(keys.ip_proto == IPPROTO_IGMP)) {
+		/* IGMP is used for PTP multicast membership, allow all of them */
+		q->stat.igmp_pkts++;
+		return &q->internal;
+	}
+
 	if (unlikely(keys.ip_proto == IPPROTO_UDP)) {
 		/* NTP packets */
-		if (unlikely(keys.port16[1] == htons(123))) {
+		if (unlikely(keys.port16[1] == __constant_htons(123))) {
 			q->stat.ntp_pkts++;
 			return &q->internal;
 		}
+		/* SSH packets, so we can access server */
+		if (unlikely(keys.port16[0] == __constant_htons(22))) {
+			q->stat.ssh_pkts++;
+			return &q->internal;
+		}
+
 		/* PTP packets are port 319,320 */
-		if (unlikely(((ntohs(keys.port16[1]) - 1) & ~1) == 318)) {
+		if (((ntohs(keys.port16[1]) - 1) & ~1) == 318) {
 			q->stat.ptp_pkts++;
 			return &q->internal;
 		}
@@ -762,9 +774,9 @@ begin:
 
 		/* timeslots are late and backlog is full. will reschedule */
 		q->stat.backlog_too_high++;
-		fp_debug("backlog too high processing timeslot %llu at %llu, rescheduling key 0x%llX\n",
-				next_nonempty, q->current_timeslot, next_key);
-		goto reschedule_timeslot_and_continue;
+		fp_debug("backlog too high processing timeslot %llu at %llu, will try again at next update\n",
+				next_nonempty, q->current_timeslot);
+		goto done;
 	}
 
 	/* Okay can move timeslot! */
@@ -791,10 +803,24 @@ begin:
 	/* statistics */
 	moved_timeslots++;
 	q->stat.sucessful_timeslots++;
-	if (next_nonempty < q->current_timeslot)
-		q->stat.late_enqueue++;
-	if (next_nonempty > q->current_timeslot)
+	if (next_nonempty > q->current_timeslot) {
 		q->stat.early_enqueue++;
+	} else {
+		u64 tslot = q->current_timeslot;
+		u64 thresh = q->miss_threshold;
+		if (unlikely(next_nonempty < tslot - (thresh >> 1))) {
+			if (unlikely(next_nonempty < tslot - 3*(thresh >> 2)))
+				q->stat.late_enqueue4++;
+			else
+				q->stat.late_enqueue3++;
+		} else {
+			if (unlikely(next_nonempty < tslot - (thresh >> 2)))
+				q->stat.late_enqueue2++;
+			else
+				q->stat.late_enqueue1++;
+
+		}
+	}
 
 	goto begin; /* try another timeslot */
 

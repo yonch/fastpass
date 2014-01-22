@@ -16,7 +16,7 @@
 #include "path_selection.h"
 
 #define NUM_FRACTIONS_A 11
-#define NUM_SIZES_A 7
+#define NUM_SIZES_A 5
 #define NUM_FRACTIONS_P 11
 #define NUM_CAPACITIES_P 4
 #define NUM_NODES_P 256
@@ -25,7 +25,7 @@
 const double admissible_fractions [NUM_FRACTIONS_A] =
     {0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9, 0.95, 0.99};
 const uint32_t admissible_sizes [NUM_SIZES_A] =
-    {1024, 512, 256, 128, 64, 32, 16};
+    {2048, 1024, 512, 256, 128/*, 64, 32, 16*/};
 const double path_fractions [NUM_FRACTIONS_P] =
     {0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9, 0.95, 0.99};
 const uint16_t path_capacities [NUM_CAPACITIES_P] =

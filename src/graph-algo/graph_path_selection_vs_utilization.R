@@ -12,37 +12,26 @@
 # This script can be run using:
 # R < ./graph_path_selection_vs_utilization.R --save
 
+# use the ggplot2 library
+library(ggplot2)
+
 data <- read.csv("output.csv", sep=",")
 attach(data)
 
-min_ratio = min(data$oversubscription_ratio)
-max_ratio = max(data$oversubscription_ratio)
-num_ratios = length(unique(data$oversubscription_ratio))
+# call device driver
+pdf(file="scalability_path_selection.pdf", width=6.6, height=3)
 
-# set up plot
-xrange <- range(observed_utilization)
-yrange <- range(data$time, 0)
-plot(xrange, yrange, type="n", xlab="Interrack Utilization (%)", ylab="Latency (microseconds)")
+theme_set(theme_bw(base_size=10))
 
-colors <- rainbow(num_ratios)
-linetype <- c(1:num_ratios)
-plotchar <- seq(15, 15+num_ratios, 1)
-
-# add plot lines
-ratio = min_ratio
-i = 1
-while (ratio <= max_ratio) {
-	data_for_this_size <- subset(data, oversubscription_ratio==ratio)
-	lines(data_for_this_size$observed_utilization, data_for_this_size$time, type="b", lwd=1.5, lty=linetype[i], col=colors[i], pch=plotchar[i])
-	ratio <- 2 * ratio
-	i <- i + 1
-}
-
-# add a title
-title("Latency of Path Selection Algorithm")
-
-# add a legend
-ratios = 2^(log(min_ratio, 2):log(max_ratio, 2))
-legend(xrange[1], yrange[2], ratios, cex=0.8, col=colors, pch=plotchar, lty=linetype, title="Oversubscription Ratio")
+ggplot(data, aes(x=observed_utilization, y=time,
+             group=as.factor(oversubscription_ratio), color=as.factor(oversubscription_ratio))) +
+             geom_point() + geom_line() +
+             scale_color_discrete(name="Oversubscription\nRatio") +
+             labs(x = "Network Utilization (%)",
+                  y = "Latency (microseconds)") +
+             guides(col = guide_legend(reverse = TRUE)) +
+             coord_cartesian(ylim=c(0, 25))
 
 detach(data)
+
+dev.off()

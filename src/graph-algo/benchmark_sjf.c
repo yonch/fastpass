@@ -15,14 +15,14 @@
 #include "generate_requests.h"
 
 #define NUM_FRACTIONS_A 11
-#define NUM_SIZES_A 7
+#define NUM_SIZES_A 5
 #define NUM_NODES_P 256
 #define PROCESSOR_SPEED 2.8
 
 const double admissible_fractions [NUM_FRACTIONS_A] =
     {0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9, 0.95, 0.99};
 const uint32_t admissible_sizes [NUM_SIZES_A] =
-    {1024, 512, 256, 128, 64, 32, 16};
+    {2048, 1024, 512, 256, 128/*, 64, 32, 16*/};
 
 // Runs one experiment. Returns the number of packets admitted.
 uint32_t run_experiment(struct request_info *requests, uint32_t start_time, uint32_t end_time,

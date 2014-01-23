@@ -39,8 +39,9 @@ void print_comm_log(uint16_t lcore_id)
 			(s64)(now_timeslot - ccs->latest_timeslot));
 
 #define D(X) (cl->X - sv->X)
-	printf("\n  RX %lu pkts, %lu bytes in %lu batches (%lu non-empty batches)",
-			D(rx_pkts), D(rx_bytes), D(rx_batches), D(rx_non_empty_batches));
+	printf("\n  RX %lu pkts, %lu bytes in %lu batches (%lu non-empty batches), %lu dropped",
+			D(rx_pkts), D(rx_bytes), D(rx_batches), D(rx_non_empty_batches),
+			D(dropped_rx_due_to_deadline));
 	printf("\n  %lu total demand from %lu demand increases %lu demand remained, %lu neg-ack with alloc, %lu demands",
 			D(total_demand), D(demand_increased), D(demand_remained), D(neg_acks_with_alloc),
 			D(neg_ack_timeslots));
@@ -53,8 +54,9 @@ void print_comm_log(uint16_t lcore_id)
 #undef D
 	printf("\n");
 
-	printf("\n  RX %lu pkts, %lu bytes in %lu batches (%lu non-empty batches)",
-			cl->rx_pkts, cl->rx_bytes, cl->rx_batches, cl->rx_non_empty_batches);
+	printf("\n  RX %lu pkts, %lu bytes in %lu batches (%lu non-empty batches), %lu dropped",
+			cl->rx_pkts, cl->rx_bytes, cl->rx_batches, cl->rx_non_empty_batches,
+			cl->dropped_rx_due_to_deadline);
 	printf("\n  %lu non-IPv4, %lu IPv4 non-fastpass",
 			cl->rx_non_ipv4_pkts, cl->rx_ipv4_non_fastpss_pkts);
 	printf("\n  %lu total demand from %lu demand increases, %lu demand remained",

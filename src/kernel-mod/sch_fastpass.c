@@ -65,6 +65,8 @@
  */
 #define FASTPASS_REQUEST_LOW_WATERMARK (1 << 9)
 
+#define CLOCK_MOVE_RESET_THRESHOLD_TSLOTS	64
+
 enum {
 	FLOW_UNQUEUED,
 	FLOW_REQUEST_QUEUE,
@@ -126,8 +128,9 @@ struct fp_sched_data {
 	/* state */
 	struct rb_root	*flow_hash_tbl;		/* table of rb-trees of flows */
 
-	struct fp_flow	internal;		/* for non classified or high prio packets */
+	struct fp_flow	internal;			/* for regular queue */
 	u64				internal_free_time; /* approx time when internal will be free */
+	struct fp_flow	hi_prio;			/* for high prio traffic */
 
 	struct list_head unreq_flows; 		/* flows with unscheduled packets */
 	struct list_head retrans_flows; 	/* flows with a retransmission pending */
@@ -470,7 +473,7 @@ static struct fp_flow *fpq_classify(struct sk_buff *skb, struct fp_sched_data *q
 		/* Special case the PTP broadcasts: MAC 01:1b:19:00:00:00 */
 		if (likely(get_mac(skb) == 0x011b19000000)) {
 			q->stat.ptp_pkts++;
-			return &q->internal;
+			return &q->hi_prio;
 		}
 		goto cannot_classify;
 
@@ -498,21 +501,21 @@ ipv4_ipv6:
 		/* NTP packets */
 		if (unlikely(keys.port16[1] == __constant_htons(123))) {
 			q->stat.ntp_pkts++;
-			return &q->internal;
-		}
-		/* SSH packets, so we can access server */
-		if (unlikely(keys.port16[0] == __constant_htons(22))) {
-			q->stat.ssh_pkts++;
-			return &q->internal;
+			return &q->hi_prio;
 		}
 
 		/* PTP packets are port 319,320 */
 		if (((ntohs(keys.port16[1]) - 1) & ~1) == 318) {
 			q->stat.ptp_pkts++;
+			return &q->hi_prio;
+		}
+	} else if (keys.ip_proto == IPPROTO_TCP) {
+		/* SSH packets, so we can access server */
+		if (unlikely(keys.port16[0] == __constant_htons(22))) {
+			q->stat.ssh_pkts++;
 			return &q->internal;
 		}
 	}
-
 	/* get MAC address */
 	src_dst_key = get_mac(skb);
 
@@ -594,7 +597,7 @@ static bool flow_enqueue_skb(struct Qdisc *sch, struct fp_flow *flow,
 		flow->tail = skb;
 	}
 
-	if (flow != &q->internal) {
+	if (flow != &q->internal && flow != &q->hi_prio) {
 		/* if credit relates to an old slot, discard it */
 		if (unlikely(flow->demand_tslots == flow->used_tslots))
 			flow->credit = 0;
@@ -635,20 +638,20 @@ static int fpq_enqueue(struct sk_buff *skb, struct Qdisc *sch)
 	struct fp_sched_data *q = qdisc_priv(sch);
 	struct fp_flow *f;
 
-	/* enforce qdisc packet limit */
-	if (unlikely(sch->q.qlen >= sch->limit))
-		return qdisc_drop(skb, sch);
-
 	f = fpq_classify(skb, q);
 
 	/* internal queue flows without scheduling */
-	if (unlikely(f == &q->internal)) {
+	if (unlikely(f == &q->internal || f == &q->hi_prio)) {
 		/* fix internal_free_time if there hasn't been enqueues in a while */
 		u64 now_monotonic = fp_monotonic_time_ns();
 		q->internal_free_time = max_t(u64, q->internal_free_time, now_monotonic);
 
 		/* unthrottle qdisc */
 		qdisc_unthrottled(sch);
+		__netif_schedule(qdisc_root(sch));
+	} else if (unlikely(sch->q.qlen >= sch->limit)) {
+		/* enforce qdisc packet limit */
+		return qdisc_drop(skb, sch);
 	} else if (unlikely(f->qlen >= q->flow_plimit)) {
 		/* enforce flow packet limit */
 		q->stat.flows_plimit++;
@@ -664,7 +667,6 @@ static int fpq_enqueue(struct sk_buff *skb, struct Qdisc *sch)
 	}
 	fp_debug("enqueued packet of len %d to flow 0x%llX, qlen=%d\n",
 			qdisc_pkt_len(skb), f->src_dst_key, f->qlen);
-
 
 	return NET_XMIT_SUCCESS;
 }
@@ -834,12 +836,17 @@ done:
 	/* update window around current timeslot */
 	tslot_advance = q->current_timeslot + FASTPASS_WND_LEN - 1 - q->miss_threshold - wnd_head(&q->alloc_wnd);
 	if (unlikely((s64)tslot_advance < 0)) {
-		if ((s64)tslot_advance < -4)
-			FASTPASS_WARN("current timeslot moved back a lot: %lld timeslots. new current %llu\n",
+		if ((s64)tslot_advance < CLOCK_MOVE_RESET_THRESHOLD_TSLOTS) {
+			FASTPASS_WARN("current timeslot moved back a lot: %lld timeslots. new current %llu. will reset\n",
 					(s64)tslot_advance, q->current_timeslot);
-		else
+			q->stat.clock_move_causes_reset++;
+			/* This corrupts the status; will force a reset */
+			fpproto_force_reset(fpproto_conn(q));
+			handle_reset((void *)sch); /* manually call callback since fpproto won't call it */
+		} else {
 			fp_debug("current timeslot moved back a little: %lld timeslots. new current %llu\n",
 					(s64)tslot_advance, q->current_timeslot);
+		}
 	} else {
 		/* tslot advance is non-negative, can call advance */
 		wnd_advance(&q->alloc_wnd, tslot_advance);
@@ -1342,6 +1349,11 @@ static struct sk_buff *fpq_dequeue(struct Qdisc *sch)
 	struct fp_sched_data *q = qdisc_priv(sch);
 	struct sk_buff *skb;
 
+	/* try hi_prio queue first */
+	skb = flow_dequeue_skb(sch, &q->hi_prio);
+	if (skb)
+		goto out_got_skb;
+
 	/* any packets already queued? */
 	skb = flow_dequeue_skb(sch, &q->internal);
 	if (skb)
@@ -1435,6 +1447,8 @@ static void fp_tc_reset(struct Qdisc *sch)
 	unsigned int idx;
 
 	while ((skb = flow_dequeue_skb(sch, &q->internal)) != NULL)
+		kfree_skb(skb);
+	while ((skb = flow_dequeue_skb(sch, &q->hi_prio)) != NULL)
 		kfree_skb(skb);
 
 	if (!q->flow_hash_tbl)
@@ -1795,6 +1809,7 @@ static int fp_tc_init(struct Qdisc *sch, struct nlattr *opt)
 	INIT_LIST_HEAD(&q->unreq_flows);
 	INIT_LIST_HEAD(&q->retrans_flows);
 	q->internal.src_dst_key = 0xD066F00DDEADBEEF;
+	q->hi_prio.src_dst_key = 0xABCDEEEEEEEEDCBA;
 	q->internal_free_time = now_monotonic;
 	q->tslot_mul		= 1;
 	q->tslot_shift		= 20;

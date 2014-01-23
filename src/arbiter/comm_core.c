@@ -608,12 +608,16 @@ static inline void do_rx_burst(struct lcore_conf* qconf)
 	uint8_t portid;
 	uint8_t queueid;
 	uint64_t rx_time;
+	uint64_t deadline_monotonic;
+
+	deadline_monotonic = rte_get_timer_cycles() + RX_BURST_DEADLINE_SEC * rte_get_timer_hz();
 
 	for (i = 0; i < qconf->n_rx_queue; ++i) {
 		portid = qconf->rx_queue_list[i].port_id;
 		queueid = qconf->rx_queue_list[i].queue_id;
 		nb_rx = rte_eth_rx_burst(portid, queueid, pkts_burst, MAX_PKT_BURST);
 		rx_time = fp_get_time_ns();
+
 
 		/* Prefetch first packets */
 		for (j = 0; j < PREFETCH_OFFSET && j < nb_rx; j++) {
@@ -624,7 +628,13 @@ static inline void do_rx_burst(struct lcore_conf* qconf)
 		for (j = 0; j < (nb_rx - PREFETCH_OFFSET); j++) {
 			rte_prefetch0(
 					rte_pktmbuf_mtod(pkts_burst[ j + PREFETCH_OFFSET], void *));
-			comm_rx(pkts_burst[j], portid);
+			if (rte_get_timer_cycles() < deadline_monotonic) {
+				comm_rx(pkts_burst[j], portid);
+			} else {
+				/* deadline passed, drop on the floor */
+				rte_pktmbuf_free(pkts_burst[j]);
+				comm_log_dropped_rx_passed_deadline();
+			}
 		}
 
 		/* handle remaining prefetched packets */

@@ -57,6 +57,7 @@ struct comm_log {
 	uint64_t acks_without_alloc;
 	uint64_t acks_with_alloc;
 	uint64_t total_acked_timeslots;
+	uint64_t dropped_rx_due_to_deadline;
 };
 
 extern struct comm_log comm_core_logs[RTE_MAX_LCORE];
@@ -275,6 +276,10 @@ static inline void comm_log_triggered_report(uint16_t src, uint16_t dst) {
 
 static inline void comm_log_flushed_buffer_in_add_backlog() {
 	CL->flush_buffer_in_add_backlog++;
+}
+
+static inline void comm_log_dropped_rx_passed_deadline() {
+	CL->dropped_rx_due_to_deadline++;
 }
 
 #undef CL

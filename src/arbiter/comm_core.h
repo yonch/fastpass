@@ -28,6 +28,9 @@
 /* The buffer size when writing to q_head */
 #define Q_HEAD_WRITE_BUFFER_SIZE		(32*1024)
 
+/* Deadline to handle all packets, or start dropping */
+#define RX_BURST_DEADLINE_SEC			0.000001
+
 /**
  * Specifications for controller thread
  * @comm_core_index: the index of the core among the comm cores

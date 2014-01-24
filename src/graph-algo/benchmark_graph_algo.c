@@ -19,7 +19,8 @@
 #define NUM_SIZES_A 5
 #define NUM_FRACTIONS_P 11
 #define NUM_CAPACITIES_P 4
-#define NUM_NODES_P 256
+#define NUM_RACKS_P 4
+#define NUM_NODES_P 1024
 #define PROCESSOR_SPEED 2.8
 
 const double admissible_fractions [NUM_FRACTIONS_A] =
@@ -30,10 +31,13 @@ const double path_fractions [NUM_FRACTIONS_P] =
     {0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9, 0.95, 0.99};
 const uint16_t path_capacities [NUM_CAPACITIES_P] =
     {4, 8, 16, 32};  // inter-rack capacities (32 machines per rack)
+const uint8_t path_num_racks [NUM_RACKS_P] =
+    {32, 16, 8, 4};
 
 enum benchmark_type {
     ADMISSIBLE,
-    PATH_SELECTION
+    PATH_SELECTION_OVERSUBSCRIPTION,
+    PATH_SELECTION_RACKS
 };
 
 // Runs one experiment. Returns the number of packets admitted.
@@ -133,7 +137,7 @@ uint32_t run_admissible(struct request_info *requests, uint32_t start_time, uint
 
 void print_usage(char **argv) {
     printf("usage: %s benchmark_type\n", argv[0]);
-    printf("\tbenchmark_type=0 for admissible traffic benchmark, benchmark_type=1 for path selection benchmark\n");
+    printf("\tbenchmark_type=0 for admissible traffic benchmark, benchmark_type=1 for path selection benchmark (vary oversubscription ratio), benchmark_type=2 for path selection (vary #racks)\n");
 }
 
 int main(int argc, char **argv)
@@ -149,7 +153,9 @@ int main(int argc, char **argv)
     if (type == 0)
         benchmark_type = ADMISSIBLE;
     else if (type == 1)
-        benchmark_type = PATH_SELECTION;
+        benchmark_type = PATH_SELECTION_OVERSUBSCRIPTION;
+    else if (type == 2)
+        benchmark_type = PATH_SELECTION_RACKS;
     else {
         print_usage(argv);
         return -1;
@@ -167,6 +173,7 @@ int main(int argc, char **argv)
     const double *fractions;
     const uint32_t *sizes;
     const uint16_t *capacities;
+    const uint8_t *racks;
     uint8_t num_fractions;
     uint8_t num_parameter_2;
     if (benchmark_type == ADMISSIBLE) {
@@ -177,7 +184,7 @@ int main(int argc, char **argv)
         // init parameter 2 - sizes
         num_parameter_2 = NUM_SIZES_A;
         sizes = admissible_sizes;
-    } else {
+    } else if (benchmark_type == PATH_SELECTION_OVERSUBSCRIPTION) {
         // init fractions
         num_fractions = NUM_FRACTIONS_P;
         fractions = path_fractions;
@@ -185,6 +192,14 @@ int main(int argc, char **argv)
         // init parameter 2 - inter-rack capacities
         num_parameter_2 = NUM_CAPACITIES_P;
         capacities = path_capacities;
+    } else {
+        // init fractions
+        num_fractions = NUM_FRACTIONS_P;
+        fractions = path_fractions;
+
+        // init parameter 2 - number of racks
+        num_parameter_2 = NUM_RACKS_P;
+        racks = path_num_racks;
     }
 
     // Data structures
@@ -245,14 +260,17 @@ int main(int argc, char **argv)
 
     if (benchmark_type == ADMISSIBLE)
         printf("target_utilization, nodes, time, observed_utilization, time/utilzn\n");
-    else
+    else if (benchmark_type == PATH_SELECTION_OVERSUBSCRIPTION)
         printf("target_utilization, oversubscription_ratio, time, observed_utilization, time/utilzn\n"); 
+    else
+        printf("target_utilization, num_racks, time, observed_utilization, time/utilzn\n"); 
 
     for (i = 0; i < num_fractions; i++) {
 
         for (j = 0; j < num_parameter_2; j++) {
             double fraction = fractions[i];
             uint32_t num_nodes;
+            uint8_t num_racks;
             uint16_t inter_rack_capacity;
 
             // Initialize data structures
@@ -260,13 +278,19 @@ int main(int argc, char **argv)
                 num_nodes = sizes[j];
                 reset_admissible_status(status, false, 0, 0, num_nodes);
             }
-            else if (benchmark_type == PATH_SELECTION) {
+            else if (benchmark_type == PATH_SELECTION_OVERSUBSCRIPTION) {
                 num_nodes = NUM_NODES_P;
                 inter_rack_capacity = capacities[j];
                 reset_admissible_status(status, true, inter_rack_capacity, 0,
                                         num_nodes);
                 fraction = fraction * ((double) inter_rack_capacity) / MAX_NODES_PER_RACK;
+            } else if (benchmark_type == PATH_SELECTION_RACKS) {
+                num_racks = racks[j];
+                num_nodes = MAX_NODES_PER_RACK * num_racks;
+                inter_rack_capacity = MAX_NODES_PER_RACK;
+                reset_admissible_status(status, false, 0, 0, num_nodes);
             }
+
             for (k = 0; k < NUM_BINS; k++) {
             	struct bin *b;
             	fp_ring_dequeue(q_bin, (void **)&b);
@@ -288,7 +312,8 @@ int main(int argc, char **argv)
             uint32_t num_requests = generate_requests_poisson(requests, max_requests, num_nodes,
                                                               duration, fraction, mean);
 
-            if (benchmark_type == PATH_SELECTION) {
+            if (benchmark_type == PATH_SELECTION_OVERSUBSCRIPTION ||
+                benchmark_type == PATH_SELECTION_RACKS) {
                 // Re-initialize admitted_batch pointers
                 for (k = 0; k < BATCH_SIZE; k++)
                     admitted_batch[k] = all_admitted[k];            
@@ -319,7 +344,8 @@ int main(int argc, char **argv)
                 printf("%f, %d, %f, %f, %f\n", fraction, num_nodes, time_per_experiment,
                        utilzn, time_per_experiment / utilzn);
             }
-            else {
+            else if (benchmark_type == PATH_SELECTION_OVERSUBSCRIPTION ||
+                     benchmark_type == PATH_SELECTION_RACKS) {
                 // Run the admissible algorithm to generate admitted traffic
                 uint32_t num_admitted = run_admissible(next_request, warm_up_duration, duration,
                                                        num_requests - (next_request - requests),
@@ -342,12 +368,19 @@ int main(int argc, char **argv)
                 uint16_t max_capacity_per_timeslot = inter_rack_capacity * num_nodes / MAX_NODES_PER_RACK;
                 double utilzn = ((double) num_admitted) / ((duration - warm_up_duration) * max_capacity_per_timeslot);
 
-                uint16_t oversubscription_ratio = MAX_NODES_PER_RACK / inter_rack_capacity;
+                if (benchmark_type == PATH_SELECTION_OVERSUBSCRIPTION) {
+                    uint16_t oversubscription_ratio = MAX_NODES_PER_RACK / inter_rack_capacity;
 
-                // Print stats - percent of network capacity utilized and computation time
-                // per admitted timeslot (in microseconds) for different numbers of nodes
-                printf("%f, %d, %f, %f, %f\n", fraction, oversubscription_ratio,
-                       time_per_experiment, utilzn, time_per_experiment / utilzn);
+                    // Print stats - percent of network capacity utilized and computation time
+                    // per admitted timeslot (in microseconds) for different numbers of nodes
+                    printf("%f, %d, %f, %f, %f\n", fraction, oversubscription_ratio,
+                           time_per_experiment, utilzn, time_per_experiment / utilzn);
+                } else {
+                    // Print stats - percent of network capacity utilized and computation time
+                    // per admitted timeslot (in microseconds) for different numbers of nodes
+                    printf("%f, %d, %f, %f, %f\n", fraction, num_racks,
+                           time_per_experiment, utilzn, time_per_experiment / utilzn);
+                }
             }
         }
     }

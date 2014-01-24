@@ -29,7 +29,6 @@ ggplot(data, aes(x=observed_utilization, y=time,
              scale_color_discrete(name="Oversubscription\nRatio") +
              labs(x = "Network Utilization (%)",
                   y = "Latency (microseconds)") +
-             guides(col = guide_legend(reverse = TRUE)) +
              coord_cartesian(ylim=c(0, 25))
 
 detach(data)

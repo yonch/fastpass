@@ -836,7 +836,7 @@ done:
 	/* update window around current timeslot */
 	tslot_advance = q->current_timeslot + FASTPASS_WND_LEN - 1 - q->miss_threshold - wnd_head(&q->alloc_wnd);
 	if (unlikely((s64)tslot_advance < 0)) {
-		if ((s64)tslot_advance < CLOCK_MOVE_RESET_THRESHOLD_TSLOTS) {
+		if (-1*(s64)tslot_advance > CLOCK_MOVE_RESET_THRESHOLD_TSLOTS) {
 			FASTPASS_WARN("current timeslot moved back a lot: %lld timeslots. new current %llu. will reset\n",
 					(s64)tslot_advance, q->current_timeslot);
 			q->stat.clock_move_causes_reset++;

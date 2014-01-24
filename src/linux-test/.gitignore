@@ -1,3 +1,5 @@
 results/
 tcp_receiver
 tcp_sender
+*.csv
+*.pdf

@@ -29,25 +29,21 @@ if (length(args) > 3)
 # use the ggplot2 library
 library('ggplot2')
 
+pdf(file="latency_histogram.pdf", width=6.6, height=3)
+
 data <- read.csv("data.csv", sep=",")
 
 # reframe the data
 end_index = length(data)
 start_index = end_index - num_bins + 1
-counts = colSums(data[start_index:end_index])
+counts = colSums(data[start_index:end_index]) / sum(colSums(data[start_index:end_index]))
 bins = seq(bin_duration / 2, length=num_bins, by=bin_duration)
 df = data.frame(bins, counts)
 
 # plot the data
 graph = ggplot(df, aes(x=bins, y=counts)) +
       geom_bar(stat='identity', fill="blue") +
-      labs(x = "Packet Latency (microseconds)", y = "Number of Packets",
-           title = "Distribution of Packet Latencies") +
-      theme(axis.text = element_text(size = 12),
-            axis.title = element_text(size = 14),
-            legend.title = element_text(size = 14),
-            legend.text = element_text(size = 12),
-            plot.title = element_text(size = 18))
+      labs(x = "Packet Latency (microseconds)", y = "PDF of Packets")
 
 plot(graph)
 

@@ -44,10 +44,13 @@ void add_backlog(struct admissible_status *status, uint16_t src,
                        uint16_t dst, uint16_t backlog_increase) {
 	void *edge;
 
-	if (add_backlog_no_enqueue(status, src, dst, backlog_increase, &edge) == false)
+	if (add_backlog_no_enqueue(status, src, dst, backlog_increase, &edge) == false) {
+		status->stat.added_backlog_atomically++
 		return; /* no need to enqueue */
+	}
 
 	/* need to enqueue */
+	status->stat.added_backlog_to_queue++;
 	while (fp_ring_enqueue(status->q_head, edge) == -ENOBUFS)
 		status->stat.wait_for_space_in_q_head++;
 }
@@ -57,7 +60,8 @@ void add_backlog(struct admissible_status *status, uint16_t src,
  * Returns 0 if the flow will be handled internally,
  * 		   1 if more backlog remains and should be handled by the caller
  */
-static int try_allocation(uint16_t src, uint16_t dst, struct admission_core_state *core,
+static int try_allocation(uint16_t src, uint16_t dst,
+		struct admission_core_state *core,
 		struct admissible_status *status)
 {
     assert(core != NULL);
@@ -65,9 +69,11 @@ static int try_allocation(uint16_t src, uint16_t dst, struct admission_core_stat
 
     uint8_t batch_timeslot = get_first_timeslot(&core->batch_state, src, dst);
 
-    if (batch_timeslot == NONE_AVAILABLE)
+    if (batch_timeslot == NONE_AVAILABLE) {
+    	adm_algo_log_no_available_timeslots_for_bin_entry(core, src, dst);
     	/* caller should handle allocation of this flow */
     	return 1;
+    }
 
 	// We can allocate this edge now
 	set_timeslot_occupied(&core->batch_state, src, dst, batch_timeslot);

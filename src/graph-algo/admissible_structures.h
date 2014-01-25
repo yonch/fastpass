@@ -17,6 +17,7 @@
 #include "atomic.h"
 #include "fp_ring.h"
 #include "platform.h"
+#include "admission_algo_log.h"
 
 #include "../protocol/topology.h"
 
@@ -81,6 +82,7 @@ struct admission_core_state {
     struct fp_ring *q_bin_out;
     struct fp_ring *q_urgent_in;
     struct fp_ring *q_urgent_out;
+    struct admission_core_statistics stat;
 };
 
 // Demand/backlog info for a given src/dst pair
@@ -96,6 +98,8 @@ struct admission_statistics {
 	uint64_t waiting_to_pass_token;
 	uint64_t pacing_wait;
 	uint64_t wait_for_q_bin_in;
+	uint64_t added_backlog_atomically;
+	uint64_t added_backlog_to_queue;
 };
 
 // Tracks status for admissible traffic (last send time and demand for all flows, etc.)

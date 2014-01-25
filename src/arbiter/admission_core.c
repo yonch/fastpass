@@ -17,6 +17,8 @@ struct rte_mempool* admitted_traffic_pool[NB_SOCKETS];
 
 struct admission_log admission_core_logs[RTE_MAX_LCORE];
 
+struct admission_core_state admission_core_state[RTE_MAX_LCORE];
+
 struct rte_ring *q_head;
 struct rte_ring *q_bin[N_ADMISSION_CORES];
 struct rte_ring *q_urgent[N_ADMISSION_CORES];
@@ -104,17 +106,17 @@ void admission_init_core(uint16_t lcore_id)
 int exec_admission_core(void *void_cmd_p)
 {
 	struct admission_core_cmd *cmd = (struct admission_core_cmd *)void_cmd_p;
-	struct admission_core_state core;
+	uint32_t core_ind = cmd->admission_core_index;
+	uint64_t current_timeslot = cmd->start_timeslot;
+	struct admission_core_state *core = &admission_core_state[rte_lcore_id()];
 	/* int traffic_pool_socketid = rte_lcore_to_socket_id(rte_lcore_id()); */
 	int traffic_pool_socketid = 0;
 	struct admitted_traffic *admitted[BATCH_SIZE];
 	int rc;
-	uint32_t core_ind = cmd->admission_core_index;
-	uint64_t current_timeslot = cmd->start_timeslot;
 	uint64_t start_time_first_timeslot;
 
 	/* initialize core */
-	rc = alloc_core_init(&core,
+	rc = alloc_core_init(core,
 			q_bin[core_ind],
 			q_bin[(core_ind + 1) % N_ADMISSION_CORES],
 			q_urgent[core_ind],
@@ -142,7 +144,7 @@ int exec_admission_core(void *void_cmd_p)
 		/* perform allocation */
 		admission_log_allocation_begin(current_timeslot,
 				start_time_first_timeslot);
-		get_admissible_traffic(&core, &g_admissible_status, &admitted[0],
+		get_admissible_traffic(core, &g_admissible_status, &admitted[0],
 				current_timeslot - PREALLOC_DURATION_TIMESLOTS,
 				TIMESLOT_MUL, TIMESLOT_SHIFT);
 		admission_log_allocation_end();

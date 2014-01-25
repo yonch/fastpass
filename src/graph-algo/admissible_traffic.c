@@ -26,16 +26,20 @@
 bool add_backlog_no_enqueue(struct admissible_status *status, uint16_t src,
         uint16_t dst, uint16_t backlog_increase, void **out_edge)
 {
+	int32_t backlog;
     assert(status != NULL);
 
     // Get full quantity from 16-bit LSB
     uint32_t index = get_status_index(src, dst);
 
-	if (atomic32_add_return(&status->flows[index].backlog, backlog_increase) == backlog_increase) {
+    backlog = atomic32_add_return(&status->flows[index].backlog, backlog_increase);
+	if (backlog == backlog_increase) {
+		adm_log_increased_backlog_to_queue(&status->stat, backlog_increase, backlog);
 		*out_edge = MAKE_EDGE(0,src,dst);
 		return true;
 	}
 
+	adm_log_increased_backlog_atomically(&status->stat, backlog_increase, backlog);
 	return false;
 }
 
@@ -45,12 +49,10 @@ void add_backlog(struct admissible_status *status, uint16_t src,
 	void *edge;
 
 	if (add_backlog_no_enqueue(status, src, dst, backlog_increase, &edge) == false) {
-		status->stat.added_backlog_atomically++
 		return; /* no need to enqueue */
 	}
 
 	/* need to enqueue */
-	status->stat.added_backlog_to_queue++;
 	while (fp_ring_enqueue(status->q_head, edge) == -ENOBUFS)
 		status->stat.wait_for_space_in_q_head++;
 }
@@ -64,13 +66,14 @@ static int try_allocation(uint16_t src, uint16_t dst,
 		struct admission_core_state *core,
 		struct admissible_status *status)
 {
+	int32_t backlog;
     assert(core != NULL);
     assert(status != NULL);
 
     uint8_t batch_timeslot = get_first_timeslot(&core->batch_state, src, dst);
 
     if (batch_timeslot == NONE_AVAILABLE) {
-    	adm_algo_log_no_available_timeslots_for_bin_entry(core, src, dst);
+    	adm_algo_log_no_available_timeslots_for_bin_entry(&core->stat, src, dst);
     	/* caller should handle allocation of this flow */
     	return 1;
     }
@@ -82,8 +85,13 @@ static int try_allocation(uint16_t src, uint16_t dst,
 	uint32_t index = get_status_index(src, dst);
 	status->last_alloc_tslot[index] = status->current_timeslot + batch_timeslot;
 
-	if (atomic32_sub_return(&status->flows[index].backlog, 1) != 0)
+	backlog = atomic32_sub_return(&status->flows[index].backlog, 1);
+	if (backlog != 0) {
+    	adm_log_allocated_backlog_remaining(&core->stat, src, dst, backlog);
 		enqueue_bin(core->new_request_bins[NUM_BINS + batch_timeslot], src, dst);
+	} else {
+		adm_log_allocator_no_backlog(&core->stat, src, dst);
+	}
 
 	return 0;
 }

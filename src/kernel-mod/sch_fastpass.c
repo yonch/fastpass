@@ -43,6 +43,8 @@
 #include "../protocol/window.h"
 #include "../protocol/topology.h"
 
+#define 	FASTPASS_SCH_RETRANS_TIMEOUT_NS		(10000)
+
 /*
  * FastPass client qdisc
  *
@@ -57,13 +59,6 @@
 
 #define FASTPASS_HORIZON		64
 #define FASTPASS_REQUEST_WINDOW_SIZE (1 << 13)
-
-/**
- * Don't bother sending a fresh request when there are already many timeslots
- *   requested. Rather, wait until the number of allocated timeslots gets close
- *   to the number of request packets.
- */
-#define FASTPASS_REQUEST_LOW_WATERMARK (1 << 9)
 
 #define CLOCK_MOVE_RESET_THRESHOLD_TSLOTS	64
 
@@ -1806,7 +1801,7 @@ static int fp_tc_init(struct Qdisc *sch, struct nlattr *opt)
 	q->req_min_gap		= 1000;
 	q->ctrl_addr_netorder = htonl(0x7F000001); /* need sensible default? */
 	q->reset_window_us	= 2e6; /* 2 seconds */
-	q->send_timeout_us	= 100000; /* 5ms timeout */
+	q->send_timeout_us	= FASTPASS_SCH_RETRANS_TIMEOUT_NS;
 	q->flow_hash_tbl	= NULL;
 	INIT_LIST_HEAD(&q->unreq_flows);
 	INIT_LIST_HEAD(&q->retrans_flows);

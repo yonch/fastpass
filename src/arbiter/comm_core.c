@@ -472,7 +472,7 @@ make_packet(struct end_node_state *en, struct fpproto_pktdesc *pd)
 
 	/* ipv4 header */
 	ipv4_hdr->version_ihl = 0x45; // Version=4, IHL=5
-	ipv4_hdr->type_of_service = 0;
+	ipv4_hdr->type_of_service = 46 << 2; /* 46 is DSCP Expedited Forwarding */
 	ipv4_hdr->packet_id = 0;
 	ipv4_hdr->fragment_offset = 0;
 	ipv4_hdr->time_to_live = 77;

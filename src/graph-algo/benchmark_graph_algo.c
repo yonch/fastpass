@@ -19,7 +19,7 @@
 #define NUM_SIZES_A 5
 #define NUM_FRACTIONS_P 11
 #define NUM_CAPACITIES_P 4
-#define NUM_RACKS_P 5
+#define NUM_RACKS_P 4
 #define NUM_NODES_P 1024
 #define PROCESSOR_SPEED 2.8
 
@@ -32,7 +32,7 @@ const double path_fractions [NUM_FRACTIONS_P] =
 const uint16_t path_capacities [NUM_CAPACITIES_P] =
     {4, 8, 16, 32};  // inter-rack capacities (32 machines per rack)
 const uint8_t path_num_racks [NUM_RACKS_P] =
-    {64, 32, 16, 8, 4};
+    {32, 16, 8, 4};
 
 enum benchmark_type {
     ADMISSIBLE,

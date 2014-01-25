@@ -111,13 +111,30 @@ void print_global_admission_log() {
 	printf("\n  %lu delay in passing token", st->waiting_to_pass_token);
 	printf("\n  %lu pacing wait", st->pacing_wait);
 	printf("\n  %lu wait for q_bin_in", st->wait_for_q_bin_in);
+	printf("\n  add_backlog; %lu atomic add %0.2f to avg %0.2f; %lu queue add %0.2f to avg %0.2f",
+			st->added_backlog_atomically,
+			(float)st->backlog_sum_inc_atomically / (float)(st->added_backlog_atomically+1),
+			(float)st->backlog_sum_atomically / (float)(st->added_backlog_atomically+1),
+			st->added_backlog_to_queue,
+			(float)st->backlog_sum_inc_to_queue / (float)(st->added_backlog_to_queue+1),
+			(float)st->backlog_sum_to_queue / (float)(st->added_backlog_to_queue+1));
 	printf("\n");
 }
 
 void print_admission_core_log(uint16_t lcore) {
+	int i;
 	struct admission_log *al = &admission_core_logs[lcore];
-	printf("admission lcore %d: %lu failed alloc\n",
-			lcore, al->failed_admitted_traffic_alloc);
+	struct admission_core_statistics *ast = &admission_core_state[lcore].stat;
+	printf("admission lcore %d: %lu failed alloc, %lu no_timeslot, %lu need more (avg %0.2f), %lu done\n",
+			lcore, al->failed_admitted_traffic_alloc,
+			ast->no_available_timeslots_for_bin_entry,
+			ast->allocated_backlog_remaining,
+			(float)ast->backlog_sum / (float)(ast->allocated_backlog_remaining+1),
+			ast->allocated_no_backlog);
+
+	for (i = 0; i < BACKLOG_HISTOGRAM_NUM_BINS; i++)
+		printf("%lu ", ast->backlog_histogram[i]);
+	printf ("\n");
 }
 
 int exec_log_core(void *void_cmd_p)

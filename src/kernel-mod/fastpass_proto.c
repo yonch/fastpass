@@ -24,7 +24,9 @@
 
 struct inet_hashinfo fastpass_hashinfo;
 EXPORT_SYMBOL_GPL(fastpass_hashinfo);
-#define FASTPASS_EHASH_NBUCKETS 16
+#define FASTPASS_EHASH_NBUCKETS		16
+
+#define FASTPASS_CTRL_SOCK_WMEM		(64*1024*1024)
 
 #ifdef CONFIG_IP_FASTPASS_DEBUG
 bool fastpass_debug;
@@ -332,6 +334,7 @@ void fpproto_send_skb(struct sock *sk, struct sk_buff *skb)
 static int fpproto_sk_init(struct sock *sk)
 {
 	struct fastpass_sock *fp = fastpass_sk(sk);
+	int opt;
 
 	fp_debug("visited\n");
 
@@ -348,6 +351,12 @@ static int fpproto_sk_init(struct sock *sk)
 
 	/* skb allocation must be atomic (done under the qdisc lock) */
 	sk->sk_allocation = GFP_ATOMIC;
+
+	/* we need a larger-than-default wmem, so we don't run out. ask for a lot,
+	 * the call will not fail if it's too much */
+	opt = FASTPASS_CTRL_SOCK_WMEM;
+	kernel_setsockopt(sk, SOL_SOCKET, SO_SNDBUF, &opt, sizeof(opt));
+
 
 	/* caller should initialize fpproto_conn before calling connect() */
 

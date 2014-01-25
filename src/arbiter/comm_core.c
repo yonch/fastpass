@@ -333,8 +333,7 @@ static void handle_areq(void *param, u16 *dst_and_count, int n)
 		}
 	}
 
-	if (num_increases > 0)
-		trigger_request(en);
+	trigger_request(en);
 }
 
 static void handle_reset(void *param)

@@ -1060,6 +1060,8 @@ static void handle_areq(void *param, u16 *dst_and_count, int n)
 	u16 count_low;
 	u64 count;
 
+	trigger_tx(q);
+
 	for (i = 0; i < n; i++) {
 		dst = ntohs(dst_and_count[2*i]);
 		count_low = ntohs(dst_and_count[2*i + 1]);
@@ -1295,7 +1297,7 @@ static enum hrtimer_restart timeslot_update_timer_func(struct hrtimer *timer)
 			container_of(timer, struct fp_sched_data, timeslot_update_timer);
 
 	/* schedule tasklet to write request */
-	tasklet_schedule(&q->timeslot_update_tasklet);
+	tasklet_hi_schedule(&q->timeslot_update_tasklet);
 
 	return HRTIMER_NORESTART;
 }

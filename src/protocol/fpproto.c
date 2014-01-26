@@ -144,7 +144,7 @@ static void do_proto_reset(struct fpproto_conn *conn, u64 reset_time,
 	conn->in_max_seqno = base_seqno + FASTPASS_INGRESS_SEQNO_OFFSET - 1;
 	conn->inwnd = ~0UL;
 	conn->consecutive_bad_pkts = 0;
-	recompute_and_reset_retrans_timer(conn);
+	conn->next_timeout_seqno = wnd_head(&conn->outwnd) + 1;
 
 	/* are we in sync? */
 	conn->in_sync = in_sync;

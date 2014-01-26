@@ -29,6 +29,8 @@ EXPORT_SYMBOL_GPL(fastpass_hashinfo);
 #define FASTPASS_SET_DSCP_CLASS				0
 #define FASTPASS_CTRL_DSCP_CLASS			46
 
+#define FASTPASS_TX_QUOTA_PER_TASKLET_CALL	50
+
 #ifdef CONFIG_IP_FASTPASS_DEBUG
 bool fastpass_debug;
 module_param(fastpass_debug, bool, 0644);
@@ -92,7 +94,25 @@ discard_no_sk:
 
 void fpproto_handle_pending_rx(struct sock *sk)
 {
-	release_sock(sk);
+	struct sk_buff *skb;
+
+	/* inspired by __release_sock in net/core/sock.c but no external loop */
+	bh_lock_sock(sk);
+	skb = sk->sk_backlog.head;
+	sk->sk_backlog.head = sk->sk_backlog.tail = NULL;
+	sk->sk_backlog.len = 0;
+	bh_unlock_sock(sk);
+
+	while (skb != NULL) {
+		struct sk_buff *next = skb->next;
+
+		prefetch(next);
+		WARN_ON_ONCE(skb_dst_is_noref(skb));
+		skb->next = NULL;
+		sk_backlog_rcv(sk, skb);
+
+		skb = next;
+	}
 }
 
 /**
@@ -204,20 +224,38 @@ static int fpproto_disconnect(struct sock *sk, int flags)
 static void fpproto_destroy_sock(struct sock *sk)
 {
 	struct fastpass_sock *fp = fastpass_sk(sk);
-
+	struct fp_kernel_pktdesc *kern_pd, next_pd;
 	fp_debug("visited\n");
 
 	/* might not be necessary, doing for safety */
 	fpproto_set_qdisc(sk, NULL);
 
+	/* stop tasklet from executing or wait until it finishes */
+	tasklet_kill(&fp->tx_tasklet);
+	/* free remaining entries in the tx queue */
+	list_for_each_entry_safe(kern_pd, next_pd, &fp->pktdesc_tx_queue, q_elem)
+		fpproto_pktdesc_free(&kern_pd->pktdesc);
+
 	/* free up memory in conn */
 	fpproto_destroy_conn(&fp->conn);
+}
+
+void fpproto_send_pktdesc(struct sock *sk,
+		struct fp_kernel_pktdesc *kern_pd)
+{
+	struct fastpass_sock *fp = fastpass_sk(sk);
+
+	spin_lock_bh(&fp->pktdesc_lock);
+	list_add_tail(&kern_pd->q_elem, &fp->pktdesc_tx_queue);
+	spin_unlock_bh(&fp->pktdesc_lock);
+
+	tasklet_schedule(&fp->tx_tasklet);
 }
 
 /**
  * Constructs and sends one packet.
  */
-struct sk_buff *fpproto_make_skb(struct sock *sk, struct fpproto_pktdesc *pd)
+static struct sk_buff *fpproto_make_skb(struct sock *sk, struct fpproto_pktdesc *pd)
 {
 	struct fastpass_sock *fp = fastpass_sk(sk);
 	struct inet_sock *inet = inet_sk(sk);
@@ -269,7 +307,7 @@ alloc_err:
 	return NULL;
 }
 
-void fpproto_send_skb(struct sock *sk, struct sk_buff *skb)
+static void fpproto_send_skb(struct sock *sk, struct sk_buff *skb)
 {
 	struct fastpass_sock *fp = fastpass_sk(sk);
 	struct inet_sock *inet = inet_sk(sk);
@@ -277,7 +315,7 @@ void fpproto_send_skb(struct sock *sk, struct sk_buff *skb)
 
 	fp_debug("sending packet\n");
 
-	bh_lock_sock(sk);
+	/* don't need the lock because the tasklet guarantees mutual exclusion */
 
 	/* send onwards */
 	err = ip_queue_xmit(skb, &inet->cork.fl);
@@ -289,8 +327,53 @@ void fpproto_send_skb(struct sock *sk, struct sk_buff *skb)
 		fp->stat.xmit_success++;
 	}
 
-	bh_unlock_sock(sk);
 	return;
+}
+
+static void tx_tasklet_func(unsigned long int param)
+{
+	struct sock *sk = (struct sock *)param;
+	struct fastpass_sock *fp = fastpass_sk(sk);
+	LIST_HEAD(pd_queue);
+	int quota = FASTPASS_TX_QUOTA_PER_TASKLET_CALL;
+
+	/* get a list of pending pktdescs */
+	spin_lock_bh(&fp->pktdesc_lock);
+	list_splice_init(&fp->pktdesc_tx_queue, &pd_queue);
+	spin_unlock_bh(&fp->pktdesc_lock);
+
+	/* now we can process pktdescs */
+	while (!list_empty(&pd_queue)) {
+		struct fp_kernel_pktdesc *kern_pd =
+				list_first_entry(&pd_queue, struct fp_kernel_pktdesc, q_elem);
+		struct fpproto_pktdesc *pd = &kern_pd->pktdesc;
+		struct sk_buff *skb;
+
+		/* first, dequeue */
+		list_del(&kern_pd->q_elem);
+
+		if (atomic_read(&kern_pd->refcount) == 1) {
+			/* already timed out, can free */
+			free_kernel_pktdesc_no_refcount(kern_pd);
+			continue;
+		}
+
+		if (likely(quota > 0)) {
+			/* make the skb */
+			skb = fpproto_make_skb(sk, pd);
+
+			/* send the skb */
+			if (likely(skb != NULL))
+				fpproto_send_skb(sk, skb);
+
+			quota--;
+		} else {
+			fp->stat.dropped_in_tx_tasklet++;
+		}
+
+		/* free the pktdesc if refcount allows (be wary of a race here) */
+		fpproto_pktdesc_free(pd);
+	}
 }
 
 static int fpproto_sk_init(struct sock *sk)
@@ -298,6 +381,10 @@ static int fpproto_sk_init(struct sock *sk)
 	struct fastpass_sock *fp = fastpass_sk(sk);
 
 	fp_debug("visited\n");
+
+	INIT_LIST_HEAD(&fp->pktdesc_tx_queue);
+	tasklet_init(&fp->tx_tasklet, &tx_tasklet_func, (unsigned long int)sk);
+	spin_lock_init(&fp->pktdesc_lock);
 
 	/* bind all sockets to port 1, to avoid inet_autobind */
 	inet_sk(sk)->inet_num = ntohs(FASTPASS_DEFAULT_PORT_NETORDER);

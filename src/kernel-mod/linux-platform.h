@@ -26,6 +26,19 @@ static inline u64 fp_monotonic_time_ns(void)
 }
 
 static inline
+struct fp_kernel_pktdesc *fpproto_pktdesc_alloc(void)
+{
+	struct fp_kernel_pktdesc *kern_pd
+		= kmem_cache_zalloc(fpproto_pktdesc_cachep, GFP_ATOMIC | __GFP_NOWARN);
+
+	if (kern_pd == NULL)
+		return NULL;
+
+	atomic_set(&kern_pd->refcount, 2);
+	return kern_pd;
+}
+
+static inline
 void free_kernel_pktdesc_no_refcount(struct fp_kernel_pktdesc *kern_pd)
 {
 	kmem_cache_free(fpproto_pktdesc_cachep, kern_pd);

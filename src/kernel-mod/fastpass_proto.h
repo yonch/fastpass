@@ -36,12 +36,16 @@ struct fastpass_sock {
 	struct Qdisc			*qdisc;
 	struct fpproto_conn conn;
 
+	struct list_head		pktdesc_tx_queue;
+	struct tasklet_struct	tx_tasklet;
+	spinlock_t				pktdesc_lock;
+
 	struct fp_socket_stat stat;
 };
 
 struct fp_kernel_pktdesc {
 	struct fpproto_pktdesc		pktdesc;
-	struct work_struct			work;
+	struct list_head			q_elem;
 	atomic_t					refcount;
 	struct sock					*sk;
 };
@@ -51,9 +55,7 @@ void __exit fpproto_unregister(void);
 
 void fpproto_set_qdisc(struct sock *sk, struct Qdisc *new_qdisc);
 
-struct sk_buff *fpproto_make_skb(struct sock *sk, struct fpproto_pktdesc *pkt);
-
-void fpproto_send_skb(struct sock *sk, struct sk_buff *skb);
+void fpproto_send_pktdesc(struct sock *sk, struct fp_kernel_pktdesc *kern_pd);
 
 void fpproto_handle_pending_rx(struct sock *sk);
 

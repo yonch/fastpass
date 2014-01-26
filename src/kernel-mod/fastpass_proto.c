@@ -26,6 +26,9 @@ struct inet_hashinfo fastpass_hashinfo;
 EXPORT_SYMBOL_GPL(fastpass_hashinfo);
 #define FASTPASS_EHASH_NBUCKETS		16
 
+#define FASTPASS_SET_DSCP_CLASS				0
+#define FASTPASS_CTRL_DSCP_CLASS			46
+
 #ifdef CONFIG_IP_FASTPASS_DEBUG
 bool fastpass_debug;
 module_param(fastpass_debug, bool, 0644);
@@ -345,6 +348,8 @@ static int fpproto_sk_init(struct sock *sk)
 
 	/* set socket priority */
 	sk->sk_priority = TC_PRIO_CONTROL;
+	if (FASTPASS_SET_DSCP_CLASS)
+		inet_sk(sk)->tos = FASTPASS_CTRL_DSCP_CLASS << 2;
 
 	/* skb allocation must be atomic (done under the qdisc lock) */
 	sk->sk_allocation = GFP_ATOMIC;

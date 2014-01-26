@@ -43,8 +43,6 @@
 #include "../protocol/window.h"
 #include "../protocol/topology.h"
 
-#define 	FASTPASS_SCH_RETRANS_TIMEOUT_NS		(10000)
-
 /*
  * FastPass client qdisc
  *
@@ -57,11 +55,16 @@
  *
  */
 
-#define FASTPASS_HORIZON		64
-#define FASTPASS_REQUEST_WINDOW_SIZE (1 << 13)
+#define FASTPASS_HORIZON					64
+#define FASTPASS_REQUEST_WINDOW_SIZE 		(1 << 13)
 
 #define CLOCK_MOVE_RESET_THRESHOLD_TSLOTS	64
 
+#define FASTPASS_SCH_RETRANS_TIMEOUT_NS		(10000)
+
+#define FASTPASS_CTRL_SOCK_WMEM				(64*1024*1024)
+
+#define SHOULD_DUMP_FLOW_INFO				0
 enum {
 	FLOW_UNQUEUED,
 	FLOW_REQUEST_QUEUE,
@@ -138,15 +141,9 @@ struct fp_sched_data {
 
 	struct fp_pacer request_pacer;
 	struct socket	*ctrl_sock;			/* socket to the controller */
+	struct qdisc_watchdog watchdog;
 
-	struct hrtimer 			timeslot_update_timer;
-	struct tasklet_struct 	timeslot_update_tasklet;
-
-	struct hrtimer 			request_timer;
-	struct tasklet_struct 	request_tasklet;
-
-	struct hrtimer			retrans_timer;
-	struct tasklet_struct 	retrans_tasklet;
+	u64		retrans_time;
 
 	/* counters */
 	u32		flows;
@@ -185,13 +182,7 @@ static inline u32 src_dst_key_hash(u64 src_dst_key) {
 static inline bool trigger_tx(struct fp_sched_data* q)
 {
 	/* rate limit sending of requests */
-	if (pacer_trigger(&q->request_pacer, fp_monotonic_time_ns())) {
-		hrtimer_start(&q->request_timer,
-					  ns_to_ktime(pacer_next_event(&q->request_pacer)),
-					  HRTIMER_MODE_ABS);
-		return true;
-	}
-	return false;
+	return pacer_trigger(&q->request_pacer, fp_monotonic_time_ns());
 }
 
 void trigger_tx_voidp(void *param)
@@ -206,10 +197,7 @@ static int cancel_retrans_timer(void *param)
 	struct Qdisc *sch = (struct Qdisc *)param;
 	struct fp_sched_data *q = qdisc_priv(sch);
 
-	if (unlikely(hrtimer_try_to_cancel(&q->retrans_timer) == -1)) {
-		fp_debug("could not cancel timer. tasklet will reset timer\n");
-		return -1;
-	}
+	q->retrans_time = ~0ULL;
 
 	return 0;
 }
@@ -219,44 +207,7 @@ static void set_retrans_timer(void *param, u64 when)
 	struct Qdisc *sch = (struct Qdisc *)param;
 	struct fp_sched_data *q = qdisc_priv(sch);
 
-	hrtimer_start(&q->retrans_timer, ns_to_ktime(when), HRTIMER_MODE_ABS);
-}
-
-static enum hrtimer_restart retrans_timer_func(struct hrtimer *timer)
-{
-	struct fp_sched_data *q =
-			container_of(timer, struct fp_sched_data, retrans_timer);
-
-	/* schedule tasklet to write request */
-	tasklet_schedule(&q->retrans_tasklet);
-
-	return HRTIMER_NORESTART;
-}
-
-static void retrans_tasklet(unsigned long int param)
-{
-	struct Qdisc *sch = (struct Qdisc *)param;
-	struct fp_sched_data *q = qdisc_priv(sch);
-	u64 now_monotonic = fp_monotonic_time_ns();
-
-	/* Lock the qdisc */
-	spinlock_t *root_lock = qdisc_lock(qdisc_root(sch));
-
-	spin_lock_bh(root_lock);
-
-	/* Check that the qdisc destroy func didn't race ahead of us */
-	if (unlikely(sch->limit == 0))
-		goto qdisc_destroyed;
-
-	fpproto_handle_timeout(fpproto_conn(q), now_monotonic);
-
-cleanup:
-	spin_unlock_bh(root_lock);
-	return;
-
-qdisc_destroyed:
-	FASTPASS_WARN("qdisc seems to have been destroyed\n");
-	goto cleanup;
+	q->retrans_time = when;
 }
 
 /**
@@ -268,21 +219,6 @@ void req_timer_flowqueue_enqueue(struct fp_sched_data* q)
 	/* if enqueued first flow in q->unreq_flows, set request timer */
 	if (trigger_tx(q))
 		fp_debug("set request timer to %llu\n", pacer_next_event(&q->request_pacer));
-}
-
-/**
- * Called when just about to send a request.
- * Caller should hold the qdisc lock.
- */
-void req_timer_sending_request(struct fp_sched_data *q, u64 now)
-{
-	/* update request credits */
-	pacer_reset(&q->request_pacer);
-
-	/* set timer for next request, if a request would be required */
-	if (q->demand_tslots != q->alloc_tslots)
-		/* have more requests to send */
-		trigger_tx(q);
 }
 
 static inline bool flow_in_flowqueue(struct fp_flow *f)
@@ -362,7 +298,6 @@ static struct fp_flow *flowqueue_dequeue(struct fp_sched_data* q)
 
 	return f;
 }
-
 
 static const u8 prio2band[TC_PRIO_MAX + 1] = {
 	1, 2, 2, 2, 1, 2, 0, 0 , 1, 1, 1, 1, 1, 1, 1, 1
@@ -855,12 +790,6 @@ done:
 		qdisc_unthrottled(sch);
 		__netif_schedule(qdisc_root(sch));
 	}
-
-	/* set timer to update timeslots */
-	if (!wnd_empty(&q->alloc_wnd)) {
-		hrtimer_start(&q->timeslot_update_timer,
-				ns_to_ktime(q->update_timeslot_timer_ns), HRTIMER_MODE_REL);
-	}
 }
 
 /**
@@ -1177,59 +1106,93 @@ static void handle_neg_ack(void *param, struct fpproto_pktdesc *pd)
 	fpproto_pktdesc_free(pd);
 }
 
+
+static void send_request_work_func(struct work_struct *work)
+{
+	struct fp_kernel_pktdesc *kern_pd =
+			container_of(work, struct fp_kernel_pktdesc, work);
+	struct fpproto_pktdesc *pd = &kern_pd->pktdesc;
+	struct sk_buff *skb;
+
+	if (atomic_read(&kern_pd->refcount) == 1) {
+		/* already timed out, can free */
+		free_kernel_pktdesc_no_refcount(kern_pd);
+		return;
+	}
+
+	/* make the skb -- keep the lock here so the pkt_desc doesn't timeout
+	 * underneath us */
+	skb = fpproto_make_skb(kern_pd->sk, pd);
+
+	/* send the packets */
+	if (likely(skb != NULL))
+		fpproto_send_skb(kern_pd->sk, skb);
+
+	/* free the pktdesc if refcount allows (be wary of a race here) */
+	fpproto_pktdesc_free(pd);
+}
+
+static void enqueue_send_request_work(struct fp_sched_data *q,
+		struct fp_kernel_pktdesc *kern_pd)
+{
+	atomic_set(&kern_pd->refcount, 2);
+	INIT_WORK(&kern_pd->work, &send_request_work_func);
+	kern_pd->sk = q->ctrl_sock->sk;
+	schedule_work(&kern_pd->work);
+}
+
 /**
  * Send a request packet to the controller
  */
 static void send_request(struct Qdisc *sch)
 {
 	struct fp_sched_data *q = qdisc_priv(sch);
-	spinlock_t *root_lock = qdisc_lock(qdisc_root(sch));
 	u64 now_monotonic = fp_monotonic_time_ns();
 
 	struct fp_flow *f;
-	struct fpproto_pktdesc *pkt;
+	struct list_head *cur_flow_queue;
+	struct fp_kernel_pktdesc *kern_pd;
+	struct fpproto_pktdesc *pd;
 	u64 new_requested;
 
-	spin_lock_bh(root_lock);
-
-	/* Check that the qdisc destroy func didn't race ahead of us */
-	if (unlikely(sch->limit == 0)) {
-		FASTPASS_WARN("qdisc seems to have been destroyed\n");
-		spin_unlock_bh(root_lock);
-		return;
-	}
-
-	fp_debug(
-			"start: unreq_flows=%u, unreq_tslots=%llu, now_mono=%llu, scheduled=%llu, diff=%lld, next_seq=%08llX\n",
+	fp_debug("start: unreq_flows=%u, unreq_tslots=%llu, now_mono=%llu, scheduled=%llu, diff=%lld, next_seq=%08llX\n",
 			q->n_unreq_flows, q->demand_tslots - q->requested_tslots, now_monotonic,
 			pacer_next_event(&q->request_pacer),
 			(s64 )now_monotonic - (s64 )pacer_next_event(&q->request_pacer),
 			fpproto_conn(q)->next_seqno);
-
-	WARN(q->request_pacer.T + q->request_pacer.cost > now_monotonic,
-			"send_request called too early T=%llu, req_cost=%u, now_mono=%llu (diff=%lld)\n",
-			q->request_pacer.T, q->request_pacer.cost, now_monotonic,
-			(s64)now_monotonic - (s64)(q->request_pacer.T + q->request_pacer.cost));
 	if(flowqueue_is_empty(q)) {
 		q->stat.request_with_empty_flowqueue++;
 		fp_debug("was called with no flows pending (could be due to bad packets?)\n");
 	}
 	FASTPASS_BUG_ON(!q->ctrl_sock);
 
-	/* allocate packet descriptor */
-	pkt = fpproto_pktdesc_alloc();
-	if (!pkt)
-		goto alloc_err;
+	/* update request credits */
+	pacer_reset(&q->request_pacer);
 
-	/**
-	 * this might NACK a packet, but the request timer will not be set because
-	 *   already flow queue is not empty
-	 */
+	/* allocate packet descriptor */
+	kern_pd = kmem_cache_zalloc(fpproto_pktdesc_cachep, GFP_ATOMIC | __GFP_NOWARN);
+	if (!kern_pd)
+		goto alloc_err;
+	pd = &kern_pd->pktdesc;
+
+	/* nack the tail of the outwnd if it has not been nacked or acked */
 	fpproto_prepare_to_send(fpproto_conn(q));
 
-	pkt->n_areq = 0;
-	while ((pkt->n_areq < FASTPASS_PKT_MAX_AREQ) && !flowqueue_is_empty(q)) {
-		f = flowqueue_dequeue(q);
+	pd->n_areq = 0;
+
+	/* start with the retrans queue */
+	cur_flow_queue = &q->retrans_flows;
+
+process_flow_queue:
+	while ((pd->n_areq < FASTPASS_PKT_MAX_AREQ) && !list_empty(cur_flow_queue)) {
+		/* get entry */
+		f = list_first_entry(cur_flow_queue, struct fp_flow, queue_entry);
+		/* remove it from queue */
+		list_del(&f->queue_entry);
+		f->state = FLOW_UNQUEUED;
+
+		/* update counter */
+		q->n_unreq_flows--;
 
 		new_requested = min_t(u64, f->demand_tslots,
 				f->acked_tslots + FASTPASS_REQUEST_WINDOW_SIZE - 1);
@@ -1240,104 +1203,40 @@ static void send_request(struct Qdisc *sch)
 			continue;
 		}
 
-		pkt->areq[pkt->n_areq].src_dst_key = f->src_dst_key;
-		pkt->areq[pkt->n_areq].tslots = new_requested;
+		pd->areq[pd->n_areq].src_dst_key = f->src_dst_key;
+		pd->areq[pd->n_areq].tslots = new_requested;
 
 		q->requested_tslots += (new_requested - f->requested_tslots);
 		f->requested_tslots = new_requested;
 
-		pkt->n_areq++;
+		pd->n_areq++;
+	}
+
+	/* after handling retrans_flows, we should handle unreq_flows */
+	if (cur_flow_queue == &q->retrans_flows) {
+		cur_flow_queue = &q->unreq_flows;
+		goto process_flow_queue;
 	}
 
 	fp_debug("end: unreq_flows=%u, unreq_tslots=%llu\n",
 			q->n_unreq_flows, q->demand_tslots - q->requested_tslots);
 
-	fpproto_commit_packet(fpproto_conn(q), pkt, now_monotonic);
+	fpproto_commit_packet(fpproto_conn(q), pd, now_monotonic);
 
-out:
-	req_timer_sending_request(q, now_monotonic);
+	/* set up work queue (note we are holding the lock so this doesn't race with nacks) */
+	enqueue_send_request_work(q, kern_pd);
 
-	if (likely(pkt != NULL)) {
-		struct sock *sk = q->ctrl_sock->sk;
-		struct sk_buff *skb;
-
-		/* make the skb -- keep the lock here so the pkt_desc doesn't timeout
-		 * underneath us */
-		skb = fpproto_make_skb(sk, pkt);
-
-		/* unlock the qdisc so packets could traverse the stack */
-		spin_unlock_bh(root_lock);
-
-		/* send the packets */
-		if (likely(skb != NULL))
-			fpproto_send_skb(sk, skb);
-	} else {
-		/* remember to unlock even when not sending packets */
-		spin_unlock_bh(root_lock);
-	}
-
-	/* caution: no qdisc locked held at this point */
+	/* set timer for next request, if a request would be required */
+	if (q->demand_tslots != q->alloc_tslots)
+		/* have more requests to send */
+		trigger_tx(q);
 
 	return;
 
 alloc_err:
 	q->stat.req_alloc_errors++;
 	fp_debug("request allocation failed\n");
-	goto out;
-}
-
-static enum hrtimer_restart timeslot_update_timer_func(struct hrtimer *timer)
-{
-	struct fp_sched_data *q =
-			container_of(timer, struct fp_sched_data, timeslot_update_timer);
-
-	/* schedule tasklet to write request */
-	tasklet_hi_schedule(&q->timeslot_update_tasklet);
-
-	return HRTIMER_NORESTART;
-}
-
-static void timeslot_update_tasklet_func(unsigned long int param)
-{
-	struct Qdisc *sch = (struct Qdisc *)param;
-	u64 now_real = fp_get_time_ns();
-
-	/* Lock the qdisc */
-	spinlock_t *root_lock = qdisc_lock(qdisc_root(sch));
-
-	spin_lock_bh(root_lock);
-
-	/* Check that the qdisc destroy func didn't race ahead of us */
-	if (unlikely(sch->limit == 0))
-		goto qdisc_destroyed;
-
-	update_current_timeslot(sch, now_real);
-
-cleanup:
-	spin_unlock_bh(root_lock);
-	return;
-
-qdisc_destroyed:
-	FASTPASS_WARN("qdisc seems to have been destroyed\n");
-	goto cleanup;
-}
-
-static enum hrtimer_restart send_request_timer_func(struct hrtimer *timer)
-{
-	struct fp_sched_data *q =
-			container_of(timer, struct fp_sched_data, request_timer);
-
-	/* schedule tasklet to write request */
-	tasklet_schedule(&q->request_tasklet);
-
-	return HRTIMER_NORESTART;
-}
-
-static void send_request_tasklet(unsigned long int param)
-{
-	struct Qdisc *sch = (struct Qdisc *)param;
-
-	send_request(sch);
+	trigger_tx(q); /* try again */
 }
 
 /* Extract packet from the queue (part of the qdisc API) */
@@ -1345,6 +1244,7 @@ static struct sk_buff *fpq_dequeue(struct Qdisc *sch)
 {
 	struct fp_sched_data *q = qdisc_priv(sch);
 	struct sk_buff *skb;
+	u64 now_monotonic;
 
 	/* try hi_prio queue first */
 	skb = flow_dequeue_skb(sch, &q->hi_prio);
@@ -1356,8 +1256,29 @@ static struct sk_buff *fpq_dequeue(struct Qdisc *sch)
 	if (skb)
 		goto out_got_skb;
 
+	/* when queue is empty we update the current timeslot */
+	now_monotonic = fp_monotonic_time_ns();
+	update_current_timeslot(sch, fp_get_time_ns());
+
+	/* check for retransmission timeouts */
+	if (q->retrans_time <= now_monotonic)
+		fpproto_handle_timeout(fpproto_conn(q), now_monotonic);
+
+	/* now is also a good opportunity to send a request, if allowed */
+	if (pacer_is_triggered(&q->request_pacer) &&
+		time_after_eq64(now_monotonic, pacer_next_event(&q->request_pacer)))
+		send_request(sch);
+
+	/* try the internal queue again, might be non-empty after timeslot update*/
+	skb = flow_dequeue_skb(sch, &q->internal);
+	if (skb)
+		goto out_got_skb;
+
 	/* no packets in queue, go to sleep */
 	qdisc_throttled(sch);
+	/* will re-read time, to make sure we sleep >0 time */
+	qdisc_watchdog_schedule_ns(&q->watchdog,
+				   fp_monotonic_time_ns() + q->update_timeslot_timer_ns);
 	return NULL;
 
 out_got_skb:
@@ -1382,6 +1303,7 @@ static int reconnect_ctrl_socket(struct Qdisc *sch)
 {
 	struct fp_sched_data *q = qdisc_priv(sch);
 	struct sock *sk;
+	int opt;
 	int rc;
 	struct sockaddr_in sock_addr = {
 			.sin_family = AF_INET,
@@ -1402,6 +1324,14 @@ static int reconnect_ctrl_socket(struct Qdisc *sch)
 		q->ctrl_sock = NULL;
 		return rc;
 	}
+
+	/* we need a larger-than-default wmem, so we don't run out. ask for a lot,
+	 * the call will not fail if it's too much */
+	opt = FASTPASS_CTRL_SOCK_WMEM;
+	rc = kernel_setsockopt(q->ctrl_sock, SOL_SOCKET, SO_SNDBUF, (char *)&opt,
+			sizeof(opt));
+	if (rc != 0)
+		FASTPASS_WARN("Could not set socket wmem size\n");
 
 	sk = q->ctrl_sock->sk;
 
@@ -1737,36 +1667,15 @@ static void fp_tc_destroy(struct Qdisc *sch)
 	spin_unlock_bh(root_lock);
 	fp_debug("marked fastpass qdisc as destroyed\n");
 
+	qdisc_watchdog_cancel(&q->watchdog);
+
+	/* flush work queue before releasing control socket; the work queues have a
+	 * reference to the control socket */
+	flush_scheduled_work();
+
 	/* close socket. no new packets should arrive afterwards */
 	fp_debug("closing control socket\n");
 	sock_release(q->ctrl_sock);
-
-	/* eliminate the timeslot update timer */
-	fp_debug("canceling timeslot update timer\n");
-	hrtimer_cancel(&q->timeslot_update_timer);
-
-	/* kill tasklet */
-	fp_debug("killing timeslot update tasklet\n");
-	tasklet_kill(&q->timeslot_update_tasklet);
-
-	/* eliminate the request timer */
-	fp_debug("canceling TX timer\n");
-	hrtimer_cancel(&q->request_timer);
-
-	/**
-	 * make sure there isn't a tasklet running which might try to lock
-	 *   after the the lock is destroyed
-	 */
-	fp_debug("killing TX tasklet\n");
-	tasklet_kill(&q->request_tasklet);
-
-	/* eliminate the retransmission timer */
-	fp_debug("canceling retransmission timer\n");
-	hrtimer_cancel(&q->retrans_timer);
-
-	/* kill tasklet */
-	fp_debug("killing retransmission tasklet\n");
-	tasklet_kill(&q->retrans_tasklet);
 
 	fp_debug("locking qdisc for reset\n");
 	spin_lock_bh(root_lock);
@@ -1826,30 +1735,10 @@ static int fp_tc_init(struct Qdisc *sch, struct nlattr *opt)
 
 	pacer_init_full(&q->request_pacer, now_monotonic, q->req_cost,
 			q->req_bucketlen, q->req_min_gap);
-
-	/* initialize timeslot update timer */
-	hrtimer_init(&q->timeslot_update_timer, CLOCK_MONOTONIC, HRTIMER_MODE_REL);
-	q->timeslot_update_timer.function = timeslot_update_timer_func;
-
-	/* initialize request timer */
-	hrtimer_init(&q->request_timer, CLOCK_MONOTONIC, HRTIMER_MODE_ABS);
-	q->request_timer.function = send_request_timer_func;
+	qdisc_watchdog_init(&q->watchdog, sch);
 
 	/* initialize retransmission timer */
-	hrtimer_init(&q->retrans_timer, CLOCK_MONOTONIC, HRTIMER_MODE_ABS);
-	q->retrans_timer.function = retrans_timer_func;
-
-	/* initialize timeslot update tasklet */
-	tasklet_init(&q->timeslot_update_tasklet, &timeslot_update_tasklet_func,
-			(unsigned long int)sch);
-
-	/* initialize retransmission tasklet */
-	tasklet_init(&q->retrans_tasklet, &retrans_tasklet,
-			(unsigned long int)sch);
-
-	/* initialize tasklet */
-	tasklet_init(&q->request_tasklet, &send_request_tasklet,
-			(unsigned long int)sch);
+	q->retrans_time = ~0ULL;
 
 	if (opt) {
 		err = fp_tc_change(sch, opt);
@@ -1983,9 +1872,8 @@ static int fp_tc_dump_stats(struct Qdisc *sch, struct gnet_dump *d)
 		fpproto_dump_stats(conn, (struct fp_proto_stat *)&st.proto_stats);
 	}
 
-#if 0
-	dump_flow_info(q, false);
-#endif
+	if (SHOULD_DUMP_FLOW_INFO)
+		dump_flow_info(q, false);
 
 	return gnet_stats_copy_app(d, &st, sizeof(st));
 }

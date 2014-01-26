@@ -26,17 +26,20 @@ static inline u64 fp_monotonic_time_ns(void)
 }
 
 static inline
-struct fpproto_pktdesc *fpproto_pktdesc_alloc(void)
+void free_kernel_pktdesc_no_refcount(struct fp_kernel_pktdesc *kern_pd)
 {
-	struct fpproto_pktdesc *pd;
-	pd = kmem_cache_zalloc(fpproto_pktdesc_cachep, GFP_ATOMIC | __GFP_NOWARN);
-	return pd;
+	kmem_cache_free(fpproto_pktdesc_cachep, kern_pd);
 }
 
 static inline
 void fpproto_pktdesc_free(struct fpproto_pktdesc *pd)
 {
-	kmem_cache_free(fpproto_pktdesc_cachep, pd);
+	struct fp_kernel_pktdesc *kern_pd =
+			container_of(pd, struct fp_kernel_pktdesc, pktdesc);
+
+	if (atomic_dec_and_test(&kern_pd->refcount))
+		free_kernel_pktdesc_no_refcount(kern_pd);
 }
+
 
 #endif /* FASTPASS_LINUX_PLATFORM_H_ */

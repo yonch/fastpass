@@ -11,6 +11,7 @@
 #include <net/inet_sock.h>
 #include <linux/interrupt.h>
 #include <linux/hrtimer.h>
+#include <linux/types.h>
 
 #include "../protocol/platform/generic.h"
 #include "../protocol/fpproto.h"
@@ -36,6 +37,13 @@ struct fastpass_sock {
 	struct fpproto_conn conn;
 
 	struct fp_socket_stat stat;
+};
+
+struct fp_kernel_pktdesc {
+	struct fpproto_pktdesc		pktdesc;
+	struct work_struct			work;
+	atomic_t					refcount;
+	struct sock					*sk;
 };
 
 extern int __init fpproto_register(void);

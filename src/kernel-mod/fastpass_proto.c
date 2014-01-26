@@ -224,7 +224,7 @@ static int fpproto_disconnect(struct sock *sk, int flags)
 static void fpproto_destroy_sock(struct sock *sk)
 {
 	struct fastpass_sock *fp = fastpass_sk(sk);
-	struct fp_kernel_pktdesc *kern_pd, next_pd;
+	struct fp_kernel_pktdesc *kern_pd, *next_pd;
 	fp_debug("visited\n");
 
 	/* might not be necessary, doing for safety */

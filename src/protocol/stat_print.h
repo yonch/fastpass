@@ -47,11 +47,13 @@ static inline void fpproto_print_stats(struct fp_proto_stat* sps)
 	printf(", consecutive bad %d", sps->consecutive_bad_pkts);
 	printf("\n  egress_seq 0x%llX", sps->out_max_seqno);
 	printf(", earliest_unacked 0x%llX", sps->earliest_unacked);
+	printf(", next_timeout seq 0x%llX", sps->next_timeout_seqno);
 	/* TX */
 	printf("\n  TX %llu ctrl pkts", sps->committed_pkts);
-	printf(" (%llu acked, %llu timeout, %llu fell off)", sps->acked_packets,
-			sps->timeout_pkts, sps->fall_off_outwnd);
-	printf(", %llu timeouts", sps->tasklet_runs);
+	printf(" (%llu acked, %llu not acked, %llu timeout, %llu fell off)",
+			sps->acked_packets, sps->never_acked_pkts, sps->timeout_pkts,
+			sps->fall_off_outwnd);
+	printf(", %llu timeouts", sps->timeout_handler_runs);
 	printf(", %llu timer_sets", sps->reprogrammed_timer);
 	printf("\n  %llu ack payloads", sps->ack_payloads);
 	printf(" (%llu w/new info)", sps->informative_ack_payloads);

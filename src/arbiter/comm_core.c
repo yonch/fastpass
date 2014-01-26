@@ -381,8 +381,6 @@ static void handle_neg_ack(void *param, struct fpproto_pktdesc *pd)
 
 	comm_log_neg_ack(node_id, pd->n_areq, total_timeslots, pd->seqno,
 			num_triggered);
-
-	fpproto_pktdesc_free(pd);
 }
 
 static void handle_ack(void *param, struct fpproto_pktdesc *pd)

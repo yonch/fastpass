@@ -5,7 +5,8 @@
  *      Author: yonch
  */
 
-#include "../linux-compat.h"
+#include "../platform/generic.h"
+#include "../platform/debug.h"
 #include "../window.h"
 
 void bulk_test(u64 BASE, u64 seqno, u32 amount, u64 m0, u64 m1, u64 m2, u64 m3, u64 e_summary)
@@ -16,17 +17,17 @@ void bulk_test(u64 BASE, u64 seqno, u32 amount, u64 m0, u64 m1, u64 m2, u64 m3, 
 	wnd_reset(wndp, BASE-1);
 	wnd_advance(wndp, FASTPASS_WND_LEN);
 	wnd_mark_bulk(wndp, seqno, amount);
-	BUG_ON(wndp->summary != e_summary);
-	BUG_ON(wndp->marked[0] != m0);
-	BUG_ON(wndp->marked[1] != m1);
-	BUG_ON(wndp->marked[2] != m2);
-	BUG_ON(wndp->marked[3] != m3);
+	FASTPASS_BUG_ON(wndp->summary != e_summary);
+	FASTPASS_BUG_ON(wndp->marked[0] != m0);
+	FASTPASS_BUG_ON(wndp->marked[1] != m1);
+	FASTPASS_BUG_ON(wndp->marked[2] != m2);
+	FASTPASS_BUG_ON(wndp->marked[3] != m3);
 }
 
 
 /* test */
 int main(void) {
-	u64 tslot;
+	u64 tslot, tslot_out;
 	s32 gap;
 	int i;
 	const int BASE = 10071;
@@ -35,8 +36,9 @@ int main(void) {
 
 	wnd_reset(wndp, BASE - 1);
 	for(tslot = BASE - FASTPASS_WND_LEN; tslot < BASE; tslot++) {
-		BUG_ON(wnd_at_or_before(wndp, tslot) != -1);
-		BUG_ON(wnd_is_marked(wndp, tslot));
+		FASTPASS_BUG_ON(wnd_at_or_before(wndp, tslot) != -1);
+		FASTPASS_BUG_ON(wnd_is_marked(wndp, tslot));
+		FASTPASS_BUG_ON(wnd_at_or_after(wndp, tslot, &tslot_out) != false);
 	}
 
 	for(i = 0; i < FASTPASS_WND_LEN; i++) {
@@ -45,33 +47,51 @@ int main(void) {
 	}
 
 	for(tslot = BASE; tslot < BASE + FASTPASS_WND_LEN; tslot++) {
-		BUG_ON(!wnd_is_marked(wndp, tslot));
-		BUG_ON(wnd_at_or_before(wndp, tslot) != 0);
+		FASTPASS_BUG_ON(!wnd_is_marked(wndp, tslot));
+		FASTPASS_BUG_ON(wnd_at_or_before(wndp, tslot) != 0);
+		FASTPASS_BUG_ON(wnd_at_or_after(wndp, tslot, &tslot_out) != true);
+		FASTPASS_BUG_ON(tslot_out != tslot);
 	}
 
-	BUG_ON(wnd_earliest_marked(wndp) != BASE);
+	FASTPASS_BUG_ON(wnd_earliest_marked(wndp) != BASE);
+	FASTPASS_BUG_ON(wnd_at_or_after(wndp, BASE, &tslot_out) != true);
+	FASTPASS_BUG_ON(tslot_out != BASE);
+
 	wnd_clear(wndp, BASE);
-	BUG_ON(wnd_earliest_marked(wndp) != BASE+1);
-	BUG_ON(wnd_at_or_before(wndp, BASE) != -1);
-	BUG_ON(wnd_at_or_before(wndp, BASE+1) != 0);
+	FASTPASS_BUG_ON(wnd_earliest_marked(wndp) != BASE+1);
+	FASTPASS_BUG_ON(wnd_at_or_before(wndp, BASE) != -1);
+	FASTPASS_BUG_ON(wnd_at_or_before(wndp, BASE+1) != 0);
+	FASTPASS_BUG_ON(wnd_at_or_after(wndp, BASE, &tslot_out) != true);
+	FASTPASS_BUG_ON(tslot_out != BASE+1);
+	FASTPASS_BUG_ON(wnd_at_or_after(wndp, BASE+1, &tslot_out) != true);
+	FASTPASS_BUG_ON(tslot_out != BASE+1);
+
 	wnd_clear(wndp, BASE+2);
-	BUG_ON(wnd_earliest_marked(wndp) != BASE+1);
-	BUG_ON(wnd_at_or_before(wndp, BASE+2) != 1);
+	FASTPASS_BUG_ON(wnd_earliest_marked(wndp) != BASE+1);
+	FASTPASS_BUG_ON(wnd_at_or_before(wndp, BASE+2) != 1);
+	FASTPASS_BUG_ON(wnd_at_or_after(wndp, BASE, &tslot_out) != true);
+	FASTPASS_BUG_ON(tslot_out != BASE+1);
+	FASTPASS_BUG_ON(wnd_at_or_after(wndp, BASE+1, &tslot_out) != true);
+	FASTPASS_BUG_ON(tslot_out != BASE+1);
 
 	for(tslot = BASE+3; tslot < BASE + 152; tslot++) {
 		wnd_clear(wndp, tslot);
-		BUG_ON(wnd_is_marked(wndp, tslot));
-		BUG_ON(wnd_at_or_before(wndp, tslot) != tslot - BASE - 1);
-		BUG_ON(wnd_at_or_before(wndp, tslot+1) != 0);
-		BUG_ON(wnd_earliest_marked(wndp) != BASE+1);
+		FASTPASS_BUG_ON(wnd_is_marked(wndp, tslot));
+		FASTPASS_BUG_ON(wnd_at_or_before(wndp, tslot) != tslot - BASE - 1);
+		FASTPASS_BUG_ON(wnd_at_or_before(wndp, tslot+1) != 0);
+		FASTPASS_BUG_ON(wnd_earliest_marked(wndp) != BASE+1);
+		FASTPASS_BUG_ON(wnd_at_or_after(wndp, BASE+1, &tslot_out) != true);
+		FASTPASS_BUG_ON(tslot_out != BASE+1);
+		FASTPASS_BUG_ON(wnd_at_or_after(wndp, BASE+2, &tslot_out) != true);
+		FASTPASS_BUG_ON(tslot_out != tslot+1);
 	}
 	for(tslot = BASE+152; tslot < BASE + FASTPASS_WND_LEN; tslot++) {
-		BUG_ON(!wnd_is_marked(wndp, tslot));
-		BUG_ON(wnd_at_or_before(wndp, tslot) != 0);
+		FASTPASS_BUG_ON(!wnd_is_marked(wndp, tslot));
+		FASTPASS_BUG_ON(wnd_at_or_before(wndp, tslot) != 0);
 	}
 
 	wnd_clear(wndp, BASE+1);
-	BUG_ON(wnd_earliest_marked(wndp) != BASE+152);
+	FASTPASS_BUG_ON(wnd_earliest_marked(wndp) != BASE+152);
 
 	/* prepared for BASE = 10071 */
 	/* all marks within a single word, first word */
@@ -96,34 +116,34 @@ int main(void) {
 	wnd_mark(wndp, BASE + FASTPASS_WND_LEN - 33);
 	wnd_mark(wndp, BASE + 42);
 	/* last word */
-	BUG_ON(wnd_get_mask(wndp, BASE + 2) != (3UL << 61));
+	FASTPASS_BUG_ON(wnd_get_mask(wndp, BASE + 2) != (3UL << 61));
 	/* last bit */
-	BUG_ON(wnd_get_mask(wndp, BASE) != (1UL << 63));
+	FASTPASS_BUG_ON(wnd_get_mask(wndp, BASE) != (1UL << 63));
 	/* just before last bit */
-	BUG_ON(wnd_get_mask(wndp, BASE - 1) != 0);
+	FASTPASS_BUG_ON(wnd_get_mask(wndp, BASE - 1) != 0);
 	/* two bits before last bit - shouldn't catch bit BASE+FASTPASS_WND_LEN-1 */
-	BUG_ON(wnd_get_mask(wndp, BASE - 2) != 0);
+	FASTPASS_BUG_ON(wnd_get_mask(wndp, BASE - 2) != 0);
 	/* full word (last word) */
-	BUG_ON(wnd_get_mask(wndp, BASE + 40) != (3UL << 23));
+	FASTPASS_BUG_ON(wnd_get_mask(wndp, BASE + 40) != (3UL << 23));
 	/* two words */
-	BUG_ON(wnd_get_mask(wndp, BASE + 64) != 1 + (1UL << 41));
+	FASTPASS_BUG_ON(wnd_get_mask(wndp, BASE + 64) != 1 + (1UL << 41));
 	/* bits up to head */
-	BUG_ON(wnd_get_mask(wndp, wndp->head) != (5UL << 61) + (1UL << 31));
+	FASTPASS_BUG_ON(wnd_get_mask(wndp, wndp->head) != (5UL << 61) + (1UL << 31));
 	/* bit before head */
-	BUG_ON(wnd_get_mask(wndp, wndp->head - 1) != (1UL << 62) + (1UL << 32));
+	FASTPASS_BUG_ON(wnd_get_mask(wndp, wndp->head - 1) != (1UL << 62) + (1UL << 32));
 	/* bit after head */
-	BUG_ON(wnd_get_mask(wndp, wndp->head + 1) != (5UL << 60)  + (1UL << 30));
+	FASTPASS_BUG_ON(wnd_get_mask(wndp, wndp->head + 1) != (5UL << 60)  + (1UL << 30));
 	/* just before losing the bit in prev word */
-	BUG_ON(wnd_get_mask(wndp, wndp->head + 31) != (5UL << 30)  + 1UL);
+	FASTPASS_BUG_ON(wnd_get_mask(wndp, wndp->head + 31) != (5UL << 30)  + 1UL);
 	/* just after losing the bit in prev word */
-	BUG_ON(wnd_get_mask(wndp, wndp->head + 32) != (5UL << 29));
+	FASTPASS_BUG_ON(wnd_get_mask(wndp, wndp->head + 32) != (5UL << 29));
 	/* when only the head is in the bitmask */
-	BUG_ON(wnd_get_mask(wndp, wndp->head + 63) != 1UL);
+	FASTPASS_BUG_ON(wnd_get_mask(wndp, wndp->head + 63) != 1UL);
 	/* when the head just went out of the bitmask */
-	BUG_ON(wnd_get_mask(wndp, wndp->head + 64) != 0);
+	FASTPASS_BUG_ON(wnd_get_mask(wndp, wndp->head + 64) != 0);
 	/* way after the head */
-	BUG_ON(wnd_get_mask(wndp, wndp->head + 65) != 0);
-	BUG_ON(wnd_get_mask(wndp, wndp->head + 1005) != 0);
+	FASTPASS_BUG_ON(wnd_get_mask(wndp, wndp->head + 65) != 0);
+	FASTPASS_BUG_ON(wnd_get_mask(wndp, wndp->head + 1005) != 0);
 
 	printf("done testing wnd, cleaning up\n");
 

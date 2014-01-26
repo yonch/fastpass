@@ -63,25 +63,26 @@ static __sum16 fastpass_checksum(u8 *pkt, u32 len, __be32 saddr, __be32 daddr,
 	return csum_tcpudp_magic(saddr, daddr, len, IPPROTO_FASTPASS, csum);
 }
 
-static void cancel_and_reset_retrans_timer(struct fpproto_conn *conn)
+static void recompute_and_reset_retrans_timer(struct fpproto_conn *conn)
 {
 	u64 timeout;
 	u64 seqno;
+	bool has_unacked;
 
-	conn->ops->cancel_timer(conn->ops_param);
-
-	if (wnd_empty(&conn->outwnd)) {
+	/* find the earliest untimed-out and unacked seqno, and its the timeout */
+	has_unacked = wnd_at_or_after(&conn->outwnd, conn->next_timeout_seqno, &seqno);
+	if (!has_unacked) {
 		fp_debug("all packets acked, no need to set timer\n");
+		conn->next_timeout_seqno = wnd_head(&conn->outwnd) + 1;
+		conn->ops->cancel_timer(conn->ops_param);
 		return;
 	}
 
-	/* find the earliest unacked, and the timeout */
-	seqno = wnd_earliest_marked(&conn->outwnd);
+	conn->next_timeout_seqno = seqno;
 	timeout = outwnd_peek(conn, seqno)->sent_timestamp
 			+ conn->send_timeout;
 
-	/* set timer and earliest_unacked */
-	conn->earliest_unacked = seqno;
+	conn->ops->cancel_timer(conn->ops_param);
 	conn->ops->set_timer(conn->ops_param, timeout);
 	conn->stat.reprogrammed_timer++;
 	fp_debug("setting timer to %llu for seq#=0x%llX\n", timeout, seqno);
@@ -107,12 +108,10 @@ static void do_ack_seqno(struct fpproto_conn *conn, u64 seqno)
 
 static void do_neg_ack_seqno(struct fpproto_conn *conn, u64 seq)
 {
-	struct fpproto_pktdesc *pd = outwnd_pop(conn, seq);
+	struct fpproto_pktdesc *pd = outwnd_peek(conn, seq);
 	fp_debug("Unacked tx seq 0x%llX\n", seq);
 	if (conn->ops->handle_neg_ack)
-		conn->ops->handle_neg_ack(conn->ops_param, pd);		/* will free pd */
-	else
-		fpproto_pktdesc_free(pd);
+		conn->ops->handle_neg_ack(conn->ops_param, pd);		/* will NOT free pd */
 }
 
 static void free_unacked(struct fpproto_conn *conn)
@@ -145,6 +144,7 @@ static void do_proto_reset(struct fpproto_conn *conn, u64 reset_time,
 	conn->in_max_seqno = base_seqno + FASTPASS_INGRESS_SEQNO_OFFSET - 1;
 	conn->inwnd = ~0UL;
 	conn->consecutive_bad_pkts = 0;
+	recompute_and_reset_retrans_timer(conn);
 
 	/* are we in sync? */
 	conn->in_sync = in_sync;
@@ -167,12 +167,11 @@ void fpproto_handle_timeout(struct fpproto_conn *conn, u64 now)
 	u64 seqno;
 	u64 timeout;
 
-	conn->stat.tasklet_runs++;
+	conn->stat.timeout_handler_runs++;
 
 	/* notify qdisc of expired timeouts */
-	while (!wnd_empty(&conn->outwnd)) {
-		/* find seqno and timeout of next unacked packet */
-		seqno = wnd_earliest_marked(&conn->outwnd);
+	seqno = conn->next_timeout_seqno;
+	while (wnd_at_or_after(&conn->outwnd, seqno, &seqno)) {
 		timeout = outwnd_peek(conn, seqno)->sent_timestamp
 				+ conn->send_timeout;
 
@@ -182,13 +181,16 @@ void fpproto_handle_timeout(struct fpproto_conn *conn, u64 now)
 
 		conn->stat.timeout_pkts++;
 		do_neg_ack_seqno(conn, seqno);
+
+		seqno++;
 	}
+	conn->next_timeout_seqno = wnd_head(&conn->outwnd) + 1;
 	fp_debug("outwnd empty, not setting timer\n");
 	return;
 
 set_next_timer:
 	/* seqno is the earliest unacked seqno, and timeout is its timeout */
-	conn->earliest_unacked = seqno;
+	conn->next_timeout_seqno = seqno;
 	conn->ops->set_timer(conn->ops_param, timeout);
 	fp_debug("setting timer to %llu for seq#=0x%llX\n", timeout, seqno);
 }
@@ -310,7 +312,7 @@ static void ack_payload_handler(struct fpproto_conn *conn, u64 ack_seq, u64 ack_
 	}
 
 	if (n_acked > 0) {
-		cancel_and_reset_retrans_timer(conn);
+		recompute_and_reset_retrans_timer(conn);
 		conn->stat.informative_ack_payloads++;
 	}
 	return;
@@ -730,12 +732,19 @@ void fpproto_prepare_to_send(struct fpproto_conn *conn)
 
 	/* make sure outwnd is not holding a packet descriptor where @pd will be */
 	if (wnd_is_marked(&conn->outwnd, window_edge)) {
-		/* treat packet going out of outwnd as if it was dropped */
-		conn->stat.fall_off_outwnd++;
-		do_neg_ack_seqno(conn, window_edge);
+		/* this is a packet that hasn't been acked before falling off */
+		conn->stat.never_acked_pkts++;
 
-		/* reset timer if needed */
-		cancel_and_reset_retrans_timer(conn);
+		/* if the packet has never been NACKed either, nack it now (and log) */
+		if (time_after_eq64(window_edge, conn->next_timeout_seqno)) {
+			conn->stat.fall_off_outwnd++;
+			do_neg_ack_seqno(conn, window_edge);
+			conn->next_timeout_seqno = window_edge + 1;
+			recompute_and_reset_retrans_timer(conn);
+		}
+		
+		/* remove from the window and free */
+		fpproto_pktdesc_free(outwnd_pop(conn, window_edge));
 	}
 }
 
@@ -763,13 +772,7 @@ void fpproto_commit_packet(struct fpproto_conn *conn, struct fpproto_pktdesc *pd
 	outwnd_add(conn, pd);
 	conn->stat.committed_pkts++;
 
-	/* if first packet in outwnd, enqueue timer and set fp->earliest_unacked */
-	if (wnd_num_marked(&conn->outwnd) == 1) {
-		u64 timeout = pd->sent_timestamp + conn->send_timeout;
-		conn->earliest_unacked = pd->seqno;
-		conn->ops->set_timer(conn->ops_param, timeout);
-		fp_debug("first packet in outwnd. setting timer to %llu for seq#=0x%llX\n", timeout, pd->seqno);
-	}
+	recompute_and_reset_retrans_timer(conn);
 }
 
 int fpproto_encode_packet(struct fpproto_conn *conn,
@@ -882,8 +885,10 @@ void fpproto_dump_stats(struct fpproto_conn *conn, struct fp_proto_stat *stat)
 	stat->in_sync				= conn->in_sync;
 	stat->consecutive_bad_pkts	= (__u16)conn->consecutive_bad_pkts;
 	stat->tx_num_unacked		= (__u16)wnd_num_marked(&conn->outwnd);
-	stat->earliest_unacked		= conn->earliest_unacked;
+	stat->earliest_unacked		=
+			wnd_empty(&conn->outwnd) ? 0 : wnd_earliest_marked(&conn->outwnd);
 	stat->inwnd					= conn->inwnd;
+	stat->next_timeout_seqno	= conn->next_timeout_seqno;
 }
 
 void fpproto_init_conn(struct fpproto_conn *conn, struct fpproto_ops *ops,

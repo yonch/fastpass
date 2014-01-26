@@ -157,7 +157,7 @@ struct fpproto_ops {
 
 };
 
-#define FASTPASS_PROTOCOL_STATS_VERSION 1
+#define FASTPASS_PROTOCOL_STATS_VERSION 2
 
 /* Control socket statistics */
 struct fp_proto_stat {
@@ -165,7 +165,7 @@ struct fp_proto_stat {
 
 	/* ACK/NACK-related */
 	__u64 out_max_seqno;
-	__u64 tasklet_runs;
+	__u64 timeout_handler_runs;
 	__u64 ack_payloads;
 	__u64 too_early_ack;
 	__u64 acked_packets;
@@ -174,6 +174,8 @@ struct fp_proto_stat {
 	__u64 reprogrammed_timer;
 	__u64 earliest_unacked;
 	__u64 committed_pkts;
+	__u64 never_acked_pkts;
+	__u64 next_timeout_seqno;
 	__u16 tx_num_unacked;
 
 	/* send-related */
@@ -236,8 +238,7 @@ struct fpproto_conn {
 	/* outwnd */
 	struct fp_window		outwnd;
 	struct fpproto_pktdesc	*unacked_pkts[(1 << FASTPASS_WND_LOG)];
-
-	u64						earliest_unacked;
+	u64						next_timeout_seqno;
 
 	/* inwnd */
 	u64						inwnd;

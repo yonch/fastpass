@@ -1074,7 +1074,6 @@ static void handle_neg_ack(void *param, struct fpproto_pktdesc *pd)
 		fp_debug("nack for request of %llu for flow 0x%04llX (%llu acked), added to retransmit queue\n",
 						req_tslots, f->src_dst_key, f->acked_tslots);
 	}
-	fpproto_pktdesc_free(pd);
 }
 
 

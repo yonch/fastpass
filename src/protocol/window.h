@@ -202,8 +202,8 @@ static inline s32 wnd_at_or_before(struct fp_window *wnd, u64 seqno)
 }
 
 /**
- * Returns the sequence no of the earliest unacked packet.
- * Assumes such a packet exists!
+ * Returns the earliest marked seqno.
+ * Assumes such a seqno exists!
  */
 static inline u64 wnd_earliest_marked(struct fp_window *wnd)
 {
@@ -220,6 +220,53 @@ static inline u64 wnd_earliest_marked(struct fp_window *wnd)
 	// FASTPASS_BUG_ON(wnd_at_or_before(wnd, result - 1) != -1);
 
 	return result;
+}
+
+/**
+ * If there is a marked seqno not before @seqno, returns true and puts its index
+ *  in @out_seqno. Otherwise, returns false.
+ */
+static inline bool wnd_at_or_after(struct fp_window *wnd, u64 seqno, u64 *out_seqno)
+{
+	u32 seqno_index;
+	u32 seqno_word;
+	u32 seqno_offset;
+	u32 result_word_offset;
+	unsigned long tmp;
+
+	/* if after window, there are no marks */
+	if (unlikely(wnd_seq_after(wnd, seqno)))
+		return false;
+
+	/* if before window, return the earliest marked if exists */
+	if (unlikely(wnd_seq_before(wnd, seqno))) {
+		if (wnd_empty(wnd))
+			return false;
+		else
+			*out_seqno = wnd_earliest_marked(wnd);
+			return true;
+	}
+
+	/* check seqno's word in marked */
+	seqno_index = wnd_pos(seqno);
+	seqno_word = BIT_WORD(seqno_index);
+	seqno_offset = seqno_index % BITS_PER_LONG;
+	tmp = wnd->marked[seqno_word] >> seqno_offset;
+	if (tmp != 0) {
+		*out_seqno = seqno + __ffs(tmp);
+		return true;
+	}
+
+	/* didn't find in first word, look at summary of all words strictly after */
+	tmp = wnd->summary << (BITS_PER_LONG - 1 - summary_pos(wnd, seqno_index));
+	tmp &= (1ULL << 63) - 1;
+	if (tmp == 0)
+		return false; /* summary indicates no marks there */
+
+	result_word_offset = BITS_PER_LONG - 1 - __fls(tmp);
+	tmp = wnd->marked[(seqno_word + result_word_offset) % FASTPASS_WND_WORDS];
+	*out_seqno = seqno - seqno_offset + BITS_PER_LONG * result_word_offset +  __ffs(tmp);
+	return true;
 }
 
 static inline void wnd_reset(struct fp_window *wnd, u64 head)

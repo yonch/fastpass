@@ -79,7 +79,8 @@ static inline void fp_timer_reset(struct fp_timers *timers,
 static inline
 void fp_timer_stop(struct fp_timer *tim)
 {
-	assert(tim->time != TIMER_NOT_SET_TIME);
+	if(tim->time == TIMER_NOT_SET_TIME)
+		return;
 
 	tim->time = TIMER_NOT_SET_TIME;
 	list_del(&tim->node);

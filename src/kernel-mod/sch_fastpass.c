@@ -68,7 +68,6 @@
 enum {
 	FLOW_UNQUEUED,
 	FLOW_REQUEST_QUEUE,
-	FLOW_RETRANSMIT_QUEUE,
 };
 
 /*
@@ -131,7 +130,6 @@ struct fp_sched_data {
 	struct fp_flow	hi_prio;			/* for high prio traffic */
 
 	struct list_head unreq_flows; 		/* flows with unscheduled packets */
-	struct list_head retrans_flows; 	/* flows with a retransmission pending */
 
 	struct fp_window alloc_wnd;
 	u64		current_timeslot;
@@ -234,9 +232,6 @@ static void flowqueue_enqueue_request(struct fp_sched_data *q, struct fp_flow *f
 {
 	FASTPASS_BUG_ON(f->state == FLOW_REQUEST_QUEUE);
 
-	if (f->state == FLOW_RETRANSMIT_QUEUE)
-		return; /* already in queue with higher priority */
-
 	/* enqueue */
 	list_add_tail(&f->queue_entry, &q->unreq_flows);
 	f->state = FLOW_REQUEST_QUEUE;
@@ -248,47 +243,30 @@ static void flowqueue_enqueue_request(struct fp_sched_data *q, struct fp_flow *f
 }
 
 /**
- * enqueues flow into the retransmit queue, dequeueing from the request
- *   if required.
+ * We no longer have a distinction between enqueuing retransmits and requests
  */
 static void flowqueue_enqueue_retransmit(struct fp_sched_data *q, struct fp_flow *f)
 {
-	if (f->state == FLOW_RETRANSMIT_QUEUE)
-		return; /* already in the queue (must be closer to the head) */
+	if (flow_in_flowqueue(f))
+		return;
 
-	if (f->state == FLOW_REQUEST_QUEUE) {
-		/* move flow to the retransmit queue */
-		list_move_tail(&f->queue_entry, &q->retrans_flows);
-	} else {
-		/* wasn't in a queue, enqueue */
-		list_add_tail(&f->queue_entry, &q->retrans_flows);
-		q->n_unreq_flows++;
-	}
-	f->state = FLOW_RETRANSMIT_QUEUE;
-
-	/* update request timer if necessary */
-	req_timer_flowqueue_enqueue(q);
+	flowqueue_enqueue_request(q, f);
 }
 
 static bool flowqueue_is_empty(struct fp_sched_data* q)
 {
-	return list_empty(&q->unreq_flows) && list_empty(&q->retrans_flows);
+	return list_empty(&q->unreq_flows);
 }
 
 static struct fp_flow *flowqueue_dequeue(struct fp_sched_data* q)
 {
 	struct fp_flow *f;
 
+	FASTPASS_BUG_ON(list_empty(&q->unreq_flows));
+
 	/* get entry */
-	if (unlikely(!list_empty(&q->retrans_flows))) {
-		/* got retransmit flow */
-		f = list_first_entry(&q->retrans_flows, struct fp_flow, queue_entry);
-	} else if (likely(!list_empty(&q->unreq_flows))) {
-		/* got regular request */
-		f = list_first_entry(&q->unreq_flows, struct fp_flow, queue_entry);
-	} else {
-		BUG();
-	}
+	f = list_first_entry(&q->unreq_flows, struct fp_flow, queue_entry);
+
 	/* remove it from queue */
 	list_del(&f->queue_entry);
 	f->state = FLOW_UNQUEUED;
@@ -1091,13 +1069,6 @@ static void handle_neg_ack(void *param, struct fpproto_pktdesc *pd)
 			continue;
 		}
 
-		/* don't need to re-add if already in queue */
-		if (unlikely(f->state == FLOW_RETRANSMIT_QUEUE)) {
-			fp_debug("nack for flow 0x%04llX, already queued for retransmission\n",
-					f->src_dst_key);
-			continue;
-		}
-
 		/* add to retransmit queue */
 		flowqueue_enqueue_retransmit(q, f);
 		fp_debug("nack for request of %llu for flow 0x%04llX (%llu acked), added to retransmit queue\n",
@@ -1150,7 +1121,6 @@ static void send_request(struct Qdisc *sch)
 	u64 now_monotonic = fp_monotonic_time_ns();
 
 	struct fp_flow *f;
-	struct list_head *cur_flow_queue;
 	struct fp_kernel_pktdesc *kern_pd;
 	struct fpproto_pktdesc *pd;
 	u64 new_requested;
@@ -1180,19 +1150,9 @@ static void send_request(struct Qdisc *sch)
 
 	pd->n_areq = 0;
 
-	/* start with the retrans queue */
-	cur_flow_queue = &q->retrans_flows;
-
-process_flow_queue:
-	while ((pd->n_areq < FASTPASS_PKT_MAX_AREQ) && !list_empty(cur_flow_queue)) {
+	while ((pd->n_areq < FASTPASS_PKT_MAX_AREQ) && !flowqueue_is_empty(q)) {
 		/* get entry */
-		f = list_first_entry(cur_flow_queue, struct fp_flow, queue_entry);
-		/* remove it from queue */
-		list_del(&f->queue_entry);
-		f->state = FLOW_UNQUEUED;
-
-		/* update counter */
-		q->n_unreq_flows--;
+		f = flowqueue_dequeue(q);
 
 		new_requested = min_t(u64, f->demand_tslots,
 				f->acked_tslots + FASTPASS_REQUEST_WINDOW_SIZE - 1);
@@ -1210,12 +1170,6 @@ process_flow_queue:
 		f->requested_tslots = new_requested;
 
 		pd->n_areq++;
-	}
-
-	/* after handling retrans_flows, we should handle unreq_flows */
-	if (cur_flow_queue == &q->retrans_flows) {
-		cur_flow_queue = &q->unreq_flows;
-		goto process_flow_queue;
 	}
 
 	fp_debug("end: unreq_flows=%u, unreq_tslots=%llu\n",
@@ -1394,7 +1348,6 @@ static void fp_tc_reset(struct Qdisc *sch)
 		}
 	}
 	INIT_LIST_HEAD(&q->unreq_flows);
-	INIT_LIST_HEAD(&q->retrans_flows);
 	wnd_reset(&q->alloc_wnd, q->current_timeslot);
 	q->flows		= 0;
 	q->inactive_flows	= 0;
@@ -1713,7 +1666,6 @@ static int fp_tc_init(struct Qdisc *sch, struct nlattr *opt)
 	q->send_timeout_us	= FASTPASS_SCH_RETRANS_TIMEOUT_NS;
 	q->flow_hash_tbl	= NULL;
 	INIT_LIST_HEAD(&q->unreq_flows);
-	INIT_LIST_HEAD(&q->retrans_flows);
 	q->internal.src_dst_key = 0xD066F00DDEADBEEF;
 	q->hi_prio.src_dst_key = 0xABCDEEEEEEEEDCBA;
 	q->internal_free_time = now_monotonic;

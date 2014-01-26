@@ -94,44 +94,45 @@ void fpproto_set_qdisc(struct sock *sk, struct Qdisc *new_qdisc)
 int fpproto_rcv(struct sk_buff *skb)
 {
 	struct sock *sk;
-	const struct inet_sock *inet;
-	struct fastpass_sock *fp;
-	struct Qdisc *sch;
 
 	sk = __inet_lookup_skb(&fastpass_hashinfo, skb,
 			FASTPASS_DEFAULT_PORT_NETORDER /*sport*/,
 			FASTPASS_DEFAULT_PORT_NETORDER /*dport*/);
-	fp = fastpass_sk(sk);
-	inet = inet_sk(sk);
 
 	if (sk == NULL) {
 		fp_debug("got packet on non-connected socket\n");
-		kfree_skb(skb);
-		return NET_RX_SUCCESS;
-	}
-
-	sch = fpproto_lock_qdisc(sk);
-	if (unlikely(sch == NULL)) {
-		fp_debug("qdisc seems to have been destroyed\n");
-		kfree_skb(skb);
-		return NET_RX_SUCCESS;
+		goto discard_no_sk;
 	}
 
 	if (unlikely((skb_shinfo(skb)->frag_list != NULL)
 			|| (skb_shinfo(skb)->nr_frags != 0))) {
-		fp->stat.rx_fragmented++;
+		fastpass_sk(sk)->stat.rx_fragmented++;
 		FASTPASS_WARN("RX a fragmented control packet, which is not supported\n");
-		goto cleanup;
+		goto discard_out;
 	}
 
-	fpproto_handle_rx_packet(&fp->conn, skb->data, skb->len, inet->inet_saddr,
-			inet->inet_daddr);
+	bh_lock_sock_nested(sk);
 
-cleanup:
-	fpproto_unlock_qdisc(sch);
+	if (unlikely(sk_add_backlog(sk, skb, sk->sk_rcvbuf)))
+		goto discard_out_locked;
+
+	bh_unlock_sock(sk);
 	sock_put(sk);
+
+	return NET_RX_SUCCESS;
+
+discard_out_locked:
+	bh_unlock_sock(sk);
+discard_out:
+	sock_put(sk);
+discard_no_sk:
 	__kfree_skb(skb);
 	return NET_RX_SUCCESS;
+}
+
+void fpproto_handle_pending_rx(struct sock *sk)
+{
+	release_sock(sk);
 }
 
 /**
@@ -372,10 +373,13 @@ static int fpproto_userspace_recvmsg(struct kiocb *iocb, struct sock *sk,
 	return -ENOTSUPP;
 }
 
-/* backlog_rcv - should never be called */
 static int fpproto_backlog_rcv(struct sock *sk, struct sk_buff *skb)
 {
-	BUG();
+	const struct inet_sock *inet = inet_sk(sk);
+	struct fastpass_sock *fp = fastpass_sk(sk);
+
+	fpproto_handle_rx_packet(&fp->conn, skb->data, skb->len, inet->inet_saddr,
+			inet->inet_daddr);
 	return 0;
 }
 

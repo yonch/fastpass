@@ -55,6 +55,8 @@ struct sk_buff *fpproto_make_skb(struct sock *sk, struct fpproto_pktdesc *pkt);
 
 void fpproto_send_skb(struct sock *sk, struct sk_buff *skb);
 
+void fpproto_handle_pending_rx(struct sock *sk);
+
 static inline struct fastpass_hdr *fastpass_hdr(
 		const struct sk_buff *skb)
 {

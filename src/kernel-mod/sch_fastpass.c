@@ -1198,6 +1198,7 @@ static struct sk_buff *fpq_dequeue(struct Qdisc *sch)
 	struct fp_sched_data *q = qdisc_priv(sch);
 	struct sk_buff *skb;
 	u64 now_monotonic;
+	u64 now_real;
 
 	/* try hi_prio queue first */
 	skb = flow_dequeue_skb(sch, &q->hi_prio);
@@ -1209,11 +1210,18 @@ static struct sk_buff *fpq_dequeue(struct Qdisc *sch)
 	if (skb)
 		goto out_got_skb;
 
-	/* when queue is empty we update the current timeslot */
-	now_monotonic = fp_monotonic_time_ns();
-	update_current_timeslot(sch, fp_get_time_ns());
+	/* queue is empty, can perform maintenance */
 
-	/* check for retransmission timeouts */
+	/* first, handle all received protocol packets */
+	if (likely(q->ctrl_sock != NULL))
+		fpproto_handle_pending_rx(q->ctrl_sock->sk);
+
+	/* update the current timeslot */
+	now_real = fp_get_time_ns();
+	update_current_timeslot(sch, now_real);
+
+	/* check for retransmission timeouts and process */
+	now_monotonic = fp_monotonic_time_ns();
 	if (q->retrans_time <= now_monotonic)
 		fpproto_handle_timeout(fpproto_conn(q), now_monotonic);
 

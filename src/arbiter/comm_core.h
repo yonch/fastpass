@@ -29,7 +29,7 @@
 #define Q_HEAD_WRITE_BUFFER_SIZE		(32*1024)
 
 /* Deadline to handle all packets, or start dropping */
-#define RX_BURST_DEADLINE_SEC			0.000001
+#define RX_BURST_DEADLINE_SEC			0.000010
 
 /**
  * Specifications for controller thread

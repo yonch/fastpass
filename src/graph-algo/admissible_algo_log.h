@@ -8,6 +8,8 @@
 #ifndef ADMISSIBLE_ALGO_LOG_H_
 #define ADMISSIBLE_ALGO_LOG_H_
 
+#include "../protocol/platform/generic.h"
+
 #define		MAINTAIN_ADM_LOG_COUNTERS	1
 
 #define		BACKLOG_HISTOGRAM_NUM_BINS	16

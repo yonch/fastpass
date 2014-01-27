@@ -17,9 +17,10 @@ library(scales)
 data <- read.csv("output.csv", sep=",")
 
 ggplot(data, aes(fct, linetype=as.factor(target_util), color=algo)) + stat_ecdf() +
-             labs(x = "Flow Completion Time (timeslots)", y = "CDF of FCTs") +
+             labs(x = "Flow Completion Time (number of timeslots)", y = "CDF of FCTs") +
              scale_x_log10(breaks= trans_breaks("log10", function(x) 10^x)) + 
              scale_colour_discrete(name="Algorithm") +
              scale_linetype_discrete(name="Target Utilization")
+             #+ coord_cartesian(ylim=c(0.99, 1), xlim=c(31622, 63000))
              
 

@@ -3,6 +3,7 @@ Created on January 19, 2014
 
 @author: aousterh
 '''
+import random
 import sys
 import unittest
 
@@ -27,6 +28,7 @@ class admissible_runner(object):
 
     ROUND_ROBIN = 0
     SHORTEST_JOB_FIRST = 1
+    RANDOM = 2
 
     def __init__(self, num_nodes, duration, warm_up_duration, request_size):
         self.num_nodes = num_nodes
@@ -188,6 +190,83 @@ class admissible_runner(object):
 
         return observed_util
 
+    def run_random_admissible(self):
+        BATCH_SIZE = structures.BATCH_SIZE
+        total_backlog = {}
+
+        num_admitted = 0
+        num_requested = 0
+        current_request = 0
+        req = self.requests[current_request]
+        for t in range(self.duration):
+            # Issue new requests
+            while int(req.time) == t:
+                num_requested += self.request_size
+                total_backlog[(req.src, req.dst)] = total_backlog.get((req.src, req.dst),
+                                                                      0) + self.request_size
+                self.pending_requests[(req.src, req.dst)].append(pending_request(self.request_size, t))
+                current_request += 1
+                req = self.requests[current_request]
+
+            if t % BATCH_SIZE != BATCH_SIZE - 1:
+                continue
+
+            # Get admissible traffic for this batch by choosing randomly from amongst
+            # all flows with pending backlog
+            admitted_batch = []
+            for i in range(BATCH_SIZE):
+                admitted_batch.append(set())
+            next_backlog = {}
+            for i in range(BATCH_SIZE):
+                srcs = set()
+                dsts = set()
+                while len(admitted_batch[i]) < self.num_nodes and len(total_backlog) > 0:
+                    index = random.randint(0, len(total_backlog) - 1)
+                    backlog_record = total_backlog.items()[index]
+                    pair = backlog_record[0]
+                    backlog = backlog_record[1]
+                    if pair[0] not in srcs and pair[1] not in dsts:
+                        # admit
+                        srcs.add(pair[0])
+                        dsts.add(pair[1])
+                        admitted_batch[i].add(pair)
+                        backlog -= 1
+                    
+                    # move backlog to be considered in the next timeslot
+                    if backlog > 0:
+                        next_backlog[pair] = backlog
+                    del total_backlog[pair]
+                total_backlog = dict(total_backlog.items() + next_backlog.items())
+                next_backlog = {}
+                
+            if t < self.warm_up_duration:
+                continue
+
+            # Record stats
+            for i in range(BATCH_SIZE):
+                admitted_i = admitted_batch[i]
+                num_admitted += len(admitted_i)
+                if len(admitted_i) > self.num_nodes:
+                    raise AssertionError
+
+                for e in range(len(admitted_i)):
+                    edge = admitted_i.pop()
+                    req_list = self.pending_requests[(edge[0], edge[1])]
+                    if len(req_list) < 1:
+                        raise AssertionError
+                    req_list[0].size -= 1
+                    if req_list[0].size == 0:
+                        # record flow completion time
+                        last_t_slot = t + i
+                        fct = last_t_slot - req_list[0].request_time
+                        self.flow_completion_times.append(fct)
+                        del req_list[0]
+                
+        capacity = (self.duration - self.warm_up_duration) * self.num_nodes
+        observed_util = float(num_admitted) / capacity
+
+        return observed_util        
+
     def run_admissible(self, admissible_type):
         '''Run an admissible algorithm of a specific type. 0=round-robin, 1=sjf, 2=random.'''
 
@@ -204,15 +283,19 @@ class admissible_runner(object):
             return self.run_round_robin_admissible()
         elif admissible_type == self.SHORTEST_JOB_FIRST:
             return self.run_shortest_job_first_admissible()
+        elif admissible_type == self.RANDOM:
+            return self.run_random_admissible()
 
 class Test(unittest.TestCase):
 
     def test_benchmark(self):
         """Benchmarks the flow completion time of different admissible traffic algorithms."""
 
-        fractions = [0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9, 0.95, 0.99]
-        algorithms = [(admissible_runner.ROUND_ROBIN, "round_robin"),
-                      (admissible_runner.SHORTEST_JOB_FIRST, "shortest_job_first")]
+        # too many fractions takes too long and yields a crowded plot!
+        fractions = [0.2, 0.5, 0.9, 0.99]
+        algorithms =  [(admissible_runner.ROUND_ROBIN, "round_robin"),
+                       (admissible_runner.SHORTEST_JOB_FIRST, "shortest_job_first"),
+                       (admissible_runner.RANDOM, "random")]
         num_nodes = 256
         # keep both durations an even number of batches so that bin pointers return to queue_0
         warm_up_duration = ((10000 + 127) / 128) * 128

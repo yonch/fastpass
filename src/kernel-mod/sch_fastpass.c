@@ -143,6 +143,12 @@ struct fp_sched_data {
 
 	u64		retrans_time;
 
+	u64		profile_update;
+	u64		profile_rx;
+	u64		profile_tx;
+	u64		profile_timeout;
+	u64		profile_display_ctr;
+
 	/* counters */
 	u32		flows;
 	u32		inactive_flows;
@@ -1076,41 +1082,6 @@ static void handle_neg_ack(void *param, struct fpproto_pktdesc *pd)
 	}
 }
 
-
-static void send_request_work_func(struct work_struct *work)
-{
-	struct fp_kernel_pktdesc *kern_pd =
-			container_of(work, struct fp_kernel_pktdesc, work);
-	struct fpproto_pktdesc *pd = &kern_pd->pktdesc;
-	struct sk_buff *skb;
-
-	if (atomic_read(&kern_pd->refcount) == 1) {
-		/* already timed out, can free */
-		free_kernel_pktdesc_no_refcount(kern_pd);
-		return;
-	}
-
-	/* make the skb -- keep the lock here so the pkt_desc doesn't timeout
-	 * underneath us */
-	skb = fpproto_make_skb(kern_pd->sk, pd);
-
-	/* send the packets */
-	if (likely(skb != NULL))
-		fpproto_send_skb(kern_pd->sk, skb);
-
-	/* free the pktdesc if refcount allows (be wary of a race here) */
-	fpproto_pktdesc_free(pd);
-}
-
-static void enqueue_send_request_work(struct fp_sched_data *q,
-		struct fp_kernel_pktdesc *kern_pd)
-{
-	atomic_set(&kern_pd->refcount, 2);
-	INIT_WORK(&kern_pd->work, &send_request_work_func);
-	kern_pd->sk = q->ctrl_sock->sk;
-	schedule_work(&kern_pd->work);
-}
-
 /**
  * Send a request packet to the controller
  */
@@ -1139,7 +1110,7 @@ static void send_request(struct Qdisc *sch)
 	pacer_reset(&q->request_pacer);
 
 	/* allocate packet descriptor */
-	kern_pd = kmem_cache_zalloc(fpproto_pktdesc_cachep, GFP_ATOMIC | __GFP_NOWARN);
+	kern_pd = fpproto_pktdesc_alloc();
 	if (!kern_pd)
 		goto alloc_err;
 	pd = &kern_pd->pktdesc;
@@ -1176,8 +1147,8 @@ static void send_request(struct Qdisc *sch)
 
 	fpproto_commit_packet(fpproto_conn(q), pd, now_monotonic);
 
-	/* set up work queue (note we are holding the lock so this doesn't race with nacks) */
-	enqueue_send_request_work(q, kern_pd);
+	/* let fpproto send the pktdesc */
+	fpproto_send_pktdesc(q->ctrl_sock->sk, kern_pd);
 
 	/* set timer for next request, if a request would be required */
 	if (q->demand_tslots != q->alloc_tslots)
@@ -1198,6 +1169,7 @@ static struct sk_buff *fpq_dequeue(struct Qdisc *sch)
 	struct fp_sched_data *q = qdisc_priv(sch);
 	struct sk_buff *skb;
 	u64 now_monotonic;
+	u64 now_real;
 
 	/* try hi_prio queue first */
 	skb = flow_dequeue_skb(sch, &q->hi_prio);
@@ -1209,11 +1181,18 @@ static struct sk_buff *fpq_dequeue(struct Qdisc *sch)
 	if (skb)
 		goto out_got_skb;
 
-	/* when queue is empty we update the current timeslot */
-	now_monotonic = fp_monotonic_time_ns();
-	update_current_timeslot(sch, fp_get_time_ns());
+	/* queue is empty, can perform maintenance */
 
-	/* check for retransmission timeouts */
+	/* first, handle all received protocol packets */
+	if (likely(q->ctrl_sock != NULL))
+		fpproto_handle_pending_rx(q->ctrl_sock->sk);
+
+	/* update the current timeslot */
+	now_real = fp_get_time_ns();
+	update_current_timeslot(sch, now_real);
+
+	/* check for retransmission timeouts and process */
+	now_monotonic = fp_monotonic_time_ns();
 	if (q->retrans_time <= now_monotonic)
 		fpproto_handle_timeout(fpproto_conn(q), now_monotonic);
 

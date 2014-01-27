@@ -406,8 +406,6 @@ static void handle_ack(void *param, struct fpproto_pktdesc *pd)
 	}
 
 	comm_log_ack(node_id, pd->n_areq, total_acked, pd->seqno);
-
-	fpproto_pktdesc_free(pd);
 }
 
 static void trigger_request_voidp(void *param)

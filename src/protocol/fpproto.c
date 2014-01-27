@@ -102,8 +102,8 @@ static void do_ack_seqno(struct fpproto_conn *conn, u64 seqno)
 
 	if (conn->ops->handle_ack)
 		conn->ops->handle_ack(conn->ops_param, pd);		/* will free pd */
-	else
-		fpproto_pktdesc_free(pd);
+
+	fpproto_pktdesc_free(pd);
 }
 
 static void do_neg_ack_seqno(struct fpproto_conn *conn, u64 seq)

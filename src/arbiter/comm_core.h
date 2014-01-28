@@ -10,7 +10,7 @@
 #include "fp_timer.h"
 #include "main.h"
 
-#define CONTROLLER_SEND_TIMEOUT_SECS 	0.0001
+#define CONTROLLER_SEND_TIMEOUT_SECS 	0.0002
 
 /* The maximum number of admitted time-slots to process in a batch before
  *   sending and receiving packets */
@@ -19,7 +19,7 @@
 /* maximum number of paths possible */
 #define MAX_PATHS					4
 
-#define NODE_MAX_PKTS_PER_SEC		100000
+#define NODE_MAX_PKTS_PER_SEC		50000
 /* maximum burst of egress packets to a single node (must be >1, can be fraction) */
 #define NODE_MAX_BURST				1.5
 /* minimum time between packets */
@@ -29,7 +29,7 @@
 #define Q_HEAD_WRITE_BUFFER_SIZE		(32*1024)
 
 /* Deadline to handle all packets, or start dropping */
-#define RX_BURST_DEADLINE_SEC			0.000010
+#define RX_BURST_DEADLINE_SEC			0.000003
 
 /**
  * Specifications for controller thread

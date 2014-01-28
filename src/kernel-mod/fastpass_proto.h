@@ -40,6 +40,8 @@ struct fastpass_sock {
 	struct tasklet_struct	tx_tasklet;
 	spinlock_t				pktdesc_lock;
 
+	spinlock_t				conn_lock;
+
 	struct fp_socket_stat stat;
 };
 
@@ -52,6 +54,9 @@ struct fp_kernel_pktdesc {
 
 extern int __init fpproto_register(void);
 void __exit fpproto_unregister(void);
+
+void fpproto_maintenance_lock(struct sock *sk);
+void fpproto_maintenance_unlock(struct sock *sk);
 
 void fpproto_set_qdisc(struct sock *sk, struct Qdisc *new_qdisc);
 

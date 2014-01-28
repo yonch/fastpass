@@ -159,6 +159,8 @@ void run_tcp_sender_bulk(struct tcp_sender *sender) {
   assert(sender != NULL);
 
   struct packet outgoing;
+  uint64_t start_time = current_time_nanoseconds();
+  uint64_t end_time = start_time + sender->duration;
 
   // Info about the connection
   struct connection connection;
@@ -212,7 +214,7 @@ void run_tcp_sender_bulk(struct tcp_sender *sender) {
       bytes_left_in_buffer = MAX_BUFFER_SIZE;
       connection.current_buffer = connection.buffer;
     }
-  } while (connection.bytes_left > 0);
+  } while (connection.bytes_left > 0 && current_time_nanoseconds() < end_time);
 
   // close socket
   (void) shutdown(connection.sock_fd, SHUT_RDWR);

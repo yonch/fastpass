@@ -24,7 +24,8 @@
 #include <fcntl.h>
 
 #define BITS_PER_BYTE 8
-#define NUM_INTERVALS 1000
+#define NUM_INTERVALS 60  // should be at least 1 interval per second!!!
+#define MAX_BUFFER_SIZE (10000 * MTU_SIZE)
 
 enum connection_state {
   INVALID,  // this socket is not currently in use
@@ -106,10 +107,11 @@ void run_tcp_receiver_persistent(struct tcp_receiver *receiver) {
   uint64_t interval_end_time = start_time + interval_duration;
   receiver->log.current->start_time = start_time;
   uint64_t time_now;
+  char * buf = malloc(MAX_BUFFER_SIZE);
+  assert(buf != NULL);
   while((time_now = current_time_nanoseconds()) < end_time + 1*1000*1000*1000uLL)
   {
     int i;
-    char buf[MTU_SIZE];
 
     // Add fds to set and compute max
     int max = sock_fd;
@@ -181,8 +183,8 @@ void run_tcp_receiver_persistent(struct tcp_receiver *receiver) {
 	else {
 	  // Read in data
 	  assert(connections[ready_index].status == READING);
-	  int count = connections[ready_index].bytes_left < MTU_SIZE ?
-	    connections[ready_index].bytes_left : MTU_SIZE;
+	  int count = connections[ready_index].bytes_left < MAX_BUFFER_SIZE ?
+	    connections[ready_index].bytes_left : MAX_BUFFER_SIZE;
 	  int bytes = read(ready_fd, buf, count);
 	  log_data_received(&receiver->log,
 			    connections[ready_index].packet.sender, bytes);
@@ -229,6 +231,7 @@ void run_tcp_receiver_persistent(struct tcp_receiver *receiver) {
   }
 
   close(sock_fd);
+  free(buf);
 
   // Write log to a file
   write_out_log(&receiver->log);
@@ -262,10 +265,10 @@ void run_tcp_receiver_short_lived(struct tcp_receiver *receiver)
   uint64_t interval_end_time = start_time + interval_duration;
   receiver->log.current->start_time = start_time;
   uint64_t time_now;
+  char * buf = malloc(MAX_BUFFER_SIZE);
   while((time_now = current_time_nanoseconds()) < end_time + 1*1000*1000*1000uLL)
   {
     int i;
-    char buf[MTU_SIZE];
 
     // Add fds to set and compute max
     int max = sock_fd;
@@ -335,8 +338,8 @@ void run_tcp_receiver_short_lived(struct tcp_receiver *receiver)
 	else {
 	  // Read in data
 	  assert(connections[ready_index].status == READING);
-	  int count = connections[ready_index].bytes_left < MTU_SIZE ?
-	    connections[ready_index].bytes_left : MTU_SIZE;
+	  int count = connections[ready_index].bytes_left < MAX_BUFFER_SIZE ?
+	    connections[ready_index].bytes_left : MAX_BUFFER_SIZE;
 	  int bytes = read(ready_fd, buf, count);
 	  log_data_received(&receiver->log,
 			    connections[ready_index].packet.sender, bytes);
@@ -379,6 +382,7 @@ void run_tcp_receiver_short_lived(struct tcp_receiver *receiver)
   }
 
   close(sock_fd);
+  free(buf);
 
   // Write log to a file
   write_out_log(&receiver->log);

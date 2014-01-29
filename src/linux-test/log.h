@@ -14,9 +14,9 @@
 #include <stdio.h>
 #include <stdlib.h>
 
-#define LATENCY_BIN_DURATION (50 * 1000) // 50 microseconds in nanoseconds
+#define LATENCY_BIN_DURATION (1 * 1000) // 50 microseconds in nanoseconds
 #define MAX_SENDERS 1
-#define NUM_LATENCY_BINS 100
+#define NUM_LATENCY_BINS 5000
 
 // Information logged per sending node per interval
 // All times are in nanoseconds
@@ -66,10 +66,10 @@ void log_flow_start(struct log *log, uint16_t node_id,
   node->bytes_received += bytes;
 
   // Tally this latency in the appropriate bin
-  uint16_t latency_bin_index = latency / LATENCY_BIN_DURATION;
-  if (latency_bin_index > NUM_LATENCY_BINS - 1)
-    latency_bin_index = NUM_LATENCY_BINS - 1;
-  log->current->latency_bins[latency_bin_index]++;
+  //  uint16_t latency_bin_index = latency / LATENCY_BIN_DURATION;
+  //if (latency_bin_index > NUM_LATENCY_BINS - 1)
+  //  latency_bin_index = NUM_LATENCY_BINS - 1;
+  //log->current->latency_bins[latency_bin_index]++;
 }
 
 // Logs more bytes received
@@ -93,6 +93,12 @@ void log_flow_completed(struct log *log, uint16_t node_id,
   struct node_info *node = &log->current->nodes[node_id];
   node->num_fcs++;
   node->sum_of_fcs += fc_time;
+
+  // Tally this fct in the appropriate bin
+  uint16_t latency_bin_index = fc_time / LATENCY_BIN_DURATION;
+  if (latency_bin_index > NUM_LATENCY_BINS - 1)
+    latency_bin_index = NUM_LATENCY_BINS - 1;
+  log->current->latency_bins[latency_bin_index]++;
 }
 
 // Prints the log contents in CSV format to stdout to be piped to a file

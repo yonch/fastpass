@@ -26,7 +26,7 @@
 #include <sys/fcntl.h>
 
 #define IP_ADDR_MAX_LENGTH 20
-#define MAX_BUFFER_SIZE (100 * MTU_SIZE)
+#define MAX_BUFFER_SIZE (10000 * MTU_SIZE)
 #define NUM_CORES 4
 
 enum state {
@@ -308,13 +308,14 @@ void run_tcp_sender_persistent(struct tcp_sender *sender) {
       }
 
       if (FD_ISSET(connection.sock_fd, &wfds)) {
+	connection.return_val = send(connection.sock_fd,
+				     connection.buffer,
+				     connection.bytes_left, 0);
+        assert(connection.return_val >= 0);
 	if (connection.return_val != connection.bytes_left) {
 	  // Not done sending - resend part of this flow
 	  connection.bytes_left -= connection.return_val;
 	  connection.current_buffer += connection.return_val;
-	  connection.return_val = send(connection.sock_fd,
-				       connection.current_buffer,
-				       connection.bytes_left, 0);
 	} else {
 	  // Finished sending this flow
 	  if (connection.buffer != NULL) {
@@ -338,9 +339,6 @@ void run_tcp_sender_persistent(struct tcp_sender *sender) {
 	struct packet *outgoing_data = (struct packet *) connection.buffer;
 	connection.bytes_left = size_in_bytes;
 	outgoing_data->packet_send_time = current_time_nanoseconds();
-	connection.return_val = send(connection.sock_fd,
-				     connection.buffer,
-				     connection.bytes_left, 0);
 	connection.status = SENDING;
 	/*printf("sent, \t\t%d, %d, %d, %"PRIu64", %d, %"PRIu64"\n",
 	       outgoing_data->sender, outgoing_data->receiver,

@@ -174,6 +174,11 @@ void run_tcp_receiver_persistent(struct tcp_receiver *receiver) {
 	  struct packet *incoming = &connections[ready_index].packet;
 	  int bytes = read(ready_fd, incoming, sizeof(struct packet));
 	  time_now = current_time_nanoseconds();
+
+	  if (DEBUG_PRINTS)
+		  printf("new flow,\t%d, %d, %d, %"PRIu64", %d, %"PRIu64"\n",
+				  	 incoming->sender, incoming->receiver, incoming->size,
+				  	 incoming->flow_start_time, incoming->id, time_now);
 	  log_flow_start(&receiver->log, incoming->sender, bytes,
 			 (time_now - incoming->packet_send_time));
 	  connections[ready_index].bytes_left = ((uint64_t) incoming->size) * MTU_SIZE -
@@ -195,9 +200,10 @@ void run_tcp_receiver_persistent(struct tcp_receiver *receiver) {
 	    {
 	      // This flow is done!
 	      struct packet *incoming = &connections[ready_index].packet;
-	      /*printf("received,\t%d, %d, %d, %"PRIu64", %d, %"PRIu64"\n",
-		     incoming->sender, incoming->receiver, incoming->size,
-		     incoming->flow_start_time, incoming->id, time_now);*/
+	      if (DEBUG_PRINTS)
+	    	  printf("received,\t%d, %d, %d, %"PRIu64", %d, %"PRIu64"\n",
+	    			  incoming->sender, incoming->receiver, incoming->size,
+	    			  incoming->flow_start_time, incoming->id, time_now);
 
 	      if (incoming->flow_start_time < end_time) {
 		log_flow_completed(&receiver->log, incoming->sender,

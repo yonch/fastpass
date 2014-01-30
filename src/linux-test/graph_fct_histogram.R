@@ -28,7 +28,7 @@ if (length(args) > 3)
 # use the ggplot2 library
 library('ggplot2')
 
-pdf(file="latency_histogram.pdf", width=6.6, height=3)
+pdf(file="fct_cdf.pdf", width=6.6, height=3)
 
 # calculate baseline stats
 data_0 <- read.csv("fct_4_senders_baseline_port_1100.csv", sep=",")

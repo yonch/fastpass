@@ -36,17 +36,16 @@ if (type == 0) {
    pdf(file="scalability_time_allocation_sjf.pdf", width=6.6, height=3)
 }
 
-theme_set(theme_bw(base_size=10))
+theme_set(theme_bw(base_size=12))
 
-ggplot(data, aes(x=observed_utilization, y=time,
-             group=as.factor(nodes), color=as.factor(nodes))) +
+new_data = data[data$nodes > 128,]
+
+ggplot(new_data, aes(x=observed_utilization, y=time,
+             color=as.factor(nodes), shape=as.factor(nodes))) +
              geom_point() + geom_line() +
-             scale_color_discrete(name="Nodes") +
+             scale_color_discrete(name="Nodes", guide = guide_legend(reverse = TRUE)) +
+             scale_shape_discrete(name="Nodes", guide = guide_legend(reverse = TRUE)) +
              labs(x = "Network Utilization (%)",
-                  y = "Latency (microseconds)") +
-             scale_y_log10() +
-             guides(col = guide_legend(reverse = TRUE))
+                  y = "Latency (microseconds)")
 
 detach(data)
-
-dev.off()

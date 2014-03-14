@@ -272,6 +272,10 @@ int main(int argc, char **argv)
     uint16_t num_batches = (duration - warm_up_duration) / BATCH_SIZE;
     uint32_t *per_batch_times = malloc(sizeof(uint64_t) * num_batches);
     assert(per_batch_times != NULL);
+    
+    uint16_t num_timeslots = duration - warm_up_duration;
+    uint32_t *per_timeslot_times = malloc(sizeof(uint64_t) * num_timeslots);
+    assert(per_timeslot_times != NULL);
 
     if (benchmark_type == ADMISSIBLE)
         printf("target_utilization, nodes, time, observed_utilization, time/utilzn\n");
@@ -374,10 +378,17 @@ int main(int argc, char **argv)
                 // Start timining
                 uint64_t start_time = current_time();
 
+                uint64_t prev_time = current_time();
                 for (k = 0; k < duration - warm_up_duration; k++) {
                     struct admitted_traffic *admitted = all_admitted[k];
 
                     select_paths(admitted, num_nodes / MAX_NODES_PER_RACK);
+                    
+                    // Record time
+                    uint64_t time_now = current_time();
+                    assert(time_now - prev_time < (0x1ULL << 32));
+                    per_timeslot_times[k] = time_now - prev_time;
+                    prev_time = time_now;
                 }
 
                 uint64_t end_time = current_time();
@@ -392,13 +403,21 @@ int main(int argc, char **argv)
 
                     // Print stats - percent of network capacity utilized and computation time
                     // per admitted timeslot (in microseconds) for different numbers of nodes
-                    printf("%f, %d, %f, %f, %f\n", fraction, oversubscription_ratio,
-                           time_per_experiment, utilzn, time_per_experiment / utilzn);
+                    uint16_t t;
+                    for (t = 0; t < num_timeslots; t++) {
+                        double time_per_experiment = per_timeslot_times[t] / (PROCESSOR_SPEED * 1000);
+                        printf("%f, %d, %f, %f, %f\n", fraction, oversubscription_ratio, time_per_experiment,
+                               utilzn, time_per_experiment / utilzn);
+                    }
                 } else {
                     // Print stats - percent of network capacity utilized and computation time
                     // per admitted timeslot (in microseconds) for different numbers of nodes
-                    printf("%f, %d, %f, %f, %f\n", fraction, num_racks,
-                           time_per_experiment, utilzn, time_per_experiment / utilzn);
+                    uint16_t t;
+                    for (t = 0; t < num_timeslots; t++) {
+                        double time_per_experiment = per_timeslot_times[t] / (PROCESSOR_SPEED * 1000);
+                        printf("%f, %d, %f, %f, %f\n", fraction, num_racks, time_per_experiment,
+                               utilzn, time_per_experiment / utilzn);
+                    }
                 }
             }
         }

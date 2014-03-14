@@ -95,8 +95,8 @@ summary <- summarySE(new_data, measurevar="time", groupvars=c("observed_utilizat
 
 ggplot(summary, aes(x=observed_utilization, y=time,
              color=as.factor(nodes), shape=as.factor(nodes))) +
+             geom_errorbar(aes(ymin=p_5, ymax=p_95), width=0.01, colour='grey') +
              geom_point() + geom_line() +
-             geom_errorbar(aes(ymin=p_5, ymax=p_95), width=0.01) +
              scale_color_discrete(name="Nodes", guide = guide_legend(reverse = TRUE)) +
              scale_shape_manual(name="Nodes", guide = guide_legend(reverse = TRUE), values=c(15, 16, 17, 18)) +
              labs(x = "Network Utilization (%)",

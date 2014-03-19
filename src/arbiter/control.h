@@ -8,6 +8,12 @@
 #include <stdint.h>
 
 #define I_AM_MASTER				1
+#define IS_STRESS_TEST			1
+
+#define STRESS_TEST_MEAN_T_BETWEEN_REQUESTS_SEC		1e-4
+#define STRESS_TEST_NUM_NODES						32
+#define STRESS_TEST_DEMAND_TSLOTS					10
+#define STRESS_TEST_DURATION_SEC					10
 
 /* bits 1-3 occupied by other experiments */
 #define LAUNCH_CONTROLLER_EXPT 0x8

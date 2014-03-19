@@ -8,6 +8,8 @@
 #ifndef GENERATE_REQUESTS_H_
 #define GENERATE_REQUESTS_H_
 
+#include <math.h>
+
 // Stores info needed to generate a stream of requests on demand
 struct request_generator {
     double mean_t_btwn_requests;  // mean t for all requests

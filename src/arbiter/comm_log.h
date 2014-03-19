@@ -28,6 +28,8 @@ struct comm_log {
 	uint64_t tx_cannot_alloc_mbuf;
 	uint64_t rx_non_ipv4_pkts;
 	uint64_t rx_ipv4_non_fastpss_pkts;
+	uint64_t rx_watchdog_pkts;
+	uint64_t tx_watchdog_pkts;
 	uint64_t tx_pkt;
 	uint64_t tx_bytes;
 	uint64_t pktdesc_alloc_failed;
@@ -58,6 +60,8 @@ struct comm_log {
 	uint64_t acks_with_alloc;
 	uint64_t total_acked_timeslots;
 	uint64_t dropped_rx_due_to_deadline;
+	uint64_t failed_to_allocate_watchdog;
+	uint64_t failed_to_burst_watchdog;
 };
 
 extern struct comm_log comm_core_logs[RTE_MAX_LCORE];
@@ -113,6 +117,12 @@ static inline void comm_log_rx_non_ipv4_packet(uint8_t portid) {
 	(void)portid;
 	CL->rx_non_ipv4_pkts++;
 	COMM_DEBUG("got non-IPv4 packet on portid %d\n", portid);
+}
+
+static inline void comm_log_rx_watchdog_packet(uint8_t portid) {
+	(void)portid;
+	CL->rx_watchdog_pkts++;
+	COMM_DEBUG("got watchdog packet on portid %d\n", portid);
 }
 
 static inline void comm_log_rx_ip_non_fastpass_pkt(uint8_t portid) {
@@ -280,6 +290,18 @@ static inline void comm_log_flushed_buffer_in_add_backlog() {
 
 static inline void comm_log_dropped_rx_passed_deadline() {
 	CL->dropped_rx_due_to_deadline++;
+}
+
+static inline void comm_log_failed_to_allocate_watchdog() {
+	CL->failed_to_allocate_watchdog++;
+}
+
+static inline void comm_log_failed_to_burst_watchdog() {
+	CL->failed_to_burst_watchdog++;
+}
+
+static inline void comm_log_sent_watchdog() {
+	CL->tx_watchdog_pkts++;
 }
 
 #undef CL

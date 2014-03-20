@@ -3,9 +3,10 @@
 #define STRESS_TEST_CORE_H_
 
 #include <stdint.h>
+#include <rte_ip.h>
 #include "../graph-algo/admissible_structures.h"
 
-#define MAX_ENQUEUES_PER_LOOP		256
+#define MAX_ENQUEUES_PER_LOOP		1024
 #define MAX_ADMITTED_PER_LOOP		(4*BATCH_SIZE)
 
 /* The buffer size when writing to q_head */
@@ -25,12 +26,12 @@ struct stress_test_core_cmd {
 	struct rte_ring *q_allocated;
 };
 
-struct stress_test_core_state {
-	uint64_t latest_timeslot;
-
-	void *q_head_write_buffer[Q_HEAD_WRITE_BUFFER_SIZE];
-	uint32_t q_head_buf_len;
-};
+//struct stress_test_core_state {
+//	uint64_t latest_timeslot;
+//
+//	void *q_head_write_buffer[Q_HEAD_WRITE_BUFFER_SIZE];
+//	uint32_t q_head_buf_len;
+//};
 
 void exec_stress_test_core(struct stress_test_core_cmd * cmd,
 		uint64_t first_time_slot);

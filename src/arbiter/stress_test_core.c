@@ -1,5 +1,6 @@
 #include "stress_test_core.h"
 
+#include "comm_core.h"
 #include <rte_log.h>
 #include <rte_common.h>
 #include <rte_cycles.h>
@@ -16,6 +17,9 @@
 #include "admission_core.h"
 #include "../protocol/stat_print.h"
 #include "../protocol/topology.h"
+#include "comm_log.h"
+
+#define STRESS_TEST_MIN_LOOP_TIME_SEC		2e-6
 
 /* logs */
 struct stress_test_log {
@@ -37,7 +41,7 @@ static inline void stress_test_log_got_admitted_tslot(uint16_t size, uint64_t ti
 	CL->occupied_node_tslots += size;
 }
 
-static void flush_q_head_buffer(struct stress_test_core_state *core)
+static void flush_q_head_buffer(struct comm_core_state *core)
 {
 	uint32_t remaining = core->q_head_buf_len;
 	void **edge_p = &core->q_head_write_buffer[0];
@@ -55,7 +59,7 @@ static void flush_q_head_buffer(struct stress_test_core_state *core)
 	core->q_head_buf_len = 0;
 }
 
-static void add_backlog_buffered(struct stress_test_core_state *core,
+static void add_backlog_buffered(struct comm_core_state *core,
 		struct admissible_status *status, uint16_t src, uint16_t dst,
         uint16_t demand_tslots)
 {
@@ -71,7 +75,7 @@ static void add_backlog_buffered(struct stress_test_core_state *core,
 	}
 }
 
-static inline void process_allocated_traffic(struct stress_test_core_state *core,
+static inline void process_allocated_traffic(struct comm_core_state *core,
 		struct rte_ring *q_admitted)
 {
 	int rc;
@@ -90,7 +94,7 @@ static inline void process_allocated_traffic(struct stress_test_core_state *core
 
 	for (i = 0; i < rc; i++) {
 		current_timeslot = ++core->latest_timeslot;
-		stress_test_log_got_admitted_tslot(admitted[i]->size, current_timeslot);
+		comm_log_got_admitted_tslot(admitted[i]->size, current_timeslot);
 	}
 	/* free memory */
 	rte_mempool_put_bulk(admitted_traffic_pool[0], (void **) admitted, rc);
@@ -104,12 +108,15 @@ void exec_stress_test_core(struct stress_test_core_cmd * cmd,
 	uint64_t now;
 	struct request_generator gen;
 	struct request next_request;
-	struct stress_test_core_state core;
+	struct comm_core_state *core = &ccore_state[lcore_id];
+	uint64_t min_next_iteration_time;
+	uint64_t loop_minimum_iteration_time =
+			rte_get_timer_hz() * STRESS_TEST_MIN_LOOP_TIME_SEC;
 
-	core.latest_timeslot = first_time_slot - 1;
-	core.q_head_buf_len = 0;
-
+	core->latest_timeslot = first_time_slot - 1;
+	core->q_head_buf_len = 0;
 	stress_test_log_init(&stress_test_core_logs[lcore_id]);
+	comm_log_init(&comm_core_logs[lcore_id]);
 
 	/* Initialize gen */
 	init_request_generator(&gen, cmd->mean_t_btwn_requests, cmd->start_time,
@@ -123,28 +130,39 @@ void exec_stress_test_core(struct stress_test_core_cmd * cmd,
 
 	/* MAIN LOOP */
 	while (now < cmd->end_time) {
+		uint32_t n_processed_requests = 0;
+
 		/* if time to enqueue request, do so now */
 		for (i = 0; i < MAX_ENQUEUES_PER_LOOP; i++) {
 			if (next_request.time > now)
 				break;
 
 			/* enqueue the request */
-			add_backlog_buffered(&core, &g_admissible_status,
+			add_backlog_buffered(core, &g_admissible_status,
 					next_request.src, next_request.dst, cmd->demand_tslots);
+			comm_log_demand_increased(next_request.src, next_request.dst, 0,
+					cmd->demand_tslots, cmd->demand_tslots);
+
+			n_processed_requests++;
 
 			/* generate the next request */
 			get_next_request(&gen, &next_request);
 		}
 
-		/* TODO: do something to detect if we're falling behind */
+		comm_log_processed_batch(n_processed_requests, now);
 
 		/* Process newly allocated timeslots */
-		process_allocated_traffic(&core, cmd->q_allocated);
+		process_allocated_traffic(core, cmd->q_allocated);
 
 		/* flush q_head's buffer into q_head */
-		flush_q_head_buffer(&core);
+		flush_q_head_buffer(core);
 
-		now = rte_get_timer_cycles();
+		/* wait until at least loop_minimum_iteration_time has passed from
+		 * beginning of loop */
+		min_next_iteration_time = now + loop_minimum_iteration_time;
+		do {
+			now = rte_get_timer_cycles();
+		} while (now < min_next_iteration_time);
 	}
 
 	/* Dump some stats */

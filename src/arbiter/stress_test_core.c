@@ -112,6 +112,8 @@ void exec_stress_test_core(struct stress_test_core_cmd * cmd,
 	uint64_t min_next_iteration_time;
 	uint64_t loop_minimum_iteration_time =
 			rte_get_timer_hz() * STRESS_TEST_MIN_LOOP_TIME_SEC;
+	uint64_t next_rate_increase_time;
+	double next_mean_t_btwn_requests;
 
 	core->latest_timeslot = first_time_slot - 1;
 	core->q_head_buf_len = 0;
@@ -119,18 +121,28 @@ void exec_stress_test_core(struct stress_test_core_cmd * cmd,
 	comm_log_init(&comm_core_logs[lcore_id]);
 
 	/* Initialize gen */
-	init_request_generator(&gen, cmd->mean_t_btwn_requests, cmd->start_time,
-			cmd->num_nodes);
+	next_mean_t_btwn_requests = cmd->mean_t_btwn_requests;
 
 	while (rte_get_timer_cycles() < cmd->start_time);
 
 	/* Generate first request */
-	get_next_request(&gen, &next_request);
 	now = rte_get_timer_cycles();
+	next_rate_increase_time = now;
 
 	/* MAIN LOOP */
 	while (now < cmd->end_time) {
 		uint32_t n_processed_requests = 0;
+
+		/* if need to change rate, do it */
+		if (now >= next_rate_increase_time) {
+			init_request_generator(&gen, next_mean_t_btwn_requests,
+					now, cmd->num_nodes);
+			get_next_request(&gen, &next_request);
+
+			next_mean_t_btwn_requests /= STRESS_TEST_RATE_INCREASE_FACTOR;
+			next_rate_increase_time +=
+					rte_get_timer_hz() * STRESS_TEST_RATE_INCREASE_GAP_SEC;
+		}
 
 		/* if time to enqueue request, do so now */
 		for (i = 0; i < MAX_ENQUEUES_PER_LOOP; i++) {

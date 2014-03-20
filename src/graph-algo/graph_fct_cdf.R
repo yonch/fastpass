@@ -16,11 +16,17 @@ library(scales)
 
 data <- read.csv("output.csv", sep=",")
 
+pdf(file="timeslot_allocation_fcts.pdf", width=6.6, height=3)
+
+theme_set(theme_bw(base_size=12))
+
 ggplot(data, aes(fct, linetype=as.factor(target_util), color=algo)) + stat_ecdf() +
              labs(x = "Flow Completion Time (number of timeslots)", y = "CDF of FCTs") +
-             scale_x_log10(breaks= trans_breaks("log10", function(x) 10^x)) + 
-             scale_colour_discrete(name="Algorithm") +
-             scale_linetype_discrete(name="Target Utilization")
-             #+ coord_cartesian(ylim=c(0.99, 1), xlim=c(31622, 63000))
+             scale_x_log10(breaks=c(100, 1000, 10000)) + 
+             scale_colour_manual(name="Algorithm", values=c("#8DD3C7", "#FB8072", "#BEBADA"),
+                                 breaks=c("round_robin", "shortest_job_first", "random"),
+                                 labels=c("round robin", "shortest first", "random")) +
+             scale_linetype_discrete(name="Network\nUtilization", breaks=c(0.2, 0.5, 0.9),
+                                     labels=c("20%", "50%", "90%"))
              
 

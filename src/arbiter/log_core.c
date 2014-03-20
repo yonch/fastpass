@@ -57,8 +57,8 @@ void print_comm_log(uint16_t lcore_id)
 	printf("\n  RX %lu pkts, %lu bytes in %lu batches (%lu non-empty batches), %lu dropped",
 			cl->rx_pkts, cl->rx_bytes, cl->rx_batches, cl->rx_non_empty_batches,
 			cl->dropped_rx_due_to_deadline);
-	printf("\n  %lu non-IPv4, %lu IPv4 non-fastpass",
-			cl->rx_non_ipv4_pkts, cl->rx_ipv4_non_fastpss_pkts);
+	printf("\n  %lu watchdog, %lu non-IPv4, %lu IPv4 non-fastpass",
+			cl->rx_watchdog_pkts, cl->rx_non_ipv4_pkts, cl->rx_ipv4_non_fastpss_pkts);
 	printf("\n  %lu total demand from %lu demand increases, %lu demand remained",
 			cl->total_demand, cl->demand_increased, cl->demand_remained);
 	printf("\n  %lu informative acks for %lu allocations, %lu non-informative",
@@ -67,8 +67,8 @@ void print_comm_log(uint16_t lcore_id)
 
 	printf("\n  processed %lu tslots (%lu non-empty) with %lu node-tslots",
 			cl->processed_tslots, cl->non_empty_tslots, cl->occupied_node_tslots);
-	printf("\n  TX %lu pkts, %lu bytes, %lu triggers, %lu report-triggers (%lu due to neg-acks(",
-			cl->tx_pkt, cl->tx_bytes, cl->triggered_send, cl->reports_triggered,
+	printf("\n  TX %lu pkts (%lu watchdogs), %lu bytes, %lu triggers, %lu report-triggers (%lu due to neg-acks(",
+			cl->tx_pkt, cl->tx_watchdog_pkts, cl->tx_bytes, cl->triggered_send, cl->reports_triggered,
 			cl->neg_ack_triggered_reports);
 	printf("\n  set %lu timers, canceled %lu, expired %lu",
 			cl->timer_set, cl->timer_cancel, cl->retrans_timer_expired);
@@ -89,6 +89,12 @@ void print_comm_log(uint16_t lcore_id)
 	if (cl->error_encoding_packet)
 		printf("\n  %lu times couldn't encode packet (due to bug?)",
 				cl->error_encoding_packet);
+	if (cl->failed_to_allocate_watchdog)
+		printf("\n  %lu failed to allocate watchdog packet",
+				cl->failed_to_allocate_watchdog);
+	if (cl->failed_to_burst_watchdog)
+		printf("\n  %lu failed to burst watchdog packet",
+				cl->failed_to_burst_watchdog);
 
 	printf("\n warnings:");
 	if (cl->alloc_fell_off_window)

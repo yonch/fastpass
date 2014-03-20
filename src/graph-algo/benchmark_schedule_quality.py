@@ -38,18 +38,19 @@ class admissible_runner(object):
         self.request_size = request_size
 
     def generate_request_stream(self, mean_t_btwn_requests):
+        # generate a list of requests - tuples of (request, size)
         generator = genrequests.create_request_generator(mean_t_btwn_requests,
                                                          0, self.num_nodes)
 
         # Free any requests generated before
         for r in self.requests:
-            genrequests.destroy_request(r)
+            genrequests.destroy_request(r[0])
         self.requests = []
 
         current_time = 0
         while current_time < self.duration:
             req = genrequests.create_next_request(generator)
-            self.requests.append(req)
+            self.requests.append((req, self.request_size))
             current_time = req.time
 
     def run_round_robin_admissible(self):
@@ -76,16 +77,20 @@ class admissible_runner(object):
         # TODO: can we run this so that request arrivals are inter-leaved with
         # getting admissible traffic? would be more realistic.
         current_request = 0
-        req = self.requests[current_request]
+        req_tuple = self.requests[current_request]
+        req = req_tuple[0]
+        req_size = req_tuple[1]
         for t in range(self.duration):
             # Issue new requests
             while int(req.time) == t:
-                num_requested += self.request_size
-                admissible.add_backlog(status, req.src, req.dst, self.request_size)
-                self.pending_requests[(req.src, req.dst)].append(pending_request(self.request_size, t))
+                num_requested += req_size
+                admissible.add_backlog(status, req.src, req.dst, req_size)
+                self.pending_requests[(req.src, req.dst)].append(pending_request(req_size, t))
                 current_request += 1
    
-                req = self.requests[current_request]
+                req_tuple = self.requests[current_request]
+                req = req_tuple[0]
+                req_size = req_tuple[1]
                 
             if t % structures.BATCH_SIZE != structures.BATCH_SIZE - 1:
                 continue
@@ -93,13 +98,12 @@ class admissible_runner(object):
             # Get admissible traffic for this batch
             admissible.get_admissible_traffic(core, status, admitted_batch, 0, 1, 0)
             
-            if t < self.warm_up_duration:
-                continue
-
             # Record stats
             for i in range(structures.BATCH_SIZE):
                 admitted_i = admissible.dequeue_admitted_traffic(status)
-                num_admitted += admitted_i.size
+
+                if t > self.warm_up_duration:
+                    num_admitted += admitted_i.size
 
                 for e in range(admitted_i.size):
                     edge = structures.get_admitted_edge(admitted_i, e)
@@ -108,10 +112,11 @@ class admissible_runner(object):
                         raise AssertionError
                     req_list[0].size -= 1
                     if req_list[0].size == 0:
-                        # record flow completion time
-                        last_t_slot = t + i
-                        fct = last_t_slot - req_list[0].request_time
-                        self.flow_completion_times.append(fct)
+                        if t > self.warm_up_duration:
+                            # record flow completion time
+                            last_t_slot = t + i
+                            fct = last_t_slot - req_list[0].request_time
+                            self.flow_completion_times.append((fct, req_list[0].request_time, last_t_slot))
                         del req_list[0]
                 
         capacity = (self.duration - self.warm_up_duration) * self.num_nodes
@@ -145,30 +150,33 @@ class admissible_runner(object):
         # TODO: can we run this so that request arrivals are inter-leaved with
         # getting admissible traffic? would be more realistic.
         current_request = 0
-        req = self.requests[current_request]
+        req_tuple = self.requests[current_request]
+        req = req_tuple[0]
+        req_size = req_tuple[1]
         for t in range(self.duration):
             # Issue new requests
             while int(req.time) == t:
-                num_requested += self.request_size
-                admissiblesjf.add_backlog(status, req.src, req.dst, self.request_size)
-                self.pending_requests[(req.src, req.dst)].append(pending_request(self.request_size, t))
+                num_requested += req_size
+                admissiblesjf.add_backlog(status, req.src, req.dst, req_size)
+                self.pending_requests[(req.src, req.dst)].append(pending_request(req_size, t))
                 current_request += 1
    
-                req = self.requests[current_request]
+                req_tuple = self.requests[current_request]
+                req = req_tuple[0]
+                req_size = req_tuple[1]
                 
             if t % structuressjf.BATCH_SIZE != structuressjf.BATCH_SIZE - 1:
                 continue
 
             # Get admissible traffic for this batch
             admissiblesjf.get_admissible_traffic(core, status, admitted_batch, 0, 1, 0)
-            
-            if t < self.warm_up_duration:
-                continue
-
+  
             # Record stats
             for i in range(structuressjf.BATCH_SIZE):
                 admitted_i = admissiblesjf.dequeue_admitted_traffic(status)
-                num_admitted += admitted_i.size
+
+                if t > self.warm_up_duration:
+                    num_admitted += admitted_i.size
 
                 for e in range(admitted_i.size):
                     edge = structuressjf.get_admitted_edge(admitted_i, e)
@@ -177,10 +185,11 @@ class admissible_runner(object):
                         raise AssertionError
                     req_list[0].size -= 1
                     if req_list[0].size == 0:
-                        # record flow completion time
-                        last_t_slot = t + i
-                        fct = last_t_slot - req_list[0].request_time
-                        self.flow_completion_times.append(fct)
+                        if t > self.warm_up_duration:
+                            # record flow completion time
+                            last_t_slot = t + i
+                            fct = last_t_slot - req_list[0].request_time
+                            self.flow_completion_times.append((fct, req_list[0].request_time, last_t_slot))
                         del req_list[0]
                 
         capacity = (self.duration - self.warm_up_duration) * self.num_nodes
@@ -197,16 +206,20 @@ class admissible_runner(object):
         num_admitted = 0
         num_requested = 0
         current_request = 0
-        req = self.requests[current_request]
+        req_tuple = self.requests[current_request]
+        req = req_tuple[0]
+        req_size = req_tuple[1]
         for t in range(self.duration):
             # Issue new requests
             while int(req.time) == t:
-                num_requested += self.request_size
+                num_requested += req_size
                 total_backlog[(req.src, req.dst)] = total_backlog.get((req.src, req.dst),
-                                                                      0) + self.request_size
-                self.pending_requests[(req.src, req.dst)].append(pending_request(self.request_size, t))
+                                                                      0) + req_size
+                self.pending_requests[(req.src, req.dst)].append(pending_request(req_size, t))
                 current_request += 1
-                req = self.requests[current_request]
+                req_tuple = self.requests[current_request]
+                req = req_tuple[0]
+                req_size = req_tuple[1]
 
             if t % BATCH_SIZE != BATCH_SIZE - 1:
                 continue
@@ -238,14 +251,14 @@ class admissible_runner(object):
                     del total_backlog[pair]
                 total_backlog = dict(total_backlog.items() + next_backlog.items())
                 next_backlog = {}
-                
-            if t < self.warm_up_duration:
-                continue
-
+  
             # Record stats
             for i in range(BATCH_SIZE):
                 admitted_i = admitted_batch[i]
-                num_admitted += len(admitted_i)
+
+                if t > self.warm_up_duration:
+                    num_admitted += len(admitted_i)
+
                 if len(admitted_i) > self.num_nodes:
                     raise AssertionError
 
@@ -256,10 +269,11 @@ class admissible_runner(object):
                         raise AssertionError
                     req_list[0].size -= 1
                     if req_list[0].size == 0:
-                        # record flow completion time
-                        last_t_slot = t + i
-                        fct = last_t_slot - req_list[0].request_time
-                        self.flow_completion_times.append(fct)
+                        if t > self.warm_up_duration:
+                            # record flow completion time
+                            last_t_slot = t + i
+                            fct = last_t_slot - req_list[0].request_time
+                            self.flow_completion_times.append((fct, req_list[0].request_time, last_t_slot))
                         del req_list[0]
                 
         capacity = (self.duration - self.warm_up_duration) * self.num_nodes
@@ -292,7 +306,7 @@ class Test(unittest.TestCase):
         """Benchmarks the flow completion time of different admissible traffic algorithms."""
 
         # too many fractions takes too long and yields a crowded plot!
-        fractions = [0.2, 0.5, 0.9, 0.99]
+        fractions = [0.2, 0.5, 0.9]
         algorithms =  [(admissible_runner.ROUND_ROBIN, "round_robin"),
                        (admissible_runner.SHORTEST_JOB_FIRST, "shortest_job_first"),
                        (admissible_runner.RANDOM, "random")]
@@ -304,7 +318,7 @@ class Test(unittest.TestCase):
 
         runner = admissible_runner(num_nodes, duration, warm_up_duration, request_mtus)
 
-        print 'algo, target_util, fct, observed_util'
+        print 'algo, target_util, fct, observed_util, request_time, completion_time'
         for fraction in fractions:
             # Generate a sequence of requests for this network utilization
             mean_t = request_mtus / fraction
@@ -315,8 +329,12 @@ class Test(unittest.TestCase):
                 observed_util = runner.run_admissible(algo[0])
 
                 # Print out results
-                for fct in runner.flow_completion_times:
+                for data in runner.flow_completion_times:
+                    fct = data[0]
+                    req_time = data[1]
+                    completion_time = data[2]
                     s = algo[1] + ', ' + str(fraction) + ', ' + str(fct) + ', ' + str(observed_util)
+                    s += ', ' + str(req_time) + ', ' + str(completion_time)
                     print(s)
 
 if __name__ == "__main__":

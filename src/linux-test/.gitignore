@@ -3,3 +3,4 @@ tcp_receiver
 tcp_sender
 *.csv
 *.pdf
+*.txt

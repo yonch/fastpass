@@ -16,7 +16,7 @@
 #include "path_selection.h"
 
 #define NUM_FRACTIONS_A 11
-#define NUM_SIZES_A 5
+#define NUM_SIZES_A 4
 #define NUM_FRACTIONS_P 11
 #define NUM_CAPACITIES_P 4
 #define NUM_RACKS_P 4
@@ -26,7 +26,7 @@
 const double admissible_fractions [NUM_FRACTIONS_A] =
     {0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9, 0.95, 0.99};
 const uint32_t admissible_sizes [NUM_SIZES_A] =
-    {2048, 1024, 512, 256, 128/*, 64, 32, 16*/};
+    {2048, 1024, 512, 256/*, 128, 64, 32, 16*/};
 const double path_fractions [NUM_FRACTIONS_P] =
     {0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9, 0.95, 0.99};
 const uint16_t path_capacities [NUM_CAPACITIES_P] =
@@ -45,18 +45,22 @@ uint32_t run_experiment(struct request_info *requests, uint32_t start_time, uint
                         uint32_t num_requests, struct admissible_status *status,
                         struct request_info **next_request,
                         struct admission_core_state *core,
-                        struct admitted_traffic **admitted_batch)
+                        struct admitted_traffic **admitted_batch,
+                        uint32_t *per_batch_times)
 {
     struct admitted_traffic *admitted;
     struct fp_ring *queue_tmp;
 
-    uint32_t b;
+    uint32_t b, start_b;
     uint8_t i;
     uint32_t num_admitted = 0;
     struct request_info *current_request = requests;
 
     assert(requests != NULL);
     assert(core->q_bin_in->tail == core->q_bin_in->head + NUM_BINS);
+
+    uint64_t prev_time = current_time();
+    start_b = start_time >> BATCH_SHIFT;
 
     for (b = (start_time >> BATCH_SHIFT); b < (end_time >> BATCH_SHIFT); b++) {
         // Issue all new requests for this batch
@@ -78,6 +82,12 @@ uint32_t run_experiment(struct request_info *requests, uint32_t start_time, uint
         	/* return admitted traffic to core */
         	admitted_batch[i] = admitted;
         }
+
+        // Record per-batch time
+        uint64_t time_now = current_time();
+        assert(time_now - prev_time < (0x1ULL << 32));
+        per_batch_times[b - start_b] = time_now - prev_time;
+        prev_time = time_now;
     }
 
     *next_request = current_request;
@@ -258,6 +268,15 @@ int main(int argc, char **argv)
         fp_ring_enqueue(q_bin, create_bin(LARGE_BIN_SIZE));
     }
 
+    /* allocate space to record times */
+    uint16_t num_batches = (duration - warm_up_duration) / BATCH_SIZE;
+    uint32_t *per_batch_times = malloc(sizeof(uint64_t) * num_batches);
+    assert(per_batch_times != NULL);
+    
+    uint16_t num_timeslots = duration - warm_up_duration;
+    uint32_t *per_timeslot_times = malloc(sizeof(uint64_t) * num_timeslots);
+    assert(per_timeslot_times != NULL);
+
     if (benchmark_type == ADMISSIBLE)
         printf("target_utilization, nodes, time, observed_utilization, time/utilzn\n");
     else if (benchmark_type == PATH_SELECTION_OVERSUBSCRIPTION)
@@ -323,7 +342,7 @@ int main(int argc, char **argv)
             // requests once we start timing
             struct request_info *next_request;
             run_experiment(requests, 0, warm_up_duration, num_requests,
-                           status, &next_request, &core, admitted_batch);
+                           status, &next_request, &core, admitted_batch, per_batch_times);
    
             if (benchmark_type == ADMISSIBLE) {
                 // Start timining
@@ -332,17 +351,21 @@ int main(int argc, char **argv)
                 // Run the experiment
                 uint32_t num_admitted = run_experiment(next_request, warm_up_duration, duration,
                                                        num_requests - (next_request - requests),
-                                                       status, &next_request, &core, admitted_batch);
+                                                       status, &next_request, &core, admitted_batch,
+                                                       per_batch_times);
                 uint64_t end_time = current_time();
-                double time_per_experiment = (end_time - start_time) / (PROCESSOR_SPEED * 1000 *
-                                                                        (duration - warm_up_duration));
 
                 double utilzn = ((double) num_admitted) / ((duration - warm_up_duration) * num_nodes);
 
                 // Print stats - percent of network capacity utilized and computation time
                 // per admitted timeslot (in microseconds) for different numbers of nodes
-                printf("%f, %d, %f, %f, %f\n", fraction, num_nodes, time_per_experiment,
-                       utilzn, time_per_experiment / utilzn);
+                uint16_t b;
+                for (b = 0; b < num_batches; b++) {
+                    double time_per_experiment = per_batch_times[b] / (PROCESSOR_SPEED * 1000 * BATCH_SIZE);
+
+                    printf("%f, %d, %f, %f, %f\n", fraction, num_nodes, time_per_experiment,
+                           utilzn, time_per_experiment / utilzn);
+                }
             }
             else if (benchmark_type == PATH_SELECTION_OVERSUBSCRIPTION ||
                      benchmark_type == PATH_SELECTION_RACKS) {
@@ -355,10 +378,17 @@ int main(int argc, char **argv)
                 // Start timining
                 uint64_t start_time = current_time();
 
+                uint64_t prev_time = current_time();
                 for (k = 0; k < duration - warm_up_duration; k++) {
                     struct admitted_traffic *admitted = all_admitted[k];
 
                     select_paths(admitted, num_nodes / MAX_NODES_PER_RACK);
+                    
+                    // Record time
+                    uint64_t time_now = current_time();
+                    assert(time_now - prev_time < (0x1ULL << 32));
+                    per_timeslot_times[k] = time_now - prev_time;
+                    prev_time = time_now;
                 }
 
                 uint64_t end_time = current_time();
@@ -373,13 +403,21 @@ int main(int argc, char **argv)
 
                     // Print stats - percent of network capacity utilized and computation time
                     // per admitted timeslot (in microseconds) for different numbers of nodes
-                    printf("%f, %d, %f, %f, %f\n", fraction, oversubscription_ratio,
-                           time_per_experiment, utilzn, time_per_experiment / utilzn);
+                    uint16_t t;
+                    for (t = 0; t < num_timeslots; t++) {
+                        double time_per_experiment = per_timeslot_times[t] / (PROCESSOR_SPEED * 1000);
+                        printf("%f, %d, %f, %f, %f\n", fraction, oversubscription_ratio, time_per_experiment,
+                               utilzn, time_per_experiment / utilzn);
+                    }
                 } else {
                     // Print stats - percent of network capacity utilized and computation time
                     // per admitted timeslot (in microseconds) for different numbers of nodes
-                    printf("%f, %d, %f, %f, %f\n", fraction, num_racks,
-                           time_per_experiment, utilzn, time_per_experiment / utilzn);
+                    uint16_t t;
+                    for (t = 0; t < num_timeslots; t++) {
+                        double time_per_experiment = per_timeslot_times[t] / (PROCESSOR_SPEED * 1000);
+                        printf("%f, %d, %f, %f, %f\n", fraction, num_racks, time_per_experiment,
+                               utilzn, time_per_experiment / utilzn);
+                    }
                 }
             }
         }
@@ -387,4 +425,5 @@ int main(int argc, char **argv)
 
 	/* TODO: memory to free up, but won't worry about it now */
     free(status);
+    free(per_batch_times);
 }

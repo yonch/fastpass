@@ -9,6 +9,7 @@
 #include "../graph-algo/admissible_structures.h"
 #include "fp_timer.h"
 #include "main.h"
+#include "watchdog.h"
 
 #define CONTROLLER_SEND_TIMEOUT_SECS 	0.0002
 
@@ -30,6 +31,9 @@
 
 /* Deadline to handle all packets, or start dropping */
 #define RX_BURST_DEADLINE_SEC			0.000003
+
+#define WATCHDOG_TRIGGER_THRESHOLD_SEC		0.002
+#define WATCHDOG_PACKET_GAP_SEC				0.0001
 
 /**
  * Specifications for controller thread
@@ -58,6 +62,10 @@ struct comm_core_state {
 	struct fp_timers tx_timers;
 	void *q_head_write_buffer[Q_HEAD_WRITE_BUFFER_SIZE];
 	uint32_t q_head_buf_len;
+
+	uint64_t last_rx_watchdog;
+	uint64_t last_tx_watchdog;
+	uint64_t last_igmp;
 };
 extern struct comm_core_state ccore_state[RTE_MAX_LCORE];
 

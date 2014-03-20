@@ -7,6 +7,14 @@
 
 #include <stdint.h>
 
+#define I_AM_MASTER				1
+#define IS_STRESS_TEST			1
+
+#define STRESS_TEST_MEAN_T_BETWEEN_REQUESTS_SEC		1e-4
+#define STRESS_TEST_NUM_NODES						32
+#define STRESS_TEST_DEMAND_TSLOTS					10
+#define STRESS_TEST_DURATION_SEC					10
+
 /* bits 1-3 occupied by other experiments */
 #define LAUNCH_CONTROLLER_EXPT 0x8
 
@@ -28,17 +36,17 @@
 #define NUM_RACKS				1
 
 /* how many timeslots before allocated timeslot to start processing it */
-#define		PREALLOC_DURATION_TIMESLOTS		80
+#define		PREALLOC_DURATION_TIMESLOTS		40
 
 /* getting timeslot from time is ((NOW_NS * MUL) >> SHIFT) */
-#define		TIMESLOT_MUL		3
-#define		TIMESLOT_SHIFT		12
+#define		TIMESLOT_MUL		419
+#define		TIMESLOT_SHIFT		19
 
 /* give the controller some time to initialize before starting allocation */
 #define		INIT_MAX_TIME_NS		(200*1000*1000)
 
 /* how many seconds in between writes to log */
-#define		LOG_GAP_SECS		0.5
+#define		LOG_GAP_SECS		0.1
 
 #define RTE_LOGTYPE_CONTROL RTE_LOGTYPE_USER1
 #define CONTROL_DEBUG(a...) RTE_LOG(DEBUG, CONTROL, ##a)

@@ -14,6 +14,7 @@
 #define PORT 1100
 #define MTU_SIZE 1456
 #define MAX_CONNECTIONS 512
+#define DEBUG_PRINTS		0
 
 // Struct for storing packet data
 struct packet {

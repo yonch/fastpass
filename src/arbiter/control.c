@@ -10,6 +10,7 @@
 #include "admission_core.h"
 #include "path_sel_core.h"
 #include "log_core.h"
+#include "stress_test_core.h"
 
 int control_do_queue_allocation(void)
 {
@@ -51,6 +52,48 @@ int control_do_queue_allocation(void)
 	return 0;
 }
 
+void launch_comm_cores(uint64_t start_time, uint64_t end_time,
+		uint64_t first_time_slot, struct rte_ring* q_path_selected,
+		struct rte_ring* q_admitted)
+{
+	struct comm_core_cmd comm_cmd;
+
+	// Set commands
+	comm_cmd.start_time = start_time;
+	comm_cmd.end_time = end_time;
+	comm_cmd.q_allocated =
+			((N_PATH_SEL_CORES > 0) ? q_path_selected : q_admitted);
+
+	/* initialize comm core on this core */
+	comm_init_core(rte_lcore_id(), first_time_slot);
+
+	/** Run the controller on this core */
+	exec_comm_core(&comm_cmd);
+}
+
+void launch_stress_test_cores(uint64_t start_time,
+		uint64_t end_time, uint64_t first_time_slot,
+		struct rte_ring* q_path_selected,
+		struct rte_ring* q_admitted)
+{
+	struct stress_test_core_cmd cmd;
+	uint64_t hz = rte_get_timer_hz();
+
+	// Set commands
+	cmd.start_time = start_time;
+	cmd.end_time = start_time + hz * STRESS_TEST_DURATION_SEC;
+	cmd.mean_t_btwn_requests = STRESS_TEST_MEAN_T_BETWEEN_REQUESTS_SEC * hz;
+	cmd.num_nodes = STRESS_TEST_NUM_NODES;
+	cmd.demand_tslots = STRESS_TEST_DEMAND_TSLOTS;
+	cmd.q_allocated =
+			((N_PATH_SEL_CORES > 0) ? q_path_selected : q_admitted);
+
+
+	/** Run the controller on this core */
+	exec_stress_test_core(&cmd, first_time_slot);
+}
+
+
 /**
  * Enqueues commands for allocation network experiments
  *
@@ -63,7 +106,6 @@ void launch_cores(void)
 	uint64_t start_time;
 	static uint64_t end_time;
 	int i; (void)i;
-	struct comm_core_cmd comm_cmd;
 	struct admission_core_cmd admission_cmd[N_ADMISSION_CORES];
 	struct path_sel_core_cmd path_sel_cmd;
 	struct log_core_cmd log_cmd;
@@ -148,17 +190,14 @@ void launch_cores(void)
 	rte_eal_remote_launch(exec_log_core, &log_cmd,
 			enabled_lcore[FIRST_LOG_CORE]);
 
-	/*** COMM CORES ***/
-	// Set commands
-	comm_cmd.start_time = start_time;
-	comm_cmd.end_time = end_time;
-	comm_cmd.q_allocated = ((N_PATH_SEL_CORES > 0) ? q_path_selected : q_admitted);
-
-	/* initialize comm core on this core */
-	comm_init_core(rte_lcore_id(), first_time_slot);
-
-	/** Run the controller on this core */
-	exec_comm_core(&comm_cmd);
+	/*** COMM/STRESS_TEST CORES ***/
+	if (IS_STRESS_TEST) {
+		launch_stress_test_cores(start_time, end_time, first_time_slot, q_path_selected,
+				q_admitted);
+	} else {
+		launch_comm_cores(start_time, end_time, first_time_slot, q_path_selected,
+				q_admitted);
+	}
 
 	/** Wait for all cores */
 	rte_eal_mp_wait_lcore();

@@ -108,15 +108,19 @@ void print_comm_log(uint16_t lcore_id)
 
 }
 
+struct admission_statistics saved_admission_statistics;
+
 void print_global_admission_log() {
 	struct admission_statistics *st = &g_admissible_status.stat;
+	struct admission_statistics *sv = &saved_admission_statistics;
+#define D(X) (st->X - sv->X)
 	printf("\nadmission core");
 	printf("\n  enqueue waits: %lu q_head, %lu q_urgent, %lu q_admitted, %lu q_bin",
 			st->wait_for_space_in_q_head, st->wait_for_space_in_q_urgent,
 			st->wait_for_space_in_q_admitted_out, st->wait_for_space_in_q_bin_out);
-	printf("\n  %lu delay in passing token", st->waiting_to_pass_token);
-	printf("\n  %lu pacing wait", st->pacing_wait);
-	printf("\n  %lu wait for q_bin_in", st->wait_for_q_bin_in);
+	printf("\n  %lu delay in passing token (+%lu)", st->waiting_to_pass_token, D(waiting_to_pass_token));
+	printf("\n  %lu pacing wait (+%lu)", st->pacing_wait, D(pacing_wait));
+	printf("\n  %lu wait for q_bin_in (+%lu)", st->wait_for_q_bin_in, D(pacing_wait));
 	printf("\n  add_backlog; %lu atomic add %0.2f to avg %0.2f; %lu queue add %0.2f to avg %0.2f",
 			st->added_backlog_atomically,
 			(float)st->backlog_sum_inc_atomically / (float)(st->added_backlog_atomically+1),
@@ -125,6 +129,9 @@ void print_global_admission_log() {
 			(float)st->backlog_sum_inc_to_queue / (float)(st->added_backlog_to_queue+1),
 			(float)st->backlog_sum_to_queue / (float)(st->added_backlog_to_queue+1));
 	printf("\n");
+#undef D
+
+	memcpy(sv, st, sizeof(*sv));
 }
 
 void print_admission_core_log(uint16_t lcore) {
@@ -166,6 +173,8 @@ int exec_log_core(void *void_cmd_p)
 	/* copy baseline statistics */
 	memcpy(&saved_comm_log, &comm_core_logs[enabled_lcore[FIRST_COMM_CORE]],
 			sizeof(saved_comm_log));
+	memcpy(&saved_admission_statistics, &g_admissible_status.stat,
+			sizeof(saved_admission_statistics));
 
 	while (1) {
 		/* wait until proper time */

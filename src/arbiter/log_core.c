@@ -148,6 +148,11 @@ void print_admission_core_log(uint16_t lcore) {
 	for (i = 0; i < BACKLOG_HISTOGRAM_NUM_BINS; i++)
 		printf("%lu ", ast->backlog_histogram[i]);
 	printf ("\n");
+
+	printf("bin_index << %d: ", BIN_SIZE_HISTOGRAM_SHIFT);
+	for (i = 0; i < BIN_SIZE_HISTOGRAM_NUM_BINS; i++)
+		printf("%lu ", ast->bin_size_histogram[i]);
+	printf ("\n");
 }
 
 int exec_log_core(void *void_cmd_p)

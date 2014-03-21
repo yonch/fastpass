@@ -925,9 +925,11 @@ int main(int argc, char **argv)
 	if (ret < 0)
 		rte_exit(EXIT_FAILURE, "init_lcore_rx_queues failed\n");
 
-	ret = init_mem();
-	if (ret < 0)
-		rte_exit(EXIT_FAILURE, "init_mem failed\n");
+	if (N_CONTROLLER_PORTS > 0) {
+		ret = init_mem();
+		if (ret < 0)
+			rte_exit(EXIT_FAILURE, "init_mem failed\n");
+	}
 
 	/* init driver */
 #ifdef RTE_LIBRTE_IGB_PMD

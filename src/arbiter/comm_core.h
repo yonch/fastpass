@@ -9,8 +9,9 @@
 #include "../graph-algo/admissible_structures.h"
 #include "fp_timer.h"
 #include "main.h"
+#include "watchdog.h"
 
-#define CONTROLLER_SEND_TIMEOUT_SECS 	0.0001
+#define CONTROLLER_SEND_TIMEOUT_SECS 	0.0002
 
 /* The maximum number of admitted time-slots to process in a batch before
  *   sending and receiving packets */
@@ -19,7 +20,7 @@
 /* maximum number of paths possible */
 #define MAX_PATHS					4
 
-#define NODE_MAX_PKTS_PER_SEC		100000
+#define NODE_MAX_PKTS_PER_SEC		50000
 /* maximum burst of egress packets to a single node (must be >1, can be fraction) */
 #define NODE_MAX_BURST				1.5
 /* minimum time between packets */
@@ -29,7 +30,10 @@
 #define Q_HEAD_WRITE_BUFFER_SIZE		(32*1024)
 
 /* Deadline to handle all packets, or start dropping */
-#define RX_BURST_DEADLINE_SEC			0.000010
+#define RX_BURST_DEADLINE_SEC			0.000003
+
+#define WATCHDOG_TRIGGER_THRESHOLD_SEC		0.002
+#define WATCHDOG_PACKET_GAP_SEC				0.0001
 
 /**
  * Specifications for controller thread
@@ -58,6 +62,10 @@ struct comm_core_state {
 	struct fp_timers tx_timers;
 	void *q_head_write_buffer[Q_HEAD_WRITE_BUFFER_SIZE];
 	uint32_t q_head_buf_len;
+
+	uint64_t last_rx_watchdog;
+	uint64_t last_tx_watchdog;
+	uint64_t last_igmp;
 };
 extern struct comm_core_state ccore_state[RTE_MAX_LCORE];
 

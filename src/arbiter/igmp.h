@@ -5,8 +5,8 @@
  *      Author: aousterh
  */
 
-#ifndef IGMP_H_
-#define IGMP_H_
+#ifndef FASTPASS_IGMP_H_
+#define FASTPASS_IGMP_H_
 
 #include "../protocol/platform/generic.h"
 
@@ -24,8 +24,11 @@ struct igmp_ipv4_hdr {
 
 
 #define TYPE_MEMBERSHIP_REPORT 0x16
+/* 239.1.1.1 */
 #define CONTROLLER_GROUP_ADDR 0xEF010101
 
+static struct ether_addr fp_igmp_group_mac = { // 01:00:5E:01:01:01
+		.addr_bytes = {0x01, 0x00, 0x5E, 0x01, 0x01, 0x01}};
 
 #define IGMP_IPV4_HDR_LEN (sizeof(struct igmp_ipv4_hdr))
 
@@ -42,8 +45,6 @@ static inline struct rte_mbuf *
 make_igmp(uint8_t src_port, uint32_t controller_ip)
 {
 	const unsigned int socket_id = rte_socket_id();
-	struct ether_addr group_mac = { // 01:00:5E:01:01:01
-			.addr_bytes = {0x01, 0x00, 0x5E, 0x01, 0x01, 0x01}};
 	struct rte_mbuf *m;
 	struct ether_hdr *eth_hdr;
         struct ipv4_hdr *ipv4_hdr;
@@ -69,7 +70,7 @@ make_igmp(uint8_t src_port, uint32_t controller_ip)
 
         /* Ethernet header */
 	/* dst addr according to destination */
-	ether_addr_copy(&group_mac, &eth_hdr->d_addr);
+	ether_addr_copy(&fp_igmp_group_mac, &eth_hdr->d_addr);
 	/* src addr according to output port*/
 	ether_addr_copy(&port_info[src_port].eth_addr, &eth_hdr->s_addr);
 	/* ethernet payload is IPv4 */
@@ -113,9 +114,9 @@ static void send_igmp(uint8_t port, uint32_t controller_ip) {
 		res = burst_single_packet(mbuf, port);
 	} while (res != 0);
 
-	COMM_DEBUG("core %u sent igmp from IP 0x%"PRIx32" on port %u\n",
+	IGMP_INFO("core %u sent igmp from IP 0x%"PRIx32" on port %u\n",
 			rte_lcore_id(), controller_ip, port);
 }
 
 
-#endif /* IGMP_H_ */
+#endif /* FASTPASS_IGMP_H_ */

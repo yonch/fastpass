@@ -164,13 +164,14 @@ process_q_urgent:
     	uint64_t edge = edges[i];
         if (unlikely(edge == URGENT_Q_HEAD_TOKEN)) {
         	/* got token! */
-        	core->is_head = 1;
+        	core->is_head = 1; /* TODO: what about the entries i+1..n-1 ?? */
         	goto process_head;
         }
 
         process_one_new_request(EDGE_SRC(edge), EDGE_DST(edge), EDGE_BIN(edge),
         		core, status, current_bin);
     }
+//    adm_log_processed_q_urgent(&core->stat, current_bin, n);
     if (n > 0)
     	goto process_q_urgent;
 
@@ -192,8 +193,8 @@ process_head:
         
         process_one_new_request(src, dst, bin_index, core, status, current_bin);
     }
-	if (n > 0)
-		goto process_head;
+//	if (n > 0)
+//		goto process_head;
 }
 
 // Determine admissible traffic for one timeslot from queue_in
@@ -231,6 +232,7 @@ void get_admissible_traffic(struct admission_core_state *core,
 				process_new_requests(status, core, bin);
 				status->stat.wait_for_q_bin_in++;
 			}
+			adm_log_dequeued_bin_in(&core->stat, bin, bin_in->tail - bin_in->head);
 			try_allocation_bin(bin_in, core, bin_out, status);
     	} else {
     	    /* wait for start time */

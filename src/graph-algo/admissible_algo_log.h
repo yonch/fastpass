@@ -12,8 +12,15 @@
 
 #define		MAINTAIN_ADM_LOG_COUNTERS	1
 
-#define		BACKLOG_HISTOGRAM_NUM_BINS	16
-#define		BACKLOG_HISTOGRAM_SHIFT		2
+#define		BACKLOG_HISTOGRAM_NUM_BINS		16
+#define		BACKLOG_HISTOGRAM_SHIFT			2
+
+#define		BIN_SIZE_HISTOGRAM_NUM_BINS		16
+#define		BIN_SIZE_HISTOGRAM_SHIFT		4
+
+#define		NEW_REQUEST_HISTOGRAM_NUM_BINS	16
+#define		NEW_REQUEST_HISTOGRAM_SHIFT		4
+
 
 /**
  * Per-core statistics, in struct admission_core_state
@@ -24,6 +31,8 @@ struct admission_core_statistics {
 	uint64_t backlog_sum;
 	uint64_t allocated_no_backlog;
 	uint64_t backlog_histogram[BACKLOG_HISTOGRAM_NUM_BINS];
+	uint64_t bin_size_histogram[BIN_SIZE_HISTOGRAM_NUM_BINS];
+	uint64_t new_request_histogram[NEW_REQUEST_HISTOGRAM_NUM_BINS];
 };
 
 /**
@@ -96,6 +105,20 @@ static inline void adm_log_increased_backlog_atomically(
 		ast->added_backlog_atomically++;
 		ast->backlog_sum_inc_atomically += amt;
 		ast->backlog_sum_atomically += new_backlog;
+	}
+}
+
+static inline void adm_log_dequeued_bin_in(
+		struct admission_core_statistics *st, uint16_t bin_index,
+		uint16_t bin_size) {
+	if (MAINTAIN_ADM_LOG_COUNTERS) {
+		uint32_t hist_bin;
+
+		/* mainatain histogram */
+		hist_bin = bin_index >> BIN_SIZE_HISTOGRAM_SHIFT;
+		if (unlikely(hist_bin >= BIN_SIZE_HISTOGRAM_NUM_BINS))
+			hist_bin = BIN_SIZE_HISTOGRAM_NUM_BINS - 1;
+		st->bin_size_histogram[hist_bin]+= bin_size;
 	}
 }
 

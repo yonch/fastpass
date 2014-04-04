@@ -229,8 +229,8 @@ void get_admissible_traffic(struct admission_core_state *core,
 
     	if (likely(bin < NUM_BINS)) {
 			while (fp_ring_dequeue(queue_in, (void **)&bin_in) != 0) {
+				adm_log_waiting_for_q_bin_in(&core->stat, bin);
 				process_new_requests(status, core, bin);
-				status->stat.wait_for_q_bin_in++;
 			}
 			adm_log_dequeued_bin_in(&core->stat, bin, bin_in->tail - bin_in->head);
 			try_allocation_bin(bin_in, core, bin_out, status);
@@ -240,14 +240,20 @@ void get_admissible_traffic(struct admission_core_state *core,
     	    	uint64_t start_timeslot = first_timeslot + (bin - NUM_BINS);
     	    	uint64_t now_timeslot;
 
-        	    do {
-        	    	/* process requests */
-        	    	process_new_requests(status, core, bin);
-        	    	/* at least until the next core had finished allocating */
-        	    	/*  and we reach the start time */
-        	    	now_timeslot = (fp_get_time_ns() * tslot_mul) >> tslot_shift;
-        	    	status->stat.pacing_wait++;
-        	    } while (!core->is_head || (now_timeslot < start_timeslot));
+process_more_requests:
+				/* process requests */
+				process_new_requests(status, core, bin);
+				/* at least until the next core had finished allocating */
+				/*  and we reach the start time */
+				now_timeslot = (fp_get_time_ns() * tslot_mul) >> tslot_shift;
+
+        	    if (unlikely(now_timeslot < start_timeslot)) {
+        	    	adm_log_pacing_wait(&core->stat, bin);
+        	    	goto process_more_requests;
+        	    } else if (unlikely(!core->is_head)) {
+        	    	adm_log_waiting_for_head(&core->stat);
+        	    	goto process_more_requests;
+        	    }
     	    }
 
     	    /* enqueue the allocated traffic for this timeslot */

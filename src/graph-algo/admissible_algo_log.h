@@ -33,6 +33,10 @@ struct admission_core_statistics {
 	uint64_t backlog_histogram[BACKLOG_HISTOGRAM_NUM_BINS];
 	uint64_t bin_size_histogram[BIN_SIZE_HISTOGRAM_NUM_BINS];
 	uint64_t new_request_histogram[NEW_REQUEST_HISTOGRAM_NUM_BINS];
+
+	uint64_t wait_for_q_bin_in;
+	uint64_t wait_for_head;
+	uint64_t pacing_wait;
 };
 
 /**
@@ -45,7 +49,6 @@ struct admission_statistics {
 	uint64_t wait_for_space_in_q_bin_out;
 	uint64_t waiting_to_pass_token;
 	uint64_t pacing_wait;
-	uint64_t wait_for_q_bin_in;
 	/* atomic increase statistics */
 	uint64_t added_backlog_atomically;
 	uint64_t backlog_sum_atomically;
@@ -121,5 +124,25 @@ static inline void adm_log_dequeued_bin_in(
 		st->bin_size_histogram[hist_bin]+= bin_size;
 	}
 }
+
+static inline void adm_log_waiting_for_q_bin_in(
+		struct admission_core_statistics *st, uint16_t bin) {
+	if (MAINTAIN_ADM_LOG_COUNTERS)
+		st->wait_for_q_bin_in++;
+}
+
+static inline void adm_log_pacing_wait(
+		struct admission_core_statistics *st, uint16_t bin) {
+	if (MAINTAIN_ADM_LOG_COUNTERS)
+		st->pacing_wait++;
+}
+
+static inline void adm_log_waiting_for_head(
+		struct admission_core_statistics *st) {
+	if (MAINTAIN_ADM_LOG_COUNTERS)
+		st->wait_for_head++;
+}
+
+
 
 #endif /* ADMISSIBLE_ALGO_LOG_H_ */

@@ -23,6 +23,10 @@ struct stress_test_core_cmd {
 	uint32_t num_nodes;
 	uint32_t demand_tslots;
 
+	uint32_t num_initial_srcs;
+	uint32_t num_initial_dsts_per_src;
+	uint32_t initial_flow_size;
+
 	struct rte_ring *q_allocated;
 };
 

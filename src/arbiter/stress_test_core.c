@@ -100,6 +100,21 @@ static inline void process_allocated_traffic(struct comm_core_state *core,
 	rte_mempool_put_bulk(admitted_traffic_pool[0], (void **) admitted, rc);
 }
 
+/**
+ * Adds demands from 'num_srcs' sources, each to 'num_dsts_per_src'.
+ *    Demand is for 'flow_size' tslots.
+ */
+static void add_initial_requests(struct comm_core_state *core,
+		uint32_t num_srcs, uint32_t num_dsts_per_src, uint32_t flow_size)
+{
+	uint32_t src;
+	uint32_t i;
+	for (src = 0; src < num_srcs; src++)
+		for (i = 0; i < num_dsts_per_src; i++)
+			add_backlog_buffered(core, &g_admissible_status,
+						src, (src + 1 + i) % num_srcs , flow_size);
+}
+
 void exec_stress_test_core(struct stress_test_core_cmd * cmd,
 		uint64_t first_time_slot)
 {
@@ -119,6 +134,12 @@ void exec_stress_test_core(struct stress_test_core_cmd * cmd,
 	core->q_head_buf_len = 0;
 	stress_test_log_init(&stress_test_core_logs[lcore_id]);
 	comm_log_init(&comm_core_logs[lcore_id]);
+
+	/* Add initial demands */
+	assert(cmd->num_initial_srcs <= cmd->num_nodes);
+	assert(cmd->num_initial_dsts_per_src < cmd->num_initial_srcs);
+	add_initial_requests(core, cmd->num_initial_srcs,
+			cmd->num_initial_dsts_per_src, cmd->initial_flow_size);
 
 	/* Initialize gen */
 	next_mean_t_btwn_requests = cmd->mean_t_btwn_requests;

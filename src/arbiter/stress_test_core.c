@@ -61,7 +61,7 @@ static void flush_q_head_buffer(struct comm_core_state *core)
 
 static void add_backlog_buffered(struct comm_core_state *core,
 		struct admissible_status *status, uint16_t src, uint16_t dst,
-        uint16_t demand_tslots)
+        uint32_t demand_tslots)
 {
 	void *edge;
 
@@ -113,6 +113,8 @@ static void add_initial_requests(struct comm_core_state *core,
 		for (i = 0; i < num_dsts_per_src; i++)
 			add_backlog_buffered(core, &g_admissible_status,
 						src, (src + 1 + i) % num_srcs , flow_size);
+
+	flush_q_head_buffer(core);
 }
 
 void exec_stress_test_core(struct stress_test_core_cmd * cmd,

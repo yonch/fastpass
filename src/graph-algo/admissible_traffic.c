@@ -24,7 +24,7 @@
 #define RING_DEQUEUE_BURST_SIZE		256
 
 bool add_backlog_no_enqueue(struct admissible_status *status, uint16_t src,
-        uint16_t dst, uint16_t backlog_increase, void **out_edge)
+        uint16_t dst, uint32_t backlog_increase, void **out_edge)
 {
 	int32_t backlog;
     assert(status != NULL);
@@ -45,7 +45,7 @@ bool add_backlog_no_enqueue(struct admissible_status *status, uint16_t src,
 
 // Request num_slots additional timeslots from src to dst
 void add_backlog(struct admissible_status *status, uint16_t src,
-                       uint16_t dst, uint16_t backlog_increase) {
+                       uint16_t dst, uint32_t backlog_increase) {
 	void *edge;
 
 	if (add_backlog_no_enqueue(status, src, dst, backlog_increase, &edge) == false) {

@@ -94,16 +94,17 @@ static inline void adm_log_allocator_no_backlog(
 }
 
 static inline void adm_log_increased_backlog_to_queue(
-		struct admission_statistics *ast, uint16_t amt, int32_t new_backlog) {
+		struct admission_statistics *ast, uint32_t amt, int32_t new_backlog) {
 	if (MAINTAIN_ADM_LOG_COUNTERS) {
 		ast->added_backlog_to_queue++;
 		ast->backlog_sum_inc_to_queue += amt;
 		ast->backlog_sum_to_queue += new_backlog;
+/*		printf("\n added backlog to queue amt %u new_backlog %u\n", amt, new_backlog); */
 	}
 }
 
 static inline void adm_log_increased_backlog_atomically(
-		struct admission_statistics *ast, uint16_t amt, int32_t new_backlog) {
+		struct admission_statistics *ast, uint32_t amt, int32_t new_backlog) {
 	if (MAINTAIN_ADM_LOG_COUNTERS) {
 		ast->added_backlog_atomically++;
 		ast->backlog_sum_inc_atomically += amt;

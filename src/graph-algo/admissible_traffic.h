@@ -19,12 +19,12 @@
  * Returns true if @out_edge should be enqueued to q_head
  */
 bool add_backlog_no_enqueue(struct admissible_status *status, uint16_t src,
-        uint16_t dst, uint16_t backlog_increase, void **out_edge);
+        uint16_t dst, uint32_t backlog_increase, void **out_edge);
 
 // Increase the backlog from src to dst
 void add_backlog(struct admissible_status *status,
                        uint16_t src, uint16_t dst,
-                       uint16_t demand_tslots);
+                       uint32_t demand_tslots);
 
 // Determine admissible traffic for one timeslot from queue_in
 void get_admissible_traffic(struct admission_core_state *core,

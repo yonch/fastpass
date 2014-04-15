@@ -281,7 +281,7 @@ static void flush_q_head_buffer(struct comm_core_state *core)
 
 static void add_backlog_buffered(struct comm_core_state *core,
 		struct admissible_status *status, uint16_t src, uint16_t dst,
-        uint16_t demand_tslots)
+        uint32_t demand_tslots)
 {
 	void *edge;
 

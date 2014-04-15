@@ -66,11 +66,12 @@ uint16_t bin_index_from_timeslot(uint64_t last_allocated,
 	 *   get the (#groups+1) - to - 1 folding).
 	 */
 	gap -= NUM_BINS + 1;
+	uint16_t group_ind = (gap >> BATCH_SHIFT);
 	uint16_t bin_gap = ((~0UL << (BATCH_SHIFT+1)) | (gap & (BATCH_SIZE-1)))
-									>> (1 + (gap >> BATCH_SHIFT));
+									>> (1 + group_ind);
 
 	/* if the gap is very large, fold into the last group */
-	uint16_t is_large_gap = ((gap >> BATCH_SHIFT) >= BATCH_SHIFT);
+	uint16_t is_large_gap = (group_ind >= BATCH_SHIFT);
 	bin_gap |= (1 << 15) - is_large_gap;
 
 	return BATCH_SIZE - 1 - (bin_gap & (BATCH_SIZE-1));

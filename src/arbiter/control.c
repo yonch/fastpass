@@ -85,6 +85,9 @@ void launch_stress_test_cores(uint64_t start_time,
 	cmd.mean_t_btwn_requests = STRESS_TEST_MEAN_T_BETWEEN_REQUESTS_SEC * hz;
 	cmd.num_nodes = STRESS_TEST_NUM_NODES;
 	cmd.demand_tslots = STRESS_TEST_DEMAND_TSLOTS;
+	cmd.num_initial_srcs = STRESS_TEST_INITIAL_SOURCES;
+	cmd.num_initial_dsts_per_src = STRESS_TEST_INITIAL_DSTS_PER_SRC;
+	cmd.initial_flow_size = STRESS_TEST_INITIAL_FLOW_SIZE;
 	cmd.q_allocated =
 			((N_PATH_SEL_CORES > 0) ? q_path_selected : q_admitted);
 
@@ -187,8 +190,9 @@ void launch_cores(void)
 	log_cmd.log_gap_ticks = (uint64_t)(LOG_GAP_SECS * rte_get_timer_hz());
 
 	/* launch log core */
-	rte_eal_remote_launch(exec_log_core, &log_cmd,
-			enabled_lcore[FIRST_LOG_CORE]);
+	if (N_LOG_CORES > 0)
+		rte_eal_remote_launch(exec_log_core, &log_cmd,
+				enabled_lcore[FIRST_LOG_CORE]);
 
 	/*** COMM/STRESS_TEST CORES ***/
 	if (IS_STRESS_TEST) {

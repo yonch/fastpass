@@ -308,13 +308,13 @@ void set_timeslot_occupied(struct batch_state *state, uint16_t src,
         uint16_t src_rack = get_rack_from_id(src);
         state->src_rack_counts[BATCH_SIZE * src_rack + timeslot] -= 1;
         if (state->src_rack_counts[BATCH_SIZE * src_rack + timeslot] == 0)
-            state->src_rack_bitmaps[src_rack] = state->src_rack_bitmaps[src_rack] & ~(0x1ULL << timeslot);
+            state->src_rack_bitmaps[src_rack] &= ~(0x1ULL << timeslot);
         
         if (dst != OUT_OF_BOUNDARY_NODE_ID) {
             uint16_t dst_rack = get_rack_from_id(dst);
             state->dst_rack_counts[BATCH_SIZE * dst_rack + timeslot] -= 1;
             if (state->dst_rack_counts[BATCH_SIZE * dst_rack + timeslot] == 0)
-                state->dst_rack_bitmaps[dst_rack] = state->dst_rack_bitmaps[dst_rack] & ~(0x1ULL << timeslot);
+                state->dst_rack_bitmaps[dst_rack] &= ~(0x1ULL << timeslot);
         }
     }
 

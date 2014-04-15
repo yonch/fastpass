@@ -263,6 +263,7 @@ process_more_requests:
 
     	    /* disallow further allocations to that timeslot */
     	    core->batch_state.allowed_mask <<= 1;
+    	    core->batch_state.allowed_mask &= (1ULL << BATCH_SIZE) - 1;
     	    /* will process flows that this batch had previously allocated to timeslot */
     	    bin_in = core->new_request_bins[bin];
     	}

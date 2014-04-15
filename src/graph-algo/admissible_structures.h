@@ -21,8 +21,11 @@
 
 #include "../protocol/topology.h"
 
-#define BATCH_SIZE 64  // must be consistent with bitmaps in batch_state
-#define BATCH_SHIFT 6  // 2^BATCH_SHIFT = BATCH_SIZE
+#define BATCH_SIZE 16  // must be consistent with bitmaps in batch_state
+#define BATCH_SHIFT 4  // 2^BATCH_SHIFT = BATCH_SIZE
+#define BITMASKS_PER_64_BIT 	(64 >> BATCH_SHIFT)
+#define BITMASK_WORD(node)		(node >> (6 - BATCH_SHIFT))
+#define BITMASK_SHIFT(node)		((node << BATCH_SHIFT) & (64 - 1))
 #define NONE_AVAILABLE 251
 #define SMALL_BIN_SIZE (MAX_NODES * MAX_NODES) // TODO: try smaller values
 #define LARGE_BIN_SIZE (MAX_NODES * MAX_NODES) // TODO: try smaller values
@@ -59,8 +62,8 @@ struct bin {
 struct batch_state {
     bool oversubscribed;
     uint64_t allowed_mask;
-    uint64_t src_endnodes [MAX_SRCS];
-    uint64_t dst_endnodes [MAX_DSTS];
+    uint64_t src_endnodes [MAX_SRCS / BITMASKS_PER_64_BIT];
+    uint64_t dst_endnodes [MAX_DSTS / BITMASKS_PER_64_BIT];
     uint64_t src_rack_bitmaps [MAX_RACKS];
     uint64_t dst_rack_bitmaps [MAX_RACKS];
     uint16_t src_rack_counts [MAX_RACKS * BATCH_SIZE];  // rows are racks
@@ -227,19 +230,19 @@ void init_batch_state(struct batch_state *state, bool oversubscribed,
     assert(num_nodes <= MAX_NODES);
 
     state->oversubscribed = oversubscribed;
-    state->allowed_mask = ~0UL;
+    state->allowed_mask = (1ULL << BATCH_SIZE) - 1;
 
     uint16_t i;
-    for (i = 0; i < num_nodes; i++) {
-        state->src_endnodes[i] = 0xFFFFFFFFFFFFFFFFULL;
-        state->dst_endnodes[i] = 0xFFFFFFFFFFFFFFFFULL;
+    for (i = 0; i < num_nodes / BITMASKS_PER_64_BIT; i++) {
+        state->src_endnodes[i] = ~0ULL;
+        state->dst_endnodes[i] = ~0ULL;
     }
-    state->dst_endnodes[OUT_OF_BOUNDARY_NODE_ID] = 0xFFFFFFFFFFFFFFFFULL;
+    state->dst_endnodes[BITMASK_WORD(OUT_OF_BOUNDARY_NODE_ID)] = ~0ULL;
 
     if (oversubscribed) {
         for (i = 0; i < (num_nodes >> TOR_SHIFT); i++) {
-            state->src_rack_bitmaps[i] = 0xFFFFFFFFFFFFFFFFULL;
-            state->dst_rack_bitmaps[i] = 0xFFFFFFFFFFFFFFFFULL;
+            state->src_rack_bitmaps[i] = ~0ULL;
+            state->dst_rack_bitmaps[i] = ~0ULL;
         }
 
         for (i = 0; i < MAX_RACKS * BATCH_SIZE; i++) {
@@ -260,7 +263,10 @@ uint8_t get_first_timeslot(struct batch_state *state, uint16_t src, uint16_t dst
     assert(src < MAX_SRCS);
     assert(dst < MAX_DSTS);
 
-    uint64_t endnode_bitmap = state->allowed_mask & state->src_endnodes[src] & state->dst_endnodes[dst];
+    uint64_t endnode_bitmap =
+    		  state->allowed_mask
+    		& (state->src_endnodes[BITMASK_WORD(src)] >> BITMASK_SHIFT(src))
+    		& (state->dst_endnodes[BITMASK_WORD(dst)] >> BITMASK_SHIFT(dst));
       
     uint64_t bitmap = endnode_bitmap;
     if (state->oversubscribed) {
@@ -292,17 +298,18 @@ void set_timeslot_occupied(struct batch_state *state, uint16_t src,
     assert(dst < MAX_DSTS);
     assert(timeslot <= BATCH_SIZE);
 
-    state->src_endnodes[src] = state->src_endnodes[src] & ~(0x1ULL << timeslot);
+    state->src_endnodes[BITMASK_WORD(src)] &=
+    		~(0x1ULL << (timeslot + BITMASK_SHIFT(src)));
 
     if (dst == OUT_OF_BOUNDARY_NODE_ID) {
         // destination is outside of scheduling boundary
         state->out_of_boundary_counts[timeslot]--;
-
         if (state->out_of_boundary_counts[timeslot] == 0)
             state->dst_endnodes[dst] = state->dst_endnodes[dst] & ~(0x1ULL << timeslot);
     }
     else
-        state->dst_endnodes[dst] = state->dst_endnodes[dst] & ~(0x1ULL << timeslot);
+        state->dst_endnodes[BITMASK_WORD(dst)] &=
+        		~(0x1ULL << (timeslot + BITMASK_SHIFT(dst)));
   
     if (state->oversubscribed) {
         uint16_t src_rack = get_rack_from_id(src);

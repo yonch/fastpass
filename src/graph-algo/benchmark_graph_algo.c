@@ -16,7 +16,7 @@
 #include "path_selection.h"
 
 #define NUM_FRACTIONS_A 11
-#define NUM_SIZES_A 4
+#define NUM_SIZES_A 1
 #define NUM_FRACTIONS_P 11
 #define NUM_CAPACITIES_P 4
 #define NUM_RACKS_P 4
@@ -24,9 +24,9 @@
 #define PROCESSOR_SPEED 2.8
 
 const double admissible_fractions [NUM_FRACTIONS_A] =
-    {0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9, 0.95, 0.99};
+    {0.99, 0.95, 0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9, 0.95, 0.99};
 const uint32_t admissible_sizes [NUM_SIZES_A] =
-    {2048, 1024, 512, 256/*, 128, 64, 32, 16*/};
+    {256, 2048, 1024, 512, /*128, 64, 32, 16*/};
 const double path_fractions [NUM_FRACTIONS_P] =
     {0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9, 0.95, 0.99};
 const uint16_t path_capacities [NUM_CAPACITIES_P] =

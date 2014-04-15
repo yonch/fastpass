@@ -113,6 +113,15 @@ struct admission_statistics saved_admission_statistics;
 void print_global_admission_log() {
 	struct admission_statistics *st = &g_admissible_status.stat;
 	struct admission_statistics *sv = &saved_admission_statistics;
+	int i;
+	uint64_t wait_for_q_bin_in = 0;
+
+	for (i = 0; i < N_ADMISSION_CORES; i++) {
+		uint16_t lcore = enabled_lcore[FIRST_ADMISSION_CORE+i];
+		struct admission_core_statistics *ast = &admission_core_state[lcore].stat;
+		wait_for_q_bin_in += ast->wait_for_q_bin_in;
+	}
+
 #define D(X) (st->X - sv->X)
 	printf("\nadmission core");
 	printf("\n  enqueue waits: %lu q_head, %lu q_urgent, %lu q_admitted, %lu q_bin",
@@ -120,7 +129,7 @@ void print_global_admission_log() {
 			st->wait_for_space_in_q_admitted_out, st->wait_for_space_in_q_bin_out);
 	printf("\n  %lu delay in passing token (+%lu)", st->waiting_to_pass_token, D(waiting_to_pass_token));
 	printf("\n  %lu pacing wait (+%lu)", st->pacing_wait, D(pacing_wait));
-	printf("\n  %lu wait for q_bin_in (+%lu)", st->wait_for_q_bin_in, D(wait_for_q_bin_in));
+	printf("\n  %lu wait for q_bin_in", wait_for_q_bin_in);
 	printf("\n  add_backlog; %lu atomic add %0.2f to avg %0.2f; %lu queue add %0.2f to avg %0.2f",
 			st->added_backlog_atomically,
 			(float)st->backlog_sum_inc_atomically / (float)(st->added_backlog_atomically+1),

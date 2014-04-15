@@ -58,8 +58,6 @@ struct bin {
 // Tracks which srcs/dsts and src/dst racks are available for this batch
 struct batch_state {
     bool oversubscribed;
-    uint16_t inter_rack_capacity;  // Only valid if oversubscribed is true
-    uint16_t out_of_boundary_capacity;
     uint64_t allowed_mask;
     uint64_t src_endnodes [MAX_SRCS];
     uint64_t dst_endnodes [MAX_DSTS];
@@ -298,9 +296,9 @@ void set_timeslot_occupied(struct batch_state *state, uint16_t src,
 
     if (dst == OUT_OF_BOUNDARY_NODE_ID) {
         // destination is outside of scheduling boundary
-        state->out_of_boundary_counts[timeslot]++;
+        state->out_of_boundary_counts[timeslot]--;
 
-        if (state->out_of_boundary_counts[timeslot] == state->out_of_boundary_capacity)
+        if (state->out_of_boundary_counts[timeslot] == 0)
             state->dst_endnodes[dst] = state->dst_endnodes[dst] & ~(0x1ULL << timeslot);
     }
     else

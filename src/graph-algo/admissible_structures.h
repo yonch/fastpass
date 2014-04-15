@@ -24,7 +24,6 @@
 #define BATCH_SIZE 64  // must be consistent with bitmaps in batch_state
 #define BATCH_SHIFT 6  // 2^BATCH_SHIFT = BATCH_SIZE
 #define NONE_AVAILABLE 251
-#define MAX_TIME 66535
 #define SMALL_BIN_SIZE (MAX_NODES * MAX_NODES) // TODO: try smaller values
 #define LARGE_BIN_SIZE (MAX_NODES * MAX_NODES) // TODO: try smaller values
 #define NUM_BINS_SHIFT 8
@@ -230,8 +229,6 @@ void init_batch_state(struct batch_state *state, bool oversubscribed,
     assert(num_nodes <= MAX_NODES);
 
     state->oversubscribed = oversubscribed;
-    state->inter_rack_capacity = inter_rack_capacity;
-    state->out_of_boundary_capacity = out_of_boundary_capacity;
     state->allowed_mask = ~0UL;
 
     uint16_t i;
@@ -248,14 +245,14 @@ void init_batch_state(struct batch_state *state, bool oversubscribed,
         }
 
         for (i = 0; i < MAX_RACKS * BATCH_SIZE; i++) {
-            state->src_rack_counts[i] = 0;
-            state->dst_rack_counts[i] = 0;
+            state->src_rack_counts[i] = inter_rack_capacity;
+            state->dst_rack_counts[i] = inter_rack_capacity;
         }
     }
 
     // init out of boundary counts
     for (i = 0; i < BATCH_SIZE; i++)
-        state->out_of_boundary_counts[i] = 0;
+        state->out_of_boundary_counts[i] = out_of_boundary_capacity;
 }
 
 // Returns the first available timeslot for src and dst, or NONE_AVAILABLE
@@ -311,14 +308,14 @@ void set_timeslot_occupied(struct batch_state *state, uint16_t src,
   
     if (state->oversubscribed) {
         uint16_t src_rack = get_rack_from_id(src);
-        state->src_rack_counts[BATCH_SIZE * src_rack + timeslot] += 1;
-        if (state->src_rack_counts[BATCH_SIZE * src_rack + timeslot] == state->inter_rack_capacity)
+        state->src_rack_counts[BATCH_SIZE * src_rack + timeslot] -= 1;
+        if (state->src_rack_counts[BATCH_SIZE * src_rack + timeslot] == 0)
             state->src_rack_bitmaps[src_rack] = state->src_rack_bitmaps[src_rack] & ~(0x1ULL << timeslot);
         
         if (dst != OUT_OF_BOUNDARY_NODE_ID) {
             uint16_t dst_rack = get_rack_from_id(dst);
-            state->dst_rack_counts[BATCH_SIZE * dst_rack + timeslot] += 1;
-            if (state->dst_rack_counts[BATCH_SIZE * dst_rack + timeslot] == state->inter_rack_capacity)
+            state->dst_rack_counts[BATCH_SIZE * dst_rack + timeslot] -= 1;
+            if (state->dst_rack_counts[BATCH_SIZE * dst_rack + timeslot] == 0)
                 state->dst_rack_bitmaps[dst_rack] = state->dst_rack_bitmaps[dst_rack] & ~(0x1ULL << timeslot);
         }
     }

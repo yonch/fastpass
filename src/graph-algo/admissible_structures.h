@@ -61,8 +61,8 @@ struct batch_state {
     uint64_t allowed_mask;
     uint64_t src_endnodes [MAX_SRCS];
     uint64_t dst_endnodes [MAX_DSTS];
-    uint64_t src_rack_bitmaps [MAX_NODES];
-    uint64_t dst_rack_bitmaps [MAX_NODES];
+    uint64_t src_rack_bitmaps [MAX_RACKS];
+    uint64_t dst_rack_bitmaps [MAX_RACKS];
     uint16_t src_rack_counts [MAX_RACKS * BATCH_SIZE];  // rows are racks
     uint16_t dst_rack_counts [MAX_RACKS * BATCH_SIZE];
     uint16_t out_of_boundary_counts [BATCH_SIZE];
@@ -237,7 +237,7 @@ void init_batch_state(struct batch_state *state, bool oversubscribed,
     state->dst_endnodes[OUT_OF_BOUNDARY_NODE_ID] = 0xFFFFFFFFFFFFFFFFULL;
 
     if (oversubscribed) {
-        for (i = 0; i < num_nodes; i++) {
+        for (i = 0; i < (num_nodes >> TOR_SHIFT); i++) {
             state->src_rack_bitmaps[i] = 0xFFFFFFFFFFFFFFFFULL;
             state->dst_rack_bitmaps[i] = 0xFFFFFFFFFFFFFFFFULL;
         }

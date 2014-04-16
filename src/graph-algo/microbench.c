@@ -24,6 +24,7 @@
 #define RAND_C					1442695040888963407
 
 #include <stdint.h>
+#include <stdio.h>
 
 void main() {
     uint64_t src_endnodes [MAX_NODES / BITMASKS_PER_64_BIT];

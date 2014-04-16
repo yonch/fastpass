@@ -108,8 +108,15 @@ static void try_allocation_bin(struct bin *in_bin, struct admission_core_state *
 {
 	int rc;
     uint16_t i;
+    uint16_t head = in_bin->head;
     uint16_t tail = in_bin->tail;
-    for (i = in_bin->head; i < tail; i++) {
+
+//    __builtin_prefetch(&core->batch_state.src_endnodes[BITMASK_WORD(in_bin->edges[head].src)], 0, 3);
+//    __builtin_prefetch(&core->batch_state.dst_endnodes[BITMASK_WORD(in_bin->edges[head].dst)], 0, 3);
+
+    for (i = head; i < tail; i++) {
+//        __builtin_prefetch(&core->batch_state.src_endnodes[BITMASK_WORD(in_bin->edges[i+1].src)], 0, 3);
+//        __builtin_prefetch(&core->batch_state.dst_endnodes[BITMASK_WORD(in_bin->edges[i+1].dst)], 0, 3);
 		uint16_t src = in_bin->edges[i].src;
 		uint16_t dst = in_bin->edges[i].dst;
 

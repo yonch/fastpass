@@ -71,7 +71,8 @@ static inline int try_allocation(uint16_t src, uint16_t dst,
     assert(status != NULL);
 
 	uint32_t index = get_status_index(src, dst);
-	__builtin_prefetch(&status->flows[index].backlog, 1, 0);
+	__builtin_prefetch(&status->flows[index].backlog, 1, 1);
+	__builtin_prefetch(&status->last_alloc_tslot[index], 1, 1);
 
 	uint64_t timeslot_bitmap = get_available_timeslot_bitmap(
 			&core->batch_state, src, dst);

@@ -122,10 +122,9 @@ void insert_admitted_edge(struct admitted_traffic *admitted, uint16_t src,
     assert(src < MAX_SRCS);
     assert(dst < MAX_DSTS);
 
-    struct admitted_edge *edge = &admitted->edges[admitted->size];
+    struct admitted_edge *edge = &admitted->edges[admitted->size++];
     edge->src = src;
     edge->dst = dst;
-    admitted->size++;
 }
 
 // Get a pointer to an edge of admitted traffic

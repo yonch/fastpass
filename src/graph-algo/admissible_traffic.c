@@ -107,7 +107,8 @@ static void try_allocation_bin(struct bin *in_bin, struct admission_core_state *
 {
 	int rc;
     uint16_t i;
-    for (i = in_bin->head; i < in_bin->tail; i++) {
+    uint16_t tail = in_bin->tail;
+    for (i = in_bin->head; i < tail; i++) {
 		uint16_t src = in_bin->edges[i].src;
 		uint16_t dst = in_bin->edges[i].dst;
 

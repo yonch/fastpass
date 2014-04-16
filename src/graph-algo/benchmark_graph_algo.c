@@ -24,7 +24,7 @@
 #define PROCESSOR_SPEED 2.8
 
 const double admissible_fractions [NUM_FRACTIONS_A] =
-    {0.99, 0.95, 0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9, 0.95, 0.99};
+    {0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9, 0.95, 0.99};
 const uint32_t admissible_sizes [NUM_SIZES_A] =
     {256, 2048, 1024, 512, /*128, 64, 32, 16*/};
 const double path_fractions [NUM_FRACTIONS_P] =

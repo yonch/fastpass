@@ -62,7 +62,7 @@ void add_backlog(struct admissible_status *status, uint16_t src,
  * Returns 0 if the flow will be handled internally,
  * 		   1 if more backlog remains and should be handled by the caller
  */
-static int try_allocation(uint16_t src, uint16_t dst,
+static inline int try_allocation(uint16_t src, uint16_t dst,
 		struct admission_core_state *core,
 		struct admissible_status *status)
 {
@@ -70,7 +70,10 @@ static int try_allocation(uint16_t src, uint16_t dst,
     assert(core != NULL);
     assert(status != NULL);
 
-    uint8_t batch_timeslot = get_first_timeslot(&core->batch_state, src, dst);
+	uint32_t index = get_status_index(src, dst);
+	__builtin_prefetch(&status->flows[index].backlog, 1, 0);
+
+	uint8_t batch_timeslot = get_first_timeslot(&core->batch_state, src, dst);
 
     if (batch_timeslot == NONE_AVAILABLE) {
     	adm_algo_log_no_available_timeslots_for_bin_entry(&core->stat, src, dst);
@@ -82,7 +85,6 @@ static int try_allocation(uint16_t src, uint16_t dst,
 	set_timeslot_occupied(&core->batch_state, src, dst, batch_timeslot);
 
 	insert_admitted_edge(core->admitted[batch_timeslot], src, dst);
-	uint32_t index = get_status_index(src, dst);
 	status->last_alloc_tslot[index] = status->current_timeslot + batch_timeslot;
 
 	backlog = atomic32_sub_return(&status->flows[index].backlog, 1);

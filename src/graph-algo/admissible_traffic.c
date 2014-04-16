@@ -106,19 +106,16 @@ static void try_allocation_bin(struct bin *in_bin, struct admission_core_state *
                     struct bin *bin_out, struct admissible_status *status)
 {
 	int rc;
-    while (!is_empty_bin(in_bin)) {
-        struct backlog_edge *edge = peek_head_bin(in_bin);
-        assert(edge != NULL);
-        uint16_t src = edge->src;
-    	uint16_t dst = edge->dst;
-        dequeue_bin(in_bin);
+    uint16_t i;
+    for (i = in_bin->head; i < in_bin->tail; i++) {
+		uint16_t src = in_bin->edges[i].src;
+		uint16_t dst = in_bin->edges[i].dst;
 
         rc = try_allocation(src, dst, core, status);
         if (rc == 1) {
 			// We cannot allocate this edge now - copy to queue_out
 			enqueue_bin(bin_out, src, dst);
         }
-
     }
 }
 

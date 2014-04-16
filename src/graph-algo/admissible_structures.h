@@ -34,6 +34,7 @@
 #define NUM_SRC_DST_PAIRS (MAX_NODES * (MAX_NODES))  // include dst == out of boundary
 #define MAX_DSTS MAX_NODES  // include dst == out of boundary
 #define MAX_SRCS MAX_NODES
+#define SUPPORTS_OVERSUBSCRIPTION		0
 
 struct admitted_edge {
     uint16_t src;
@@ -269,7 +270,8 @@ uint8_t get_first_timeslot(struct batch_state *state, uint16_t src, uint16_t dst
     		& (state->dst_endnodes[BITMASK_WORD(dst)] >> BITMASK_SHIFT(dst));
       
     uint64_t bitmap = endnode_bitmap;
-    if (state->oversubscribed) {
+
+    if (SUPPORTS_OVERSUBSCRIPTION && state->oversubscribed) {
         uint64_t rack_bitmap;
         if (dst == OUT_OF_BOUNDARY_NODE_ID)
             rack_bitmap = state->src_rack_bitmaps[get_rack_from_id(src)];
@@ -334,6 +336,12 @@ void reset_admissible_status(struct admissible_status *status, bool oversubscrib
                              uint16_t num_nodes)
 {
     assert(status != NULL);
+
+    if (status->oversubscribed && !SUPPORTS_OVERSUBSCRIPTION) {
+    	printf("ERROR: reset_admissible_status got oversubscribed network, "
+    			"but no compile-time support for oversubscription.\n");
+    	exit(-1);
+    }
 
     status->current_timeslot = NUM_BINS;  // simplifies logic in request_timeslots
     status->oversubscribed = oversubscribed;

@@ -39,8 +39,9 @@
 						</toolChain>
 					</folderInfo>
 					<fileInfo id="cdt.managedbuild.toolchain.gnu.base.1694972424.671817375" name="admissible_structures_sjf.h" rcbsApplicability="disable" resourcePath="admissible_structures_sjf.h" toolsToInvoke=""/>
+					<fileInfo id="cdt.managedbuild.toolchain.gnu.base.1694972424.1598512428" name="admissible_traffic_sjf.h" rcbsApplicability="disable" resourcePath="admissible_traffic_sjf.h" toolsToInvoke=""/>
 					<sourceEntries>
-						<entry excluding="admissible_structures_sjf.h|admissible_traffic_sjf.c" flags="VALUE_WORKSPACE_PATH|RESOLVED" kind="sourcePath" name=""/>
+						<entry excluding="admissible_traffic_sjf.h|admissible_structures_sjf.h|admissible_traffic_sjf.c" flags="VALUE_WORKSPACE_PATH|RESOLVED" kind="sourcePath" name=""/>
 					</sourceEntries>
 				</configuration>
 			</storageModule>
@@ -50,13 +51,16 @@
 	<storageModule moduleId="cdtBuildSystem" version="4.0.0">
 		<project id="graph-algo.null.1396767650" name="graph-algo"/>
 	</storageModule>
-	<storageModule moduleId="scannerConfiguration">
-		<autodiscovery enabled="true" problemReportingEnabled="true" selectedProfileId=""/>
-	</storageModule>
 	<storageModule moduleId="org.eclipse.cdt.core.LanguageSettingsProviders"/>
 	<storageModule moduleId="refreshScope" versionNumber="2">
 		<configuration configurationName="Default">
 			<resource resourceType="PROJECT" workspacePath="/graph-algo"/>
 		</configuration>
+	</storageModule>
+	<storageModule moduleId="scannerConfiguration">
+		<autodiscovery enabled="true" problemReportingEnabled="true" selectedProfileId=""/>
+		<scannerConfigBuildInfo instanceId="cdt.managedbuild.toolchain.gnu.base.1694972424;cdt.managedbuild.toolchain.gnu.base.1694972424.2066090435;cdt.managedbuild.tool.gnu.c.compiler.base.1398706030;cdt.managedbuild.tool.gnu.c.compiler.input.996792770">
+			<autodiscovery enabled="true" problemReportingEnabled="true" selectedProfileId=""/>
+		</scannerConfigBuildInfo>
 	</storageModule>
 </cproject>

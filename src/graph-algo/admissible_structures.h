@@ -26,7 +26,6 @@
 #define BITMASKS_PER_64_BIT 	(64 >> BATCH_SHIFT)
 #define BITMASK_WORD(node)		(node >> (6 - BATCH_SHIFT))
 #define BITMASK_SHIFT(node)		((node << BATCH_SHIFT) & (64 - 1))
-#define NONE_AVAILABLE 251
 #define SMALL_BIN_SIZE (MAX_NODES * MAX_NODES) // TODO: try smaller values
 #define LARGE_BIN_SIZE (MAX_NODES * MAX_NODES) // TODO: try smaller values
 #define NUM_BINS_SHIFT 5
@@ -257,9 +256,11 @@ void init_batch_state(struct batch_state *state, bool oversubscribed,
         state->out_of_boundary_counts[i] = out_of_boundary_capacity;
 }
 
-// Returns the first available timeslot for src and dst, or NONE_AVAILABLE
+// Returns the available timeslot bitmap for src and dst (lsb is closest timeslot)
 static inline
-uint8_t get_first_timeslot(struct batch_state *state, uint16_t src, uint16_t dst) {
+uint64_t get_available_timeslot_bitmap(struct batch_state *state,
+		uint16_t src, uint16_t dst)
+{
     assert(state != NULL);
     assert(src < MAX_SRCS);
     assert(dst < MAX_DSTS);
@@ -269,8 +270,6 @@ uint8_t get_first_timeslot(struct batch_state *state, uint16_t src, uint16_t dst
     		& (state->src_endnodes[BITMASK_WORD(src)] >> BITMASK_SHIFT(src))
     		& (state->dst_endnodes[BITMASK_WORD(dst)] >> BITMASK_SHIFT(dst));
       
-    uint64_t bitmap = endnode_bitmap;
-
     if (SUPPORTS_OVERSUBSCRIPTION && state->oversubscribed) {
         uint64_t rack_bitmap;
         if (dst == OUT_OF_BOUNDARY_NODE_ID)
@@ -279,16 +278,10 @@ uint8_t get_first_timeslot(struct batch_state *state, uint16_t src, uint16_t dst
             rack_bitmap = state->src_rack_bitmaps[get_rack_from_id(src)] &
                 state->dst_rack_bitmaps[get_rack_from_id(dst)];
 
-        bitmap = endnode_bitmap & rack_bitmap;
+        return endnode_bitmap & rack_bitmap;
     }
  
-    if (bitmap == 0ULL)
-        return NONE_AVAILABLE;
-
-    uint64_t timeslot;
-    asm("bsfq %1,%0" : "=r"(timeslot) : "r"(bitmap));
-
-    return (uint8_t) timeslot;
+    return endnode_bitmap;
 }
 
 // Sets a timeslot as occupied for src and dst

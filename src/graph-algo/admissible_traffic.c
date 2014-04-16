@@ -73,13 +73,17 @@ static inline int try_allocation(uint16_t src, uint16_t dst,
 	uint32_t index = get_status_index(src, dst);
 	__builtin_prefetch(&status->flows[index].backlog, 1, 0);
 
-	uint8_t batch_timeslot = get_first_timeslot(&core->batch_state, src, dst);
+	uint64_t timeslot_bitmap = get_available_timeslot_bitmap(
+			&core->batch_state, src, dst);
 
-    if (batch_timeslot == NONE_AVAILABLE) {
+    if (timeslot_bitmap == 0ULL) {
     	adm_algo_log_no_available_timeslots_for_bin_entry(&core->stat, src, dst);
     	/* caller should handle allocation of this flow */
     	return 1;
     }
+
+	uint64_t batch_timeslot;
+	asm("bsfq %1,%0" : "=r"(batch_timeslot) : "r"(timeslot_bitmap));
 
 	// We can allocate this edge now
 	set_timeslot_occupied(&core->batch_state, src, dst, batch_timeslot);

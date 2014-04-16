@@ -107,6 +107,7 @@ static void try_allocation_bin(struct bin *in_bin, struct admission_core_state *
         assert(edge != NULL);
         uint16_t src = edge->src;
     	uint16_t dst = edge->dst;
+        dequeue_bin(in_bin);
 
         rc = try_allocation(src, dst, core, status);
         if (rc == 1) {
@@ -114,7 +115,6 @@ static void try_allocation_bin(struct bin *in_bin, struct admission_core_state *
 			enqueue_bin(bin_out, src, dst);
         }
 
-        dequeue_bin(in_bin);
     }
 }
 
@@ -144,7 +144,7 @@ static inline void process_one_new_request(uint16_t src, uint16_t dst,
 
 // Sets the last send time for new requests based on the contents of status
 // and sorts them
-static void process_new_requests(struct admissible_status *status,
+static inline void process_new_requests(struct admissible_status *status,
                           struct admission_core_state *core,
                           uint16_t current_bin)
 {

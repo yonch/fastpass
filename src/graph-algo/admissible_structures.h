@@ -29,8 +29,8 @@
 #define NONE_AVAILABLE 251
 #define SMALL_BIN_SIZE (MAX_NODES * MAX_NODES) // TODO: try smaller values
 #define LARGE_BIN_SIZE (MAX_NODES * MAX_NODES) // TODO: try smaller values
-#define NUM_BINS_SHIFT 8
-#define NUM_BINS 256 // 2^NUM_BINS_SHIFT
+#define NUM_BINS_SHIFT 5
+#define NUM_BINS 32 // 2^NUM_BINS_SHIFT
 #define NUM_SRC_DST_PAIRS (MAX_NODES * (MAX_NODES))  // include dst == out of boundary
 #define MAX_DSTS MAX_NODES  // include dst == out of boundary
 #define MAX_SRCS MAX_NODES

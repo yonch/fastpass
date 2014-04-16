@@ -23,9 +23,17 @@
 
 #define BATCH_SIZE 16  // must be consistent with bitmaps in batch_state
 #define BATCH_SHIFT 4  // 2^BATCH_SHIFT = BATCH_SIZE
+/* packing of bitmasks into 64 bit words */
+#if 0
 #define BITMASKS_PER_64_BIT 	(64 >> BATCH_SHIFT)
 #define BITMASK_WORD(node)		(node >> (6 - BATCH_SHIFT))
 #define BITMASK_SHIFT(node)		((node << BATCH_SHIFT) & (64 - 1))
+#else
+#define BITMASKS_PER_64_BIT 	1
+#define BITMASK_WORD(node)		node
+#define BITMASK_SHIFT(node)		0
+#endif
+
 #define SMALL_BIN_SIZE (MAX_NODES * MAX_NODES) // TODO: try smaller values
 #define LARGE_BIN_SIZE (MAX_NODES * MAX_NODES) // TODO: try smaller values
 #define NUM_BINS_SHIFT 5

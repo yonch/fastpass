@@ -16,8 +16,8 @@
 
 #define TEST_NUM_BINS				(4*1000*1000)
 #define TEST_SEED					0xDEADBEEFDEADBEEFULL
-#define TEST_RING_READS_PER_BIN		1
-#define TEST_DEMANDS_PER_RING_READ	300
+#define TEST_RING_READS_PER_BIN		10
+#define TEST_DEMANDS_PER_RING_READ	30
 
 /* MMIX by Knuth, see LCG on wikipedia */
 #define RAND_A					6364136223846793005
@@ -28,12 +28,19 @@
 void main() {
     uint64_t src_endnodes [MAX_NODES / BITMASKS_PER_64_BIT];
     uint64_t dst_endnodes [MAX_NODES / BITMASKS_PER_64_BIT];
-    uint64_t rand_x = TEST_SEED;
     uint64_t batch_total = 0;
     uint64_t allowed_mask = (1ULL << BATCH_SIZE) - 1;
+    uint64_t rand_x[TEST_DEMANDS_PER_RING_READ];
     uint32_t ring[TEST_DEMANDS_PER_RING_READ];
 
     int i,j,k;
+
+    /* initialize rand_x array */
+    uint64_t tmp_rand = TEST_SEED;
+    for (i = 0; i < TEST_DEMANDS_PER_RING_READ; i++) {
+    	tmp_rand = (tmp_rand * RAND_A + RAND_C) ^ 0xBAB124BBC847521FULL;
+    	rand_x[i] = tmp_rand;
+    }
 
     for(i = 0; i < TEST_NUM_BINS; i++) {
     	/* re-initialize masks */
@@ -45,8 +52,8 @@ void main() {
     	for (j = 0; j < TEST_RING_READS_PER_BIN; j++) {
     		/* generate numbers as if read from ring */
     		for (k = 0; k < TEST_DEMANDS_PER_RING_READ; k++) {
-    			ring[k] = rand_x >> 32;
-        		rand_x = rand_x * RAND_A + RAND_C;
+    			ring[k] = rand_x[k] >> 32;
+        		rand_x[k] = rand_x[k] * RAND_A + RAND_C;
     		}
 
     		/* go through numbers read from the ring */
@@ -77,5 +84,5 @@ void main() {
     	/* go through pseudo-random demands */
     }
 
-    printf("batch_total %d\n", batch_total);
+    printf("batch_total %lu\n", batch_total);
 }

@@ -62,22 +62,24 @@ void main() {
         		uint16_t src = ring[k] & (MAX_NODES - 1);
         		uint16_t dst = (ring[k] >> 16) & (MAX_NODES - 1);
 
-        		uint64_t timeslot_bitmap =
+        	    uint64_t src_mask = src_endnodes[BITMASK_WORD(src)];
+        	    uint64_t dst_mask = dst_endnodes[BITMASK_WORD(dst)];
+
+        	    uint64_t timeslot_bitmap =
         				allowed_mask
-        				& (src_endnodes[BITMASK_WORD(src)] >> BITMASK_SHIFT(src))
-    					& (dst_endnodes[BITMASK_WORD(dst)] >> BITMASK_SHIFT(dst));
+        				& (src_mask >> BITMASK_SHIFT(src))
+    					& (dst_mask >> BITMASK_SHIFT(dst));
 
     //    		printf("src %d dst %d bitmap %lX\n", src, dst, timeslot_bitmap);
         	    if (timeslot_bitmap == 0ULL)
         	    	continue;
 
-        		uint64_t batch_timeslot;
-        		asm("bsfq %1,%0" : "=r"(batch_timeslot) : "r"(timeslot_bitmap));
-
-        	    src_endnodes[BITMASK_WORD(src)] &=
-        	    		~(0x1ULL << (batch_timeslot + BITMASK_SHIFT(src)));
-        	    dst_endnodes[BITMASK_WORD(dst)] &=
-        	            ~(0x1ULL << (batch_timeslot + BITMASK_SHIFT(dst)));
+				uint64_t batch_timeslot;
+				asm("bsfq %1,%0" : "=r"(batch_timeslot) : "r"(timeslot_bitmap));
+				asm("btr %1,%0" : "+r" (src_mask) : "Ir" (batch_timeslot + BITMASK_SHIFT(src)));
+				asm("btr %1,%0" : "+r" (dst_mask) : "Ir" (batch_timeslot + BITMASK_SHIFT(dst)));
+				src_endnodes[BITMASK_WORD(src)] = src_mask;
+				dst_endnodes[BITMASK_WORD(dst)] = dst_mask;
 
         	    batch_total++;
         	}

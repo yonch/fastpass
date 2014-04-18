@@ -1,20 +1,15 @@
 # 
-# Created on: December 26, 2013
+# Created on: March 16, 2014
 # Author: aousterh
 #
-# This script generates a graph of network utilization vs. latency
-# for the admissible traffic algorithm for several different
-# numbers of nodes.
+# This script generates a graph of num admitted vs. network
+# utilization for several different numbers of nodes.
 #
 # Before running this script, generate the appropriate csv file:
-# ./benchmark_graph_algo 0 > output.csv
-# OR
-# ./benchmark_sjf > output.csv
+# ./benchmark_graph_algo 2 > output.csv
 #
 # This script can be run using:
-# R < ./graph_path_selection_vs_utilization.R type --save
-# type 0 (default) is for round robin
-# type 1 is for shortest remaining job first
+# R < ./graph_admitted_vs_utilization.R --save
 
 ## Based on: http://www.cookbook-r.com/Manipulating_data/Summarizing_data/
 ## Summarizes data.
@@ -70,36 +65,29 @@ summarySE <- function(data=NULL, measurevar, groupvars=NULL, na.rm=FALSE,
 # use the ggplot2 library
 library(ggplot2)
 
-# read in arguments
-args <- commandArgs()
-type = 0 # round-robin
-if (length(args) > 2) {
-   type <- as.integer(args[2])
-}
-
 data <- read.csv("output.csv", sep=",")
-attach(data)
 
 # call device driver
-if (type == 0) {
-   pdf(file="scalability_time_allocation_rr.pdf", width=6.6, height=3)
-} else {
-   pdf(file="scalability_time_allocation_sjf.pdf", width=6.6, height=3)
-}
+pdf(file="scalability_num_admitted.pdf", width=6.6, height=3)
 
 theme_set(theme_bw(base_size=12))
 
-new_data = data[data$nodes > 128,]
+MACHINES_PER_RACK = 32
+data$nodes = data$num_racks * MACHINES_PER_RACK
 
-summary <- summarySE(new_data, measurevar="time", groupvars=c("observed_utilization", "nodes"))
+summary <- summarySE(data, measurevar="num_admitted", groupvars=c("target_utilization", "nodes"))
 
-ggplot(summary, aes(x=observed_utilization, y=time,
+ggplot(summary, aes(x=target_utilization, y=num_admitted,
              color=as.factor(nodes), shape=as.factor(nodes))) +
+             geom_abline(intercept = 0, slope = 1024, linetype = 2) +
+             geom_abline(intercept = 0, slope = 512, linetype = 2) +
+             geom_abline(intercept = 0, slope = 256, linetype = 2) +
+             geom_abline(intercept = 0, slope = 128, linetype = 2) +
              geom_errorbar(aes(ymin=p_5, ymax=p_95), width=0.01, colour='grey') +
-             geom_point() + geom_line() +
-             scale_color_discrete(name="Nodes", guide = guide_legend(reverse = TRUE)) +
+             geom_line() + geom_point() +
+             scale_color_manual(name="Nodes", guide = guide_legend(reverse = TRUE),
+                                values=c("#A1DAB4", "#41B6C4", "#2C7FB8", "#253494")) +
              scale_shape_manual(name="Nodes", guide = guide_legend(reverse = TRUE), values=c(15, 16, 17, 18)) +
              labs(x = "Network Utilization (%)",
-                  y = "Latency (microseconds)")
-
-detach(data)
+                  y = "Number of Timeslots Filled") +
+             scale_y_continuous(breaks=c(128, 256, 512, 1024))

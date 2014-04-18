@@ -8,7 +8,8 @@
 #ifndef GRAPH_ALGO_ATOMIC_H_
 #define GRAPH_ALGO_ATOMIC_H_
 
-#ifdef NO_DPDK
+#if defined(NO_DPDK) || defined(NO_ATOMIC)
+#warning "compiled without atomic operations in atomic.h"
 typedef uint32_t atomic32_t;
 #define atomic32_init(xptr)				(*(xptr) = 0)
 #define atomic32_clear(xptr)			(*(xptr) = 0)
@@ -17,6 +18,7 @@ typedef uint32_t atomic32_t;
 #define atomic32_sub_return(xptr,sub)	(*(xptr) -= (sub))
 #define atomic32_set(xptr,val)			(*(xptr) = (val))
 #else
+
 #include <rte_atomic.h>
 
 typedef rte_atomic32_t atomic32_t;

@@ -118,6 +118,53 @@ static void send_gratuitous_arp(uint16_t port, uint32_t ip) {
 			rte_lcore_id(), ip, port);
 }
 
+//static bool is_valid_arp_request(struct rte_mbuf *m)
+//{
+//	struct ether_hdr *eth_hdr;
+//	struct arp_ipv4_hdr *arp_hdr;
+//
+//	/* Check valid length */
+//	if (rte_pktmbuf_data_len(m) < sizeof(struct eth_hdr)
+//								+ sizeof(struct arp_ipv4_hdr))
+//		return false;
+//
+//	eth_hdr = rte_pktmbuf_mtod(m, struct ether_hdr *);
+//
+//	/* Check ether type */
+//	if (eth_hdr->ether_type != rte_cpu_to_be_16(ETHER_TYPE_ARP))
+//		return false;
+//
+//	arp_hdr = (struct arp_ipv4_hdr *)(rte_pktmbuf_mtod(m, unsigned char *)
+//			     + sizeof(struct ether_hdr));
+//
+//	if (arp_hdr->htype != rte_cpu_to_be_16(ARP_HTYPE_ETHERNET))
+//		return false;
+//	if (arp_hdr->ptype != rte_cpu_to_be_16(ETHER_TYPE_IPv4))
+//		return false;
+//	if (arp_hdr->hlen != ETHER_ADDR_LEN)
+//		return false;
+//	if (arp_hdr->plen != 4)
+//		return false;
+//
+//	return true;
+//}
+
+///* return true if the MAC packet is a request for given IP */
+//static bool is_arp_request_for_addr(struct rte_mbuf *m, uint32_t ip)
+//{
+//	struct ether_hdr *eth_hdr;
+//	struct arp_ipv4_hdr *arp_hdr;
+//
+//	eth_hdr = rte_pktmbuf_mtod(m, struct ether_hdr *);
+//	arp_hdr = (struct arp_ipv4_hdr *)(rte_pktmbuf_mtod(m, unsigned char *)
+//			     + sizeof(struct ether_hdr));
+//
+//	if (arp_hdr->oper != rte_cpu_to_be_16(ARP_OP_REQUEST))
+//		return false;
+//
+//	if
+//}
+
 
 static void print_arp(struct rte_mbuf *m, uint16_t portid) {
 	struct arp_ipv4_hdr *arp_hdr;

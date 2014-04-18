@@ -8,7 +8,7 @@
 
 int main()
 {
-	int i, batch_head;
+	int i;
 
 	assert(bin_index_from_timeslot(BASE, BASE) == NUM_BINS);
 	assert(bin_index_from_timeslot(BASE+1, BASE) == NUM_BINS+1);
@@ -19,10 +19,14 @@ int main()
 //		printf("i=%d timeslot=%d bin_index=%d\n", i, BASE-i, bin);
 //	}
 
+	assert((BASE & (BATCH_SIZE - 1)) == 0);
 
 	for (i = 0; i < BASE; i++) {
+		/* start at the batch timeslot where i is in its own bin */
 		uint16_t bin = NUM_BINS - BATCH_SIZE + (i % BATCH_SIZE);
-		for (batch_head = 64 + 64 * (i/64); batch_head < BASE; batch_head+= 64) {
+		uint32_t batch_head = BATCH_SIZE + (i & ~(BATCH_SIZE - 1));
+
+		for (; batch_head < BASE; batch_head+= BATCH_SIZE) {
 			if (bin <= 2 * BATCH_SIZE)
 				bin = bin / 2;
 			else

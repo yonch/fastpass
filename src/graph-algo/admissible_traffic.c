@@ -24,7 +24,7 @@
 #define RING_DEQUEUE_BURST_SIZE		256
 
 bool add_backlog_no_enqueue(struct admissible_status *status, uint16_t src,
-        uint16_t dst, uint16_t backlog_increase, void **out_edge)
+        uint16_t dst, uint32_t backlog_increase, void **out_edge)
 {
 	int32_t backlog;
     assert(status != NULL);
@@ -45,7 +45,7 @@ bool add_backlog_no_enqueue(struct admissible_status *status, uint16_t src,
 
 // Request num_slots additional timeslots from src to dst
 void add_backlog(struct admissible_status *status, uint16_t src,
-                       uint16_t dst, uint16_t backlog_increase) {
+                       uint16_t dst, uint32_t backlog_increase) {
 	void *edge;
 
 	if (add_backlog_no_enqueue(status, src, dst, backlog_increase, &edge) == false) {
@@ -62,7 +62,7 @@ void add_backlog(struct admissible_status *status, uint16_t src,
  * Returns 0 if the flow will be handled internally,
  * 		   1 if more backlog remains and should be handled by the caller
  */
-static int try_allocation(uint16_t src, uint16_t dst,
+static inline int try_allocation(uint16_t src, uint16_t dst,
 		struct admission_core_state *core,
 		struct admissible_status *status)
 {
@@ -70,19 +70,26 @@ static int try_allocation(uint16_t src, uint16_t dst,
     assert(core != NULL);
     assert(status != NULL);
 
-    uint8_t batch_timeslot = get_first_timeslot(&core->batch_state, src, dst);
+	uint32_t index = get_status_index(src, dst);
+	__builtin_prefetch(&status->flows[index].backlog, 1, 1);
+	__builtin_prefetch(&status->last_alloc_tslot[index], 1, 1);
 
-    if (batch_timeslot == NONE_AVAILABLE) {
+	uint64_t timeslot_bitmap = get_available_timeslot_bitmap(
+			&core->batch_state, src, dst);
+
+    if (timeslot_bitmap == 0ULL) {
     	adm_algo_log_no_available_timeslots_for_bin_entry(&core->stat, src, dst);
     	/* caller should handle allocation of this flow */
     	return 1;
     }
 
+	uint64_t batch_timeslot;
+	asm("bsfq %1,%0" : "=r"(batch_timeslot) : "r"(timeslot_bitmap));
+
 	// We can allocate this edge now
 	set_timeslot_occupied(&core->batch_state, src, dst, batch_timeslot);
 
 	insert_admitted_edge(core->admitted[batch_timeslot], src, dst);
-	uint32_t index = get_status_index(src, dst);
 	status->last_alloc_tslot[index] = status->current_timeslot + batch_timeslot;
 
 	backlog = atomic32_sub_return(&status->flows[index].backlog, 1);
@@ -100,19 +107,24 @@ static void try_allocation_bin(struct bin *in_bin, struct admission_core_state *
                     struct bin *bin_out, struct admissible_status *status)
 {
 	int rc;
-    while (!is_empty_bin(in_bin)) {
-        struct backlog_edge *edge = peek_head_bin(in_bin);
-        assert(edge != NULL);
-        uint16_t src = edge->src;
-    	uint16_t dst = edge->dst;
+    uint16_t i;
+    uint16_t head = in_bin->head;
+    uint16_t tail = in_bin->tail;
+
+//    __builtin_prefetch(&core->batch_state.src_endnodes[BITMASK_WORD(in_bin->edges[head].src)], 0, 3);
+//    __builtin_prefetch(&core->batch_state.dst_endnodes[BITMASK_WORD(in_bin->edges[head].dst)], 0, 3);
+
+    for (i = head; i < tail; i++) {
+//        __builtin_prefetch(&core->batch_state.src_endnodes[BITMASK_WORD(in_bin->edges[i+1].src)], 0, 3);
+//        __builtin_prefetch(&core->batch_state.dst_endnodes[BITMASK_WORD(in_bin->edges[i+1].dst)], 0, 3);
+		uint16_t src = in_bin->edges[i].src;
+		uint16_t dst = in_bin->edges[i].dst;
 
         rc = try_allocation(src, dst, core, status);
         if (rc == 1) {
 			// We cannot allocate this edge now - copy to queue_out
 			enqueue_bin(bin_out, src, dst);
         }
-
-        dequeue_bin(in_bin);
     }
 }
 
@@ -142,7 +154,7 @@ static inline void process_one_new_request(uint16_t src, uint16_t dst,
 
 // Sets the last send time for new requests based on the contents of status
 // and sorts them
-static void process_new_requests(struct admissible_status *status,
+static inline void process_new_requests(struct admissible_status *status,
                           struct admission_core_state *core,
                           uint16_t current_bin)
 {
@@ -164,13 +176,14 @@ process_q_urgent:
     	uint64_t edge = edges[i];
         if (unlikely(edge == URGENT_Q_HEAD_TOKEN)) {
         	/* got token! */
-        	core->is_head = 1;
+        	core->is_head = 1; /* TODO: what about the entries i+1..n-1 ?? */
         	goto process_head;
         }
 
         process_one_new_request(EDGE_SRC(edge), EDGE_DST(edge), EDGE_BIN(edge),
         		core, status, current_bin);
     }
+//    adm_log_processed_q_urgent(&core->stat, current_bin, n);
     if (n > 0)
     	goto process_q_urgent;
 
@@ -192,8 +205,8 @@ process_head:
         
         process_one_new_request(src, dst, bin_index, core, status, current_bin);
     }
-	if (n > 0)
-		goto process_head;
+//	if (n > 0)
+//		goto process_head;
 }
 
 // Determine admissible traffic for one timeslot from queue_in
@@ -228,9 +241,10 @@ void get_admissible_traffic(struct admission_core_state *core,
 
     	if (likely(bin < NUM_BINS)) {
 			while (fp_ring_dequeue(queue_in, (void **)&bin_in) != 0) {
+				adm_log_waiting_for_q_bin_in(&core->stat, bin);
 				process_new_requests(status, core, bin);
-				status->stat.wait_for_q_bin_in++;
 			}
+			adm_log_dequeued_bin_in(&core->stat, bin, bin_in->tail - bin_in->head);
 			try_allocation_bin(bin_in, core, bin_out, status);
     	} else {
     	    /* wait for start time */
@@ -238,14 +252,20 @@ void get_admissible_traffic(struct admission_core_state *core,
     	    	uint64_t start_timeslot = first_timeslot + (bin - NUM_BINS);
     	    	uint64_t now_timeslot;
 
-        	    do {
-        	    	/* process requests */
-        	    	process_new_requests(status, core, bin);
-        	    	/* at least until the next core had finished allocating */
-        	    	/*  and we reach the start time */
-        	    	now_timeslot = (fp_get_time_ns() * tslot_mul) >> tslot_shift;
-        	    	status->stat.pacing_wait++;
-        	    } while (!core->is_head || (now_timeslot < start_timeslot));
+process_more_requests:
+				/* process requests */
+				process_new_requests(status, core, bin);
+				/* at least until the next core had finished allocating */
+				/*  and we reach the start time */
+				now_timeslot = (fp_get_time_ns() * tslot_mul) >> tslot_shift;
+
+        	    if (unlikely(now_timeslot < start_timeslot)) {
+        	    	adm_log_pacing_wait(&core->stat, bin);
+        	    	goto process_more_requests;
+        	    } else if (unlikely(!core->is_head)) {
+        	    	adm_log_waiting_for_head(&core->stat);
+        	    	goto process_more_requests;
+        	    }
     	    }
 
     	    /* enqueue the allocated traffic for this timeslot */
@@ -255,6 +275,7 @@ void get_admissible_traffic(struct admission_core_state *core,
 
     	    /* disallow further allocations to that timeslot */
     	    core->batch_state.allowed_mask <<= 1;
+    	    core->batch_state.allowed_mask &= (1ULL << BATCH_SIZE) - 1;
     	    /* will process flows that this batch had previously allocated to timeslot */
     	    bin_in = core->new_request_bins[bin];
     	}

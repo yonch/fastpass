@@ -11,6 +11,7 @@ SRCS-y := main.c \
           admission_core.c \
           path_sel_core.c \
           log_core.c \
+          stress_test_core.c \
           ../protocol/fpproto.c \
           ../graph-algo/admissible_traffic.c \
           ../graph-algo/path_selection.c \
@@ -22,6 +23,7 @@ CFLAGS += -DFASTPASS_CONTROLLER
 #CFLAGS += -DCONFIG_IP_FASTPASS_DEBUG
 CFLAGS += -DLOG_TO_STDOUT
 CFLAGS += -DPRINT_CONN_LOG_TO_STDOUT 
+#CFLAGS += -DNO_ATOMIC
 CFLAGS += -I${PWD} 
 #CFLAGS += -g -O1
 CFLAGS += -g 

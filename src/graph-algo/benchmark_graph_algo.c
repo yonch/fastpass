@@ -360,6 +360,10 @@ int main(int argc, char **argv)
                 uint64_t end_time = current_time();
 
                 double utilzn = ((double) num_admitted) / ((duration - warm_up_duration) * num_nodes);
+                double time_per_experiment = (end_time - start_time)/ (PROCESSOR_SPEED * 1000 * num_batches * BATCH_SIZE);
+				printf("%f, %d, %f, %f, %f\n", fraction, num_nodes, time_per_experiment,
+					   utilzn, time_per_experiment / utilzn);
+
 
                 // Print stats - percent of network capacity utilized and computation time
                 // per admitted timeslot (in microseconds) for different numbers of nodes
@@ -367,8 +371,8 @@ int main(int argc, char **argv)
                 for (b = 0; b < num_batches; b++) {
                     double time_per_experiment = per_batch_times[b] / (PROCESSOR_SPEED * 1000 * BATCH_SIZE);
 
-                    printf("%f, %d, %f, %f, %f\n", fraction, num_nodes, time_per_experiment,
-                           utilzn, time_per_experiment / utilzn);
+//                    printf("%f, %d, %f, %f, %f\n", fraction, num_nodes, time_per_experiment,
+//                           utilzn, time_per_experiment / utilzn);
                 }
             }
             else if (benchmark_type == PATH_SELECTION_OVERSUBSCRIPTION ||

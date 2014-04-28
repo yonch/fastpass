@@ -29,10 +29,17 @@ struct ga_edgelist {
 } __attribute__((align(64)));
 
 /**
+ * An edgelist partitioned by source
+ */
+struct ga_src_partd_edgelist {
+	struct ga_edgelist src[GA_PARTITION_N_NODES];
+};
+
+/**
  * A container for all edgelists in the graph. See ga_edgelist for assumptions.
  */
 struct ga_partd_edgelist {
-	struct ga_edgelist elist[GA_N_PARTITIONS][GA_N_PARTITIONS];
+	struct ga_src_partd_edgelist dst[GA_N_PARTITIONS];
 };
 
 /**
@@ -49,12 +56,22 @@ void inline ga_edgelist_add(struct ga_edgelist *edgelist, uint16_t src,
 /**
  * Adds edge to the paritioned edgelist 'pedgelist'
  */
-void inline ga_partd_edgelist_add(struct ga_partd_edgelist *pel,
+void inline ga_src_partd_edgelist_add(struct ga_src_partd_edgelist *pel,
 		uint16_t src, uint16_t dst)
 {
 	uint16_t src_partition = src / GA_PARTITION_N_NODES;
+	ga_edgelist_add(&pel->src[src_partition], src, dst);
+}
+
+
+/**
+ * Adds edge to the paritioned edgelist 'pedgelist'
+ */
+void inline ga_partd_edgelist_add(struct ga_partd_edgelist *pel,
+		uint16_t src, uint16_t dst)
+{
 	uint16_t dst_partition = dst / GA_PARTITION_N_NODES;
-	ga_edgelist_add(&pel->elist[src_partition][dst_partition], src, dst);
+	ga_src_partd_edgelist_add(&pel->dst[dst_partition], src, dst);
 }
 
 /**
@@ -65,7 +82,7 @@ void inline ga_partd_edgelist_reset(struct ga_partd_edgelist *pel,
 {
 	uint32_t i;
 	for(i = 0; i < GA_N_PARTITIONS; i++)
-		pel->elist[src_partition][i].n = 0;
+		pel->dst[i].src[src_partition].n = 0;
 }
 
 /**
@@ -76,13 +93,13 @@ void inline ga_partd_edgelist_reset(struct ga_partd_edgelist *pel,
  * @param dest_adj: the adjacency structure where edges to the destination will
  *    be added
  */
-void inline ga_msgs_to_adj(struct ga_partd_edgelist *pel,
+void inline ga_edges_to_adj_by_dst(struct ga_partd_edgelist *pel,
 		uint16_t dst_partition, struct ga_adj *dest_adj)
 {
 	uint32_t i;
 	for(i = 0; i < GA_N_PARTITIONS; i++) {
-		struct ga_edgelist *edgelist = &pel->elist[i][dst_partition];
-		ga_edges_to_adj(&edgelist->edge, edgelist->n, dest_adj);
+		struct ga_edgelist *edgelist = &pel->dst[dst_partition].src[i];
+		ga_edges_to_adj(&edgelist->edge[0], edgelist->n, dest_adj);
 	}
 }
 

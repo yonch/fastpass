@@ -10,10 +10,12 @@
 
 #include "grant-accept.h"
 
+#define GA_MAX_PARTITION_EDGES		GA_PARTITION_N_NODES
+
 /**
  * A container for edges from some paritition x to some partition y.
  *
- * Assumes each partition has at most GA_PARRITION_N_NODES edges to
+ * Assumes each partition has at most GA_MAX_PARTITION_EDGES edges to
  *  another partition.
  *
  * @param n: number of edges
@@ -23,7 +25,7 @@
  */
 struct ga_edgelist {
 	uint32_t n;
-	struct ga_edge edge[GA_PARTITION_N_NODES];
+	struct ga_edge edge[GA_MAX_PARTITION_EDGES];
 } __attribute__((align(64)));
 
 /**

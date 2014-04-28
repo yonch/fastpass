@@ -211,11 +211,9 @@ int exec_log_core(void *void_cmd_p)
 
 			/* get backlog */
 			conn_log.backlog = 0;
-			for (j = 0; j < MAX_NODES; j++) {
-				uint32_t index = get_status_index(i, j);
+			for (j = 0; j < MAX_NODES; j++)
 				conn_log.backlog +=
-						atomic32_read(&g_admissible_status.flows[index].backlog);
-			}
+						backlog_get(&g_admissible_status.backlog, i, j);
 
 			if (fwrite(&conn_log, sizeof(conn_log), 1, fp) != 1)
 				LOGGING_ERR("couldn't write conn info of node %d to file\n", i);

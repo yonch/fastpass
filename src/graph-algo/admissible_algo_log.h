@@ -10,7 +10,7 @@
 
 #include "../protocol/platform/generic.h"
 
-#define		MAINTAIN_ADM_LOG_COUNTERS	0
+#define		MAINTAIN_ADM_LOG_COUNTERS	1
 
 #define		BACKLOG_HISTOGRAM_NUM_BINS		16
 #define		BACKLOG_HISTOGRAM_SHIFT			2

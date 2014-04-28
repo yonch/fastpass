@@ -72,8 +72,8 @@ static void map_racks_to_nodes(struct admitted_traffic *admitted,
     uint16_t i;
     for (i = 0; i < admitted->size; i++) {
         edge = &admitted->edges[i];
-        uint16_t src_rack = get_rack_from_id(edge->src);
-        uint16_t dst_rack = get_rack_from_id(edge->dst);
+        uint16_t src_rack = fp_rack_from_node_id(edge->src);
+        uint16_t dst_rack = fp_rack_from_node_id(edge->dst);
 
         uint32_t rack_pair_index = get_rack_pair_index(src_rack, dst_rack);
         struct racks_to_nodes *rack_pair = &map->mappings[rack_pair_index];
@@ -105,8 +105,8 @@ static void construct_graph(struct admitted_traffic *admitted,
     struct admitted_edge *edge;
     for (i = 0; i < admitted->size; i++) {
         edge = &admitted->edges[i];
-        uint16_t src_rack = get_rack_from_id(edge->src);
-        uint16_t dst_rack = get_rack_from_id(edge->dst);
+        uint16_t src_rack = fp_rack_from_node_id(edge->src);
+        uint16_t dst_rack = fp_rack_from_node_id(edge->dst);
 
         // Note: graph.h assumes that sources and destinations
         // use different numbers, so we must map carefully
@@ -229,8 +229,8 @@ bool paths_are_valid(struct admitted_traffic *admitted, uint8_t num_racks) {
     for (i = 0; i < admitted->size; i++) {
         struct admitted_edge *edge = &admitted->edges[i];
         uint8_t path = (edge->dst & ~PATH_MASK) >> PATH_SHIFT;
-        uint16_t src_rack = get_rack_from_id(edge->src);
-        uint16_t dst_rack = get_rack_from_id(edge->dst & PATH_MASK);
+        uint16_t src_rack = fp_rack_from_node_id(edge->src);
+        uint16_t dst_rack = fp_rack_from_node_id(edge->dst & PATH_MASK);
         src_rack_path_counts[src_rack * NUM_PATHS + path]++;
         dst_rack_path_counts[dst_rack * NUM_PATHS + path]++;
     }

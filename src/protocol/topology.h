@@ -43,4 +43,10 @@ static inline u16 fp_alloc_path(u16 alloc) {
 	return alloc >> 14;
 }
 
+// Returns the ID of the rack corresponding to id
+static inline
+uint16_t fp_rack_from_node_id(uint16_t id) {
+    return id >> TOR_SHIFT;
+}
+
 #endif /* FASTPASS_TOPOLOGY_H_ */

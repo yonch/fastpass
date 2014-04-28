@@ -14,45 +14,23 @@
 
 #define MAX(a,b) (((a) > (b)) ? (a) : (b))
 
-#define MAKE_EDGE(bin,src,dst) \
-	((void*)(((uint64_t)bin << 32) | ((uint32_t)src << 16) | dst))
-
 #define EDGE_BIN(edge)		((uint16_t)(edge >> 32))
 #define EDGE_SRC(edge)		((uint16_t)(edge >> 16))
 #define EDGE_DST(edge)		((uint16_t)(edge	  ))
 
 #define RING_DEQUEUE_BURST_SIZE		256
 
-bool add_backlog_no_enqueue(struct admissible_status *status, uint16_t src,
-        uint16_t dst, uint32_t backlog_increase, void **out_edge)
-{
-	int32_t backlog;
-    assert(status != NULL);
-
-    // Get full quantity from 16-bit LSB
-    uint32_t index = get_status_index(src, dst);
-
-    backlog = atomic32_add_return(&status->flows[index].backlog, backlog_increase);
-	if (backlog == backlog_increase) {
-		adm_log_increased_backlog_to_queue(&status->stat, backlog_increase, backlog);
-		*out_edge = MAKE_EDGE(0,src,dst);
-		return true;
-	}
-
-	adm_log_increased_backlog_atomically(&status->stat, backlog_increase, backlog);
-	return false;
-}
-
 // Request num_slots additional timeslots from src to dst
 void add_backlog(struct admissible_status *status, uint16_t src,
-                       uint16_t dst, uint32_t backlog_increase) {
+                       uint16_t dst, uint32_t amount) {
 	void *edge;
 
-	if (add_backlog_no_enqueue(status, src, dst, backlog_increase, &edge) == false) {
+	if (backlog_increase(&status->backlog, src, dst, amount,
+			&status->stat) == false)
 		return; /* no need to enqueue */
-	}
 
 	/* need to enqueue */
+	edge = MAKE_EDGE(0,src,dst);
 	while (fp_ring_enqueue(status->q_head, edge) == -ENOBUFS)
 		status->stat.wait_for_space_in_q_head++;
 }
@@ -71,7 +49,6 @@ static inline int try_allocation(uint16_t src, uint16_t dst,
     assert(status != NULL);
 
 	uint32_t index = get_status_index(src, dst);
-	__builtin_prefetch(&status->flows[index].backlog, 1, 1);
 	__builtin_prefetch(&status->last_alloc_tslot[index], 1, 1);
 
 	uint64_t timeslot_bitmap = get_available_timeslot_bitmap(
@@ -92,7 +69,7 @@ static inline int try_allocation(uint16_t src, uint16_t dst,
 	insert_admitted_edge(core->admitted[batch_timeslot], src, dst);
 	status->last_alloc_tslot[index] = status->current_timeslot + batch_timeslot;
 
-	backlog = atomic32_sub_return(&status->flows[index].backlog, 1);
+	backlog = backlog_decrease(&status->backlog, src, dst);
 	if (backlog != 0) {
     	adm_log_allocated_backlog_remaining(&core->stat, src, dst, backlog);
 		enqueue_bin(core->new_request_bins[NUM_BINS + batch_timeslot], src, dst);
@@ -326,6 +303,6 @@ void reset_sender(struct admissible_status *status, uint16_t src) {
     // Reset pending demands
     uint16_t dst;
     for (dst = 0; dst < MAX_NODES; dst++) {
-        reset_flow(status, src, dst);
+        backlog_reset_pair(&status->backlog, src, dst);
     }
 }

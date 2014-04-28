@@ -14,12 +14,12 @@
 #include <stdio.h>
 #include <stdlib.h>
 
-#include "atomic.h"
 #include "fp_ring.h"
 #include "platform.h"
-#include "admissible_algo_log.h"
 
 #include "../protocol/topology.h"
+
+#include "backlog.h"
 
 #define BATCH_SIZE 16  // must be consistent with bitmaps in batch_state
 #define BATCH_SHIFT 4  // 2^BATCH_SHIFT = BATCH_SIZE
@@ -93,11 +93,6 @@ struct admission_core_state {
     struct admission_core_statistics stat;
 };
 
-// Demand/backlog info for a given src/dst pair
-struct flow_status {
-    atomic32_t backlog;
-};
-
 // Tracks status for admissible traffic (last send time and demand for all flows, etc.)
 // over the lifetime of a controller
 struct admissible_status {
@@ -107,7 +102,7 @@ struct admissible_status {
     uint16_t inter_rack_capacity;  // Only valid if oversubscribed is true
     uint16_t num_nodes;
     uint64_t last_alloc_tslot[NUM_SRC_DST_PAIRS];
-    struct flow_status flows[NUM_SRC_DST_PAIRS];
+    struct backlog backlog;
     struct fp_ring *q_head;
     struct fp_ring *q_admitted_out;
     struct admission_statistics stat;
@@ -352,43 +347,14 @@ void reset_admissible_status(struct admissible_status *status, bool oversubscrib
     uint32_t i;
     for (i = 0; i < NUM_SRC_DST_PAIRS; i++)
         status->last_alloc_tslot[i] = 0;
-    for (i = 0; i < NUM_SRC_DST_PAIRS; i++)
-        atomic32_init(&status->flows[i].backlog);
+
+    backlog_init(&status->backlog);
 }
 
 // Get the index of this flow in the status data structure
 static inline
 uint32_t get_status_index(uint16_t src, uint16_t dst) {
     return (src << FP_NODES_SHIFT) + dst;
-}
-
-// Resets the flow for this src/dst pair
-static inline
-void reset_flow(struct admissible_status *status, uint16_t src, uint16_t dst) {
-    assert(status != NULL);
-
-    struct flow_status *flow = &status->flows[get_status_index(src, dst)];
-
-    int32_t backlog = atomic32_read(&flow->backlog);
-
-    if (backlog != 0) {
-        /*
-         * There is pending backlog. We want to reduce the backlog, but want to
-         *    keep the invariant that a flow is in a bin iff backlog != 0.
-         *
-         * This invariant can be broken if the allocator races to eliminate the
-         *    backlog completely while we are executing this code. So we test for
-         *    the race.
-         */
-    	if (atomic32_sub_return(&flow->backlog, backlog + 1) == -(backlog+1))
-    		/* race happened, (backlog was 0 before sub) */
-    		atomic32_clear(&flow->backlog);
-    	else
-    		/* now backlog is <=-1, it's so large that a race is unlikely */
-    		atomic32_set(&flow->backlog, 1);
-    }
-
-    /* if backlog was 0, nothing to be done */
 }
 
 // Initializes data structures associated with one allocation core for

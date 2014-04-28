@@ -9,8 +9,8 @@
 #define GRAPH_ALGO_ATOMIC_H_
 
 #if defined(NO_DPDK) || defined(NO_ATOMIC)
-#warning "compiled without atomic operations in atomic.h"
-typedef uint32_t atomic32_t;
+//#warning "compiled without atomic operations in atomic.h"
+typedef int32_t atomic32_t;
 #define atomic32_init(xptr)				(*(xptr) = 0)
 #define atomic32_clear(xptr)			(*(xptr) = 0)
 #define atomic32_read(xptr)				(*(xptr))

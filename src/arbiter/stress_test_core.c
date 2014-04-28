@@ -63,10 +63,11 @@ static void add_backlog_buffered(struct comm_core_state *core,
 		struct admissible_status *status, uint16_t src, uint16_t dst,
         uint32_t demand_tslots)
 {
-	void *edge;
-
-	if (add_backlog_no_enqueue(status, src, dst, demand_tslots, &edge) == true) {
+	if (backlog_increase(&status->backlog, src, dst, demand_tslots,
+			&status->stat) == true)
+	{
 		/* need to add to q_head, will do so through buffer */
+		void *edge = MAKE_EDGE(0,src,dst);
 		core->q_head_write_buffer[core->q_head_buf_len++] = edge;
 
 		if (unlikely(core->q_head_buf_len == Q_HEAD_WRITE_BUFFER_SIZE)) {

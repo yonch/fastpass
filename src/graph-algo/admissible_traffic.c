@@ -51,7 +51,7 @@ static inline int try_allocation(uint16_t src, uint16_t dst,
 	uint32_t index = get_status_index(src, dst);
 	__builtin_prefetch(&status->last_alloc_tslot[index], 1, 1);
 
-	uint64_t timeslot_bitmap = get_available_timeslot_bitmap(
+	uint64_t timeslot_bitmap = batch_state_get_avail_bitmap(
 			&core->batch_state, src, dst);
 
     if (timeslot_bitmap == 0ULL) {
@@ -64,7 +64,7 @@ static inline int try_allocation(uint16_t src, uint16_t dst,
 	asm("bsfq %1,%0" : "=r"(batch_timeslot) : "r"(timeslot_bitmap));
 
 	// We can allocate this edge now
-	set_timeslot_occupied(&core->batch_state, src, dst, batch_timeslot);
+	batch_state_set_occupied(&core->batch_state, src, dst, batch_timeslot);
 
 	insert_admitted_edge(core->admitted[batch_timeslot], src, dst);
 	status->last_alloc_tslot[index] = status->current_timeslot + batch_timeslot;
@@ -251,7 +251,7 @@ process_more_requests:
     	    	status->stat.wait_for_space_in_q_admitted_out++;
 
     	    /* disallow further allocations to that timeslot */
-    	    batch_disallow_lsb_timeslot(&core->batch_state);
+    	    batch_state_disallow_lsb_timeslot(&core->batch_state);
 
     	    /* will process flows that this batch had previously allocated to timeslot */
     	    bin_in = core->new_request_bins[bin];

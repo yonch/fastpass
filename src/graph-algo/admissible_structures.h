@@ -234,7 +234,7 @@ void alloc_core_reset(struct admission_core_state *core,
 	for (i = 0; i < NUM_BINS + BATCH_SIZE; i++)
 		init_bin(core->new_request_bins[i]);
 
-    init_batch_state(&core->batch_state, status->oversubscribed,
+    batch_state_init(&core->batch_state, status->oversubscribed,
                      status->inter_rack_capacity, status->out_of_boundary_capacity,
                      status->num_nodes);
 

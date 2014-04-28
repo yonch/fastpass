@@ -44,7 +44,7 @@ struct batch_state {
 
 // Initialize an admitted bitmap
 static inline
-void init_batch_state(struct batch_state *state, bool oversubscribed,
+void batch_state_init(struct batch_state *state, bool oversubscribed,
                       uint16_t inter_rack_capacity, uint16_t out_of_boundary_capacity,
                       uint16_t num_nodes) {
     assert(state != NULL);
@@ -79,7 +79,7 @@ void init_batch_state(struct batch_state *state, bool oversubscribed,
 
 // Returns the available timeslot bitmap for src and dst (lsb is closest timeslot)
 static inline
-uint64_t get_available_timeslot_bitmap(struct batch_state *state,
+uint64_t batch_state_get_avail_bitmap(struct batch_state *state,
 		uint16_t src, uint16_t dst)
 {
     assert(state != NULL);
@@ -107,7 +107,7 @@ uint64_t get_available_timeslot_bitmap(struct batch_state *state,
 
 // Sets a timeslot as occupied for src and dst
 static inline
-void set_timeslot_occupied(struct batch_state *state, uint16_t src,
+void batch_state_set_occupied(struct batch_state *state, uint16_t src,
                            uint16_t dst, uint8_t timeslot) {
     assert(state != NULL);
     assert(src < MAX_SRCS);
@@ -143,7 +143,7 @@ void set_timeslot_occupied(struct batch_state *state, uint16_t src,
 }
 
 static inline
-void batch_disallow_lsb_timeslot(struct batch_state *state) {
+void batch_state_disallow_lsb_timeslot(struct batch_state *state) {
 	state->allowed_mask <<= 1;
 	state->allowed_mask &= (1ULL << BATCH_SIZE) - 1;
 }

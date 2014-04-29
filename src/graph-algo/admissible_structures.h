@@ -44,7 +44,7 @@ struct admission_core_state {
     struct fp_ring *q_urgent_out;
     struct admission_core_statistics stat;
     struct bin *out_demands;
-}  __attribute__((align(64))) /* don't want sharing between cores */;
+}  __attribute__((aligned(64))) /* don't want sharing between cores */;
 
 // Tracks status for admissible traffic (last send time and demand for all flows, etc.)
 // over the lifetime of a controller
@@ -62,6 +62,7 @@ struct admissible_status {
     struct admission_statistics stat;
     struct fp_mempool *head_bin_mempool;
     struct fp_mempool *core_bin_mempool[ALGO_N_CORES];
+    struct fp_mempool *admitted_traffic_mempool;
 };
 
 
@@ -208,7 +209,8 @@ void init_admissible_status(struct admissible_status *status,
                             uint16_t out_of_boundary_capacity, uint16_t num_nodes,
                             struct fp_ring *q_head, struct fp_ring *q_admitted_out,
                             struct fp_mempool *head_bin_mempool,
-                            struct fp_mempool **core_bin_mempool)
+                            struct fp_mempool **core_bin_mempool,
+                            struct fp_mempool *admitted_traffic_mempool)
 {
     assert(status != NULL);
 
@@ -220,6 +222,7 @@ void init_admissible_status(struct admissible_status *status,
     status->head_bin_mempool = head_bin_mempool;
     memcpy(&status->core_bin_mempool[0], &core_bin_mempool[0],
     		sizeof(status->core_bin_mempool));
+    status->admitted_traffic_mempool = admitted_traffic_mempool;
 
     fp_mempool_get(head_bin_mempool, (void**)&status->new_demands);
     init_bin(status->new_demands);
@@ -236,7 +239,8 @@ struct admissible_status *create_admissible_status(bool oversubscribed,
                                                    struct fp_ring *q_head,
                                                    struct fp_ring *q_admitted_out,
                                                    struct fp_mempool *head_bin_mempool,
-                                                   struct fp_mempool **core_bin_mempool)
+                                                   struct fp_mempool **core_bin_mempool,
+                                                   struct fp_mempool *admitted_traffic_mempool)
 {
     struct admissible_status *status =
     		fp_malloc("admissible_status", sizeof(struct admissible_status));
@@ -246,7 +250,8 @@ struct admissible_status *create_admissible_status(bool oversubscribed,
 
     init_admissible_status(status, oversubscribed, inter_rack_capacity,
                            out_of_boundary_capacity, num_nodes, q_head,
-                           q_admitted_out, head_bin_mempool, core_bin_mempool);
+                           q_admitted_out, head_bin_mempool, core_bin_mempool,
+                           admitted_traffic_mempool);
 
     return status;
 }

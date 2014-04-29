@@ -25,6 +25,7 @@
 #define PROCESSOR_SPEED 2.8
 #define HEAD_BIN_MEMPOOL_SIZE 1024
 #define CORE_BIN_MEMPOOL_SIZE 1024
+#define ADMITTED_TRAFFIC_MEMPOOL_SIZE	(2*BATCH_SIZE)
 
 const double admissible_fractions [NUM_FRACTIONS_A] =
     {0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9, 0.95, 0.99};
@@ -228,6 +229,7 @@ int main(int argc, char **argv)
     struct admitted_traffic **all_admitted;
     struct fp_mempool *head_bin_mempool;
     struct fp_mempool *core_bin_mempool[ALGO_N_CORES];
+    struct fp_mempool *admitted_traffic_mempool;
 
     /* init queues */
     q_bin = fp_ring_create(NUM_BINS_SHIFT);
@@ -240,6 +242,8 @@ int main(int argc, char **argv)
     			bin_num_bytes(SMALL_BIN_SIZE));
     	if (!core_bin_mempool[i]) exit(-1);
     }
+    admitted_traffic_mempool = fp_mempool_create(ADMITTED_TRAFFIC_MEMPOOL_SIZE,
+    		sizeof(struct admitted_traffic));
     if (!q_bin) exit(-1);
     if (!q_urgent) exit(-1);
     if (!q_head) exit(-1);
@@ -248,7 +252,7 @@ int main(int argc, char **argv)
 
     /* init global status */
     status = create_admissible_status(false, 0, 0, 0, q_head, q_admitted_out,
-    		head_bin_mempool, &core_bin_mempool[0]);
+    		head_bin_mempool, &core_bin_mempool[0], admitted_traffic_mempool);
 
     /* init core */
     if (alloc_core_init(status, 0, &core, q_bin, q_bin, q_urgent, q_urgent) != 0) {

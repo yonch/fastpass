@@ -10,10 +10,9 @@
 
 #include <stdint.h>
 #include "../protocol/topology.h"
+#include "partitioning.h"
 
-#define GA_PARTITION_N_NODES	128
 #define GA_MAX_DEGREE			256
-#define GA_N_PARTITIONS			(MAX_NODES / GA_PARTITION_N_NODES)
 
 struct ga_edge {
 	uint16_t src;
@@ -26,8 +25,8 @@ struct ga_edge {
  *   neigh:  which are the neighbors to each node
  */
 struct ga_adj {
-	uint16_t	degree[GA_PARTITION_N_NODES];
-	uint16_t	neigh[GA_PARTITION_N_NODES][GA_MAX_DEGREE];
+	uint16_t	degree[PARTITION_N_NODES];
+	uint16_t	neigh[PARTITION_N_NODES][GA_MAX_DEGREE];
 };
 
 /**
@@ -70,7 +69,7 @@ void inline ga_edges_dst_to_adj(struct ga_edge *edges, uint32_t n_edges,
 {
 	uint32_t i;
 	for (i = 0; i < n_edges; i++)
-		ga_adj_add_edge(adj, edges[i].src, edges[i].dst % GA_PARTITION_N_NODES);
+		ga_adj_add_edge(adj, edges[i].src, PARTITION_IDX(edges[i].dst));
 }
 
 void ga_add_grant(uint16_t src, uint16_t dst);

@@ -10,7 +10,7 @@
 
 #include "grant-accept.h"
 
-#define GA_MAX_PARTITION_EDGES		GA_PARTITION_N_NODES
+#define EDGELIST_PARTITION_MAX_EDGES		PARTITION_N_NODES
 
 /**
  * A container for edges from some paritition x to some partition y.
@@ -25,21 +25,21 @@
  */
 struct ga_edgelist {
 	uint32_t n;
-	struct ga_edge edge[GA_MAX_PARTITION_EDGES];
+	struct ga_edge edge[EDGELIST_PARTITION_MAX_EDGES];
 } __attribute__((align(64)));
 
 /**
  * An edgelist partitioned by source
  */
 struct ga_src_partd_edgelist {
-	struct ga_edgelist src[GA_PARTITION_N_NODES];
+	struct ga_edgelist src[PARTITION_N_NODES];
 };
 
 /**
  * A container for all edgelists in the graph. See ga_edgelist for assumptions.
  */
 struct ga_partd_edgelist {
-	struct ga_src_partd_edgelist dst[GA_N_PARTITIONS];
+	struct ga_src_partd_edgelist dst[N_PARTITIONS];
 };
 
 /**
@@ -59,8 +59,7 @@ void inline ga_edgelist_add(struct ga_edgelist *edgelist, uint16_t src,
 void inline ga_src_partd_edgelist_add(struct ga_src_partd_edgelist *pel,
 		uint16_t src, uint16_t dst)
 {
-	uint16_t src_partition = src / GA_PARTITION_N_NODES;
-	ga_edgelist_add(&pel->src[src_partition], src, dst);
+	ga_edgelist_add(&pel->src[PARTITION_OF(src)], src, dst);
 }
 
 
@@ -70,8 +69,7 @@ void inline ga_src_partd_edgelist_add(struct ga_src_partd_edgelist *pel,
 void inline ga_partd_edgelist_add(struct ga_partd_edgelist *pel,
 		uint16_t src, uint16_t dst)
 {
-	uint16_t dst_partition = dst / GA_PARTITION_N_NODES;
-	ga_src_partd_edgelist_add(&pel->dst[dst_partition], src, dst);
+	ga_src_partd_edgelist_add(&pel->dst[PARTITION_OF(dst)], src, dst);
 }
 
 /**
@@ -81,7 +79,7 @@ void inline ga_partd_edgelist_reset(struct ga_partd_edgelist *pel,
 		uint16_t src_partition)
 {
 	uint32_t i;
-	for(i = 0; i < GA_N_PARTITIONS; i++)
+	for(i = 0; i < N_PARTITIONS; i++)
 		pel->dst[i].src[src_partition].n = 0;
 }
 
@@ -97,7 +95,7 @@ void inline ga_edges_to_adj_by_dst(struct ga_partd_edgelist *pel,
 		uint16_t dst_partition, struct ga_adj *dest_adj)
 {
 	uint32_t i;
-	for(i = 0; i < GA_N_PARTITIONS; i++) {
+	for(i = 0; i < N_PARTITIONS; i++) {
 		struct ga_edgelist *edgelist = &pel->dst[dst_partition].src[i];
 		ga_edges_to_adj(&edgelist->edge[0], edgelist->n, dest_adj);
 	}

@@ -6,6 +6,7 @@
 		<project>dpdk-include</project>
 		<project>graph-algo</project>
 		<project>kernel-module</project>
+		<project>protocol</project>
 	</projects>
 	<buildSpec>
 		<buildCommand>

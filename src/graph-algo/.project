@@ -4,6 +4,7 @@
 	<comment></comment>
 	<projects>
 		<project>dpdk-include</project>
+		<project>protocol</project>
 	</projects>
 	<buildSpec>
 		<buildCommand>

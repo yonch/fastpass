@@ -61,7 +61,7 @@ uint32_t run_experiment(struct request_info *requests, uint32_t start_time, uint
     struct request_info *current_request = requests;
 
     assert(requests != NULL);
-    assert(core->q_bin_in->tail == core->q_bin_in->head + NUM_BINS);
+    assert(status->q_bin[0]->tail == status->q_bin[0]->head + NUM_BINS);
 
     uint64_t prev_time = current_time();
     start_b = start_time >> BATCH_SHIFT;
@@ -77,7 +77,7 @@ uint32_t run_experiment(struct request_info *requests, uint32_t start_time, uint
         flush_backlog(status);
  
         // Get admissible traffic
-        get_admissible_traffic(core, status, admitted_batch, 0, 1, 0);
+        get_admissible_traffic(status, 0, admitted_batch, 0, 1, 0);
 
         for (i = 0; i < BATCH_SIZE; i++) {
         	/* get admitted traffic */
@@ -97,7 +97,7 @@ uint32_t run_experiment(struct request_info *requests, uint32_t start_time, uint
 
     *next_request = current_request;
 
-    assert(core->q_bin_in->tail == core->q_bin_in->head + NUM_BINS);
+    assert(status->q_bin[0]->tail == status->q_bin[0]->head + NUM_BINS);
 	return num_admitted;
 }
 
@@ -120,7 +120,7 @@ uint32_t run_admissible(struct request_info *requests, uint32_t start_time, uint
     uint32_t admitted_index = BATCH_SIZE;  // already BATCH_SIZE admitted structs in admitted_batch
 
     assert(requests != NULL);
-    assert(core->q_bin_in->tail == core->q_bin_in->head + NUM_BINS);
+    assert(status->q_bin[0]->tail == status->q_bin[0]->head + NUM_BINS);
 
     for (b = (start_time >> BATCH_SHIFT); b < (end_time >> BATCH_SHIFT); b++) {
         // Issue all new requests for this batch
@@ -133,7 +133,7 @@ uint32_t run_admissible(struct request_info *requests, uint32_t start_time, uint
         flush_backlog(status);
 
         // Get admissible traffic
-        get_admissible_traffic(core, status, admitted_batch, 0, 1, 0);
+        get_admissible_traffic(status, 0, admitted_batch, 0, 1, 0);
 
         for (i = 0; i < BATCH_SIZE; i++) { 
             /* get admitted traffic */
@@ -147,7 +147,7 @@ uint32_t run_admissible(struct request_info *requests, uint32_t start_time, uint
 
     *next_request = current_request;
 
-    assert(core->q_bin_in->tail == core->q_bin_in->head + NUM_BINS);
+    assert(status->q_bin[0]->tail == status->q_bin[0]->head + NUM_BINS);
     return num_admitted;
 }
 

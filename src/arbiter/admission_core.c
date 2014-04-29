@@ -177,7 +177,7 @@ int exec_admission_core(void *void_cmd_p)
 		/* perform allocation */
 		admission_log_allocation_begin(current_timeslot,
 				start_time_first_timeslot);
-		get_admissible_traffic(core, &g_admissible_status, &admitted[0],
+		get_admissible_traffic(&g_admissible_status, core_ind, &admitted[0],
 				current_timeslot - PREALLOC_DURATION_TIMESLOTS,
 				TIMESLOT_MUL, TIMESLOT_SHIFT);
 		admission_log_allocation_end();

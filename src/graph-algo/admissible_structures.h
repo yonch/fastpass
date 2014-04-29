@@ -64,6 +64,7 @@ struct admissible_status {
     struct fp_mempool *core_bin_mempool[ALGO_N_CORES];
     struct fp_mempool *admitted_traffic_mempool;
     struct admission_core_state cores[ALGO_N_CORES];
+    struct fp_ring *q_bin[ALGO_N_CORES];
 };
 
 
@@ -166,7 +167,6 @@ void alloc_core_reset(struct admission_core_state *core,
  */
 static inline int alloc_core_init(struct admissible_status *status,
 		uint32_t core_index,
-		struct fp_ring *q_bin_in, struct fp_ring *q_bin_out,
 		struct fp_ring *q_urgent_in, struct fp_ring *q_urgent_out)
 {
 	int j;
@@ -188,8 +188,6 @@ static inline int alloc_core_init(struct admissible_status *status,
 	if (core->temporary_bins[0] == NULL)
 		return -1;
 
-	core->q_bin_in = q_bin_in;
-	core->q_bin_out = q_bin_out;
 	core->q_urgent_in = q_urgent_in;
 	core->q_urgent_out = q_urgent_out;
 
@@ -228,12 +226,13 @@ int init_admissible_status(struct admissible_status *status,
     		sizeof(status->core_bin_mempool));
     status->admitted_traffic_mempool = admitted_traffic_mempool;
 
+    memcpy(&status->q_bin, q_bin, sizeof(status->q_bin));
+
     fp_mempool_get(head_bin_mempool, (void**)&status->new_demands);
     init_bin(status->new_demands);
 
     for (i = 0; i < ALGO_N_CORES; i++) {
     	rc = alloc_core_init(status, i,
-    			q_bin[i], q_bin[(i + 1) % ALGO_N_CORES],
     			q_urgent[i], q_urgent[(i + 1) % ALGO_N_CORES]);
     	if (rc != 0)
     		return -1;

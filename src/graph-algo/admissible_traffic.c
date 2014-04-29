@@ -211,17 +211,19 @@ process_head:
 // Determine admissible traffic for one timeslot from queue_in
 // Puts unallocated traffic in queue_out
 // Allocate BATCH_SIZE timeslots at once
-void get_admissible_traffic(struct admission_core_state *core,
-								struct admissible_status *status,
+void get_admissible_traffic(struct admissible_status *status,
+								uint32_t core_index,
 								struct admitted_traffic **admitted,
 								uint64_t first_timeslot, uint32_t tslot_mul,
 								uint32_t tslot_shift)
 {
     assert(status != NULL);
 
+    struct admission_core_state *core = &status->cores[core_index];
+
     // TODO: use multiple cores
-    struct fp_ring *queue_in = core->q_bin_in;
-    struct fp_ring *queue_out = core->q_bin_out;
+    struct fp_ring *queue_in = status->q_bin[core_index];
+    struct fp_ring *queue_out = status->q_bin[(core_index + 1) % ALGO_N_CORES];
 
     // Initialize this core for a new batch of processing
     alloc_core_reset(core, status, admitted);

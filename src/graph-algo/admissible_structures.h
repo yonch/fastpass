@@ -203,6 +203,9 @@ void init_admissible_status(struct admissible_status *status,
     status->q_head = q_head;
     status->q_admitted_out = q_admitted_out;
     status->bin_mempool = bin_mempool;
+
+    fp_mempool_get(bin_mempool, (void**)&status->new_demands);
+    init_bin(status->new_demands);
 }
 
 /**

@@ -9,6 +9,7 @@
 #define ADMISSIBLE_TRAFFIC_H_
 
 #include "admissible_structures.h"
+#include "platform.h"
 
 #include <inttypes.h>
 
@@ -22,6 +23,9 @@
 void add_backlog(struct admissible_status *status,
                        uint16_t src, uint16_t dst,
                        uint32_t amount);
+
+// Flushes the backlog into admissible_status
+void flush_backlog(struct admissible_status *status);
 
 // Determine admissible traffic for one timeslot from queue_in
 void get_admissible_traffic(struct admission_core_state *core,
@@ -38,12 +42,10 @@ void reset_sender(struct admissible_status *status, uint16_t src);
  *   should fit in, when allocating a batch that starts with @current_timeslot
  */
 static inline
-uint16_t bin_index_from_timeslot(uint64_t last_allocated,
+uint16_t bin_index_from_timeslot(uint32_t last_allocated,
 	uint64_t current_timeslot)
 {
-	int64_t gap = (int64_t)(current_timeslot + BATCH_SIZE) - (int64_t)last_allocated;
-
-	assert(gap > 0);
+	uint32_t gap = (uint32_t)(current_timeslot + BATCH_SIZE) - (uint32_t)last_allocated;
 
 	if (gap <= NUM_BINS)
 		return NUM_BINS + BATCH_SIZE - gap;
@@ -73,14 +75,6 @@ uint16_t bin_index_from_timeslot(uint64_t last_allocated,
 
 	return BATCH_SIZE - 1 - (bin_gap & (BATCH_SIZE-1));
 }
-
-#ifndef likely
-#define likely(x)  __builtin_expect((x),1)
-#endif /* likely */
-
-#ifndef unlikely
-#define unlikely(x)  __builtin_expect((x),0)
-#endif /* unlikely */
 
 // Helper method for testing in Python. Enqueues the head token.
 static inline

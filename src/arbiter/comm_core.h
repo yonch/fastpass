@@ -26,9 +26,6 @@
 /* minimum time between packets */
 #define NODE_MIN_TRIGGER_GAP_SEC	2e-6
 
-/* The buffer size when writing to q_head */
-#define Q_HEAD_WRITE_BUFFER_SIZE		(32*1024)
-
 /* Deadline to handle all packets, or start dropping */
 #define RX_BURST_DEADLINE_SEC			0.000003
 
@@ -60,8 +57,6 @@ struct comm_core_state {
 
 	struct fp_timers timeout_timers;
 	struct fp_timers tx_timers;
-	void *q_head_write_buffer[Q_HEAD_WRITE_BUFFER_SIZE];
-	uint32_t q_head_buf_len;
 
 	uint64_t last_rx_watchdog;
 	uint64_t last_tx_watchdog;

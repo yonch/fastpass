@@ -20,7 +20,7 @@
 
 #define RING_DEQUEUE_BURST_SIZE		256
 
-static void flush_backlog_buffer(struct admissible_status *status)
+static void _flush_backlog_now(struct admissible_status *status)
 {
 	/* enqueue status->new_backlogs */
 	while(fp_ring_enqueue(status->q_head, status->new_demands) == -ENOBUFS)
@@ -33,36 +33,25 @@ static void flush_backlog_buffer(struct admissible_status *status)
 	init_bin(status->new_demands);
 }
 
-
-static void add_backlog_buffered(struct admissible_status *status,
-		uint16_t src, uint16_t dst, uint32_t amount)
-{
-	if (backlog_increase(&status->backlog, src, dst, amount,
-			&status->stat) == true)
-	{
-		/* add to status->new_demands */
-		enqueue_bin(status->new_demands, src, dst,
-				status->last_alloc_tslot[get_status_index(src,dst)]);
-
-		if (unlikely(bin_size(status->new_demands) == SMALL_BIN_SIZE)) {
-			flush_backlog_buffer(status);
-		}
-	}
+void flush_backlog(struct admissible_status *status) {
+	if (unlikely(is_empty_bin(status->new_demands)))
+		return;
+	_flush_backlog_now(status);
 }
 
-// Request num_slots additional timeslots from src to dst
-void add_backlog(struct admissible_status *status, uint16_t src,
-                       uint16_t dst, uint32_t amount) {
-	void *edge;
-
+void add_backlog(struct admissible_status *status,
+		uint16_t src, uint16_t dst, uint32_t amount)
+{
 	if (backlog_increase(&status->backlog, src, dst, amount,
 			&status->stat) == false)
 		return; /* no need to enqueue */
 
-	/* need to enqueue */
-	edge = MAKE_EDGE(0,src,dst);
-	while (fp_ring_enqueue(status->q_head, edge) == -ENOBUFS)
-		status->stat.wait_for_space_in_q_head++;
+	/* add to status->new_demands */
+	enqueue_bin(status->new_demands, src, dst,
+			status->last_alloc_tslot[get_status_index(src,dst)]);
+
+	if (unlikely(bin_size(status->new_demands) == SMALL_BIN_SIZE))
+		_flush_backlog_now(status);
 }
 
 /**
@@ -168,6 +157,7 @@ static inline void process_new_requests(struct admissible_status *status,
     assert(core != NULL);
 
     uint64_t edges[RING_DEQUEUE_BURST_SIZE];
+    struct bin *head_bin;
     int n;
     int i;
 
@@ -197,20 +187,23 @@ process_q_urgent:
 
 process_head:
     // Add new requests to the appropriate working bin
-	n = fp_ring_dequeue_burst(status->q_head, (void **)&edges[0],
-			RING_DEQUEUE_BURST_SIZE);
+	n = fp_ring_dequeue(status->q_head, (void **)&head_bin);
+	if (n != 0)
+		return; /* nothing to dequeue */
 
+	n = bin_size(head_bin);
 	for (i = 0; i < n; i++) {
-    	uint64_t edge = edges[i];
-        uint16_t src = EDGE_SRC(edge);
-    	uint16_t dst = EDGE_DST(edge);
-        uint32_t index = get_status_index(src, dst);
-  
+        uint16_t src = bin_get(head_bin, i)->src;
+        uint16_t dst = bin_get(head_bin, i)->dst;
+		uint32_t metric = bin_get(head_bin, i)->metric;
         uint16_t bin_index = bin_index_from_timeslot(
-        		status->last_alloc_tslot[index], status->current_timeslot);
+        		metric, status->current_timeslot);
         
         process_one_new_request(src, dst, bin_index, core, status, current_bin);
     }
+
+	/* free the bin */
+	fp_mempool_put(status->bin_mempool, head_bin);
 //	if (n > 0)
 //		goto process_head;
 }
@@ -239,7 +232,7 @@ void get_admissible_traffic(struct admission_core_state *core,
     uint16_t bin;
 
     bin_out = core->temporary_bins[0];
-    assert(is_empty_bin(bin_out) && (bin_out->head == 0));
+    assert(is_empty_bin(bin_out));
 
     process_new_requests(status, core, 0);
 

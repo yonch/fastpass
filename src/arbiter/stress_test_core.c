@@ -41,41 +41,6 @@ static inline void stress_test_log_got_admitted_tslot(uint16_t size, uint64_t ti
 	CL->occupied_node_tslots += size;
 }
 
-static void flush_q_head_buffer(struct comm_core_state *core)
-{
-	uint32_t remaining = core->q_head_buf_len;
-	void **edge_p = &core->q_head_write_buffer[0];
-	int rc;
-
-	while(remaining > 0) {
-		rc = rte_ring_enqueue_burst(g_admissible_status.q_head,
-				edge_p, remaining);
-		if (unlikely(rc < 0))
-			rte_exit(EXIT_FAILURE, "got negative value (%d) from rte_ring_enqueue_burst, should never happen\n", rc);
-		remaining -= rc;
-		edge_p += rc;
-	}
-
-	core->q_head_buf_len = 0;
-}
-
-static void add_backlog_buffered(struct comm_core_state *core,
-		struct admissible_status *status, uint16_t src, uint16_t dst,
-        uint32_t demand_tslots)
-{
-	if (backlog_increase(&status->backlog, src, dst, demand_tslots,
-			&status->stat) == true)
-	{
-		/* need to add to q_head, will do so through buffer */
-		void *edge = MAKE_EDGE(0,src,dst);
-		core->q_head_write_buffer[core->q_head_buf_len++] = edge;
-
-		if (unlikely(core->q_head_buf_len == Q_HEAD_WRITE_BUFFER_SIZE)) {
-			flush_q_head_buffer(core);
-		}
-	}
-}
-
 static inline void process_allocated_traffic(struct comm_core_state *core,
 		struct rte_ring *q_admitted)
 {
@@ -112,10 +77,10 @@ static void add_initial_requests(struct comm_core_state *core,
 	uint32_t i;
 	for (src = 0; src < num_srcs; src++)
 		for (i = 0; i < num_dsts_per_src; i++)
-			add_backlog_buffered(core, &g_admissible_status,
-						src, (src + 1 + i) % num_srcs , flow_size);
+			add_backlog(&g_admissible_status,
+					src, (src + 1 + i) % num_srcs , flow_size);
 
-	flush_q_head_buffer(core);
+	flush_backlog(&g_admissible_status);
 }
 
 void exec_stress_test_core(struct stress_test_core_cmd * cmd,
@@ -134,7 +99,6 @@ void exec_stress_test_core(struct stress_test_core_cmd * cmd,
 	double next_mean_t_btwn_requests;
 
 	core->latest_timeslot = first_time_slot - 1;
-	core->q_head_buf_len = 0;
 	stress_test_log_init(&stress_test_core_logs[lcore_id]);
 	comm_log_init(&comm_core_logs[lcore_id]);
 
@@ -174,7 +138,7 @@ void exec_stress_test_core(struct stress_test_core_cmd * cmd,
 				break;
 
 			/* enqueue the request */
-			add_backlog_buffered(core, &g_admissible_status,
+			add_backlog(&g_admissible_status,
 					next_request.src, next_request.dst, cmd->demand_tslots);
 			comm_log_demand_increased(next_request.src, next_request.dst, 0,
 					cmd->demand_tslots, cmd->demand_tslots);
@@ -191,7 +155,7 @@ void exec_stress_test_core(struct stress_test_core_cmd * cmd,
 		process_allocated_traffic(core, cmd->q_allocated);
 
 		/* flush q_head's buffer into q_head */
-		flush_q_head_buffer(core);
+		flush_backlog(&g_admissible_status);
 
 		/* wait until at least loop_minimum_iteration_time has passed from
 		 * beginning of loop */

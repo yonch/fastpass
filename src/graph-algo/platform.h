@@ -10,6 +10,7 @@
 /** DPDK **/
 #include <rte_malloc.h>
 #include <rte_mempool.h>
+#include <rte_branch_prediction.h>
 #include "../protocol/platform/generic.h"
 #include "../controller/dpdk-time.h"
 #define fp_free(ptr)                            rte_free(ptr)
@@ -17,7 +18,9 @@
 #define fp_malloc(typestr, size)		rte_malloc(typestr, size, 0)
 #define fp_pause()								rte_pause()
 
-#define fp_mempool	 	rte_mempool
+#define fp_mempool	 			rte_mempool
+#define fp_mempool_get	 		rte_mempool_get
+#define fp_mempool_put	 		rte_mempool_put
 
 #else
 
@@ -28,6 +31,13 @@
 #define fp_get_time_ns()				(1UL << 62)
 #define fp_pause()						while (0) {}
 
+#ifndef likely
+#define likely(x)  __builtin_expect((x),1)
+#endif /* likely */
+
+#ifndef unlikely
+#define unlikely(x)  __builtin_expect((x),0)
+#endif /* unlikely */
 
 /* mempool */
 struct fp_mempool {
@@ -78,7 +88,7 @@ fp_mempool_get(struct fp_mempool *mp, void **obj_p) {
 	return 0;
 }
 static inline void __attribute__((always_inline))
-rte_mempool_put(struct fp_mempool *mp, void *obj) {
+fp_mempool_put(struct fp_mempool *mp, void *obj) {
 	mp->elements[mp->cur_elements++] = obj;
 }
 

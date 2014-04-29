@@ -54,9 +54,11 @@ struct admissible_status {
     uint16_t num_nodes;
     uint64_t last_alloc_tslot[NUM_SRC_DST_PAIRS];
     struct backlog backlog;
+    struct bin *new_demands;
     struct fp_ring *q_head;
     struct fp_ring *q_admitted_out;
     struct admission_statistics stat;
+    struct fp_mempool *bin_mempool;
 };
 
 
@@ -70,7 +72,7 @@ void print_backlog(struct fp_ring *queue) {
 	struct bin *bin = queue->elem[0];
     printf("printing backlog queue:\n");
     struct backlog_edge *edge;
-    for (edge = &bin->edges[bin->head]; edge < &bin->edges[bin->tail]; edge++)
+    for (edge = &bin->edges[0]; edge < &bin->edges[bin->size]; edge++)
         printf("\t%d\t%d\n", edge->src, edge->dst);
 }
 
@@ -84,8 +86,8 @@ void print_backlog_counts(struct fp_ring *queue) {
     uint32_t bin_sums = 0;
     for (bin_num = 0; bin_num < NUM_BINS; bin_num++) {
 		struct bin *bin = queue->elem[bin_num];
-        printf("\tsize of bin %d: %d\n", bin_num, bin->tail - bin->head);
-        bin_sums += bin->tail - bin->head;
+        printf("\tsize of bin %d: %d\n", bin_num, bin_size(bin));
+        bin_sums += bin_size(bin);
     }
     printf("total flows: %d\n", bin_sums);
 }
@@ -190,7 +192,8 @@ static inline
 void init_admissible_status(struct admissible_status *status,
                             bool oversubscribed, uint16_t inter_rack_capacity,
                             uint16_t out_of_boundary_capacity, uint16_t num_nodes,
-                            struct fp_ring *q_head, struct fp_ring *q_admitted_out)
+                            struct fp_ring *q_head, struct fp_ring *q_admitted_out,
+                            struct fp_mempool *bin_mempool)
 {
     assert(status != NULL);
 
@@ -199,6 +202,7 @@ void init_admissible_status(struct admissible_status *status,
 
     status->q_head = q_head;
     status->q_admitted_out = q_admitted_out;
+    status->bin_mempool = bin_mempool;
 }
 
 /**
@@ -210,7 +214,8 @@ struct admissible_status *create_admissible_status(bool oversubscribed,
                                                    uint16_t out_of_boundary_capacity,
                                                    uint16_t num_nodes,
                                                    struct fp_ring *q_head,
-                                                   struct fp_ring *q_admitted_out)
+                                                   struct fp_ring *q_admitted_out,
+                                                   struct fp_mempool *bin_mempool)
 {
     struct admissible_status *status =
     		fp_malloc("admissible_status", sizeof(struct admissible_status));
@@ -219,7 +224,8 @@ struct admissible_status *create_admissible_status(bool oversubscribed,
     	return NULL;
 
     init_admissible_status(status, oversubscribed, inter_rack_capacity,
-                           out_of_boundary_capacity, num_nodes, q_head, q_admitted_out);
+                           out_of_boundary_capacity, num_nodes, q_head,
+                           q_admitted_out, bin_mempool);
 
     return status;
 }

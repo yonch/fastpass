@@ -12,47 +12,60 @@
 struct backlog_edge {
     uint16_t src;
     uint16_t dst;
+    uint32_t metric;
 };
 
 struct bin {
-    uint16_t head;
-    uint16_t tail;
+    uint32_t size;
     struct backlog_edge edges[0];
 };
 
 // Initialize a bin
-static inline
+static inline __attribute__((always_inline))
 void init_bin(struct bin *bin) {
     assert(bin != NULL);
-
-    bin->head = 0;
-    bin->tail = 0;
+    bin->size = 0;
 }
 
 // Returns true if the bin is empty, false otherwise
-static inline
+static inline __attribute__((always_inline))
 bool is_empty_bin(struct bin *bin) {
     assert(bin != NULL);
-
-    return bin->head == bin->tail;
+    return bin->size == 0;
 }
 
 // Insert new edge to the back of this bin
-static inline
-void enqueue_bin(struct bin *bin, uint16_t src, uint16_t dst) {
+static inline __attribute__((always_inline))
+void enqueue_bin(struct bin *bin, uint16_t src, uint16_t dst, uint32_t metric) {
     assert(bin != NULL);
+    uint32_t n = bin->size++;
+    bin->edges[n].src = src;
+    bin->edges[n].dst = dst;
+    bin->edges[n].metric = metric;
+}
 
-    bin->edges[bin->tail].src = src;
-    bin->edges[bin->tail].dst = dst;
+// Insert new edge to the back of this bin
+static inline __attribute__((always_inline))
+uint32_t bin_size(struct bin *bin) {
+    assert(bin != NULL);
+    return bin->size;
+}
 
-    bin->tail++;
+// Obtain a pointer to a member edge
+static inline __attribute__((always_inline))
+struct backlog_edge *bin_get(struct bin *bin, uint32_t index) {
+    assert(bin != NULL);
+    return &bin->edges[index];
+}
+
+static inline bin_num_bytes(uint32_t n_elem) {
+	return sizeof(struct bin) + n_elem * sizeof(struct backlog_edge);
 }
 
 static inline
 struct bin *create_bin(size_t size)
 {
-	uint32_t n_bytes =
-			sizeof(struct bin) + size * sizeof(struct backlog_edge);
+	uint32_t n_bytes = bin_num_bytes(size);
 
 	struct bin *bin = fp_malloc("admissible_bin", n_bytes);
     if (bin == NULL)
@@ -68,25 +81,6 @@ void destroy_bin(struct bin *bin) {
     assert(bin != NULL);
 
     free(bin);
-}
-
-// Obtain a pointer to the first item in the bin
-// Warning: this does not check if the queue has items in it!! It will
-// happily return an invalid pointer in that case. This makes loops easier.
-static inline
-struct backlog_edge *peek_head_bin(struct bin *bin) {
-    assert(bin != NULL);
-
-    return &bin->edges[bin->head];
-}
-
-// Remove the first item in the bin
-static inline
-void dequeue_bin(struct bin *bin) {
-    assert(bin != NULL);
-    assert(!is_empty_bin(bin));
-
-    bin->head++;
 }
 
 

@@ -14,6 +14,7 @@
 #include "admissible_structures.h"
 #include "generate_requests.h"
 #include "path_selection.h"
+#include "platform.h"
 
 #define NUM_FRACTIONS_A 11
 #define NUM_SIZES_A 1
@@ -22,6 +23,7 @@
 #define NUM_RACKS_P 4
 #define NUM_NODES_P 1024
 #define PROCESSOR_SPEED 2.8
+#define BIN_MEMPOOL_SIZE 1024
 
 const double admissible_fractions [NUM_FRACTIONS_A] =
     {0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9, 0.95, 0.99};
@@ -221,16 +223,19 @@ int main(int argc, char **argv)
     struct fp_ring *q_admitted_out;
     struct admitted_traffic **admitted_batch;
     struct admitted_traffic **all_admitted;
+    struct fp_mempool *bin_mempool;
 
     /* init queues */
     q_bin = fp_ring_create(NUM_BINS_SHIFT);
     q_urgent = fp_ring_create(2 * FP_NODES_SHIFT + 1);
     q_head = fp_ring_create(2 * FP_NODES_SHIFT);
     q_admitted_out = fp_ring_create(BATCH_SHIFT);
+    bin_mempool = fp_mempool_create(BIN_MEMPOOL_SIZE, bin_num_bytes(SMALL_BIN_SIZE));
     if (!q_bin) exit(-1);
     if (!q_urgent) exit(-1);
     if (!q_head) exit(-1);
     if (!q_admitted_out) exit(-1);
+	if (!bin_mempool) exit(-1);
 
     /* init core */
     if (alloc_core_init(&core, q_bin, q_bin, q_urgent, q_urgent) != 0) {
@@ -239,7 +244,8 @@ int main(int argc, char **argv)
     }
 
     /* init global status */
-    status = create_admissible_status(false, 0, 0, 0, q_head, q_admitted_out);
+    status = create_admissible_status(false, 0, 0, 0, q_head, q_admitted_out,
+    		bin_mempool);
 
     /* make allocated_traffic containers */
     admitted_batch = malloc(sizeof(struct admitted_traffic *) * BATCH_SIZE);

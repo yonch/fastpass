@@ -20,6 +20,36 @@
 
 #define RING_DEQUEUE_BURST_SIZE		256
 
+static void flush_backlog_buffer(struct admissible_status *status)
+{
+	/* enqueue status->new_backlogs */
+	while(fp_ring_enqueue(status->q_head, status->new_demands) == -ENOBUFS)
+		/* retry */;
+
+	/* get a fresh bin for status->new_backlogs */
+	while(fp_mempool_get(status->bin_mempool, (void**)&status->new_demands) == -ENOENT)
+		/* retry */;
+
+	init_bin(status->new_demands);
+}
+
+
+static void add_backlog_buffered(struct admissible_status *status,
+		uint16_t src, uint16_t dst, uint32_t amount)
+{
+	if (backlog_increase(&status->backlog, src, dst, amount,
+			&status->stat) == true)
+	{
+		/* add to status->new_demands */
+		enqueue_bin(status->new_demands, src, dst,
+				status->last_alloc_tslot[get_status_index(src,dst)]);
+
+		if (unlikely(bin_size(status->new_demands) == SMALL_BIN_SIZE)) {
+			flush_backlog_buffer(status);
+		}
+	}
+}
+
 // Request num_slots additional timeslots from src to dst
 void add_backlog(struct admissible_status *status, uint16_t src,
                        uint16_t dst, uint32_t amount) {
@@ -72,7 +102,7 @@ static inline int try_allocation(uint16_t src, uint16_t dst,
 	backlog = backlog_decrease(&status->backlog, src, dst);
 	if (backlog != 0) {
     	adm_log_allocated_backlog_remaining(&core->stat, src, dst, backlog);
-		enqueue_bin(core->new_request_bins[NUM_BINS + batch_timeslot], src, dst);
+		enqueue_bin(core->new_request_bins[NUM_BINS + batch_timeslot], src, dst, 0);
 	} else {
 		adm_log_allocator_no_backlog(&core->stat, src, dst);
 	}
@@ -84,23 +114,22 @@ static void try_allocation_bin(struct bin *in_bin, struct admission_core_state *
                     struct bin *bin_out, struct admissible_status *status)
 {
 	int rc;
-    uint16_t i;
-    uint16_t head = in_bin->head;
-    uint16_t tail = in_bin->tail;
+    uint32_t i;
+    uint32_t n_elem = bin_size(in_bin);
 
 //    __builtin_prefetch(&core->batch_state.src_endnodes[BITMASK_WORD(in_bin->edges[head].src)], 0, 3);
 //    __builtin_prefetch(&core->batch_state.dst_endnodes[BITMASK_WORD(in_bin->edges[head].dst)], 0, 3);
 
-    for (i = head; i < tail; i++) {
+    for (i = 0; i < n_elem; i++) {
 //        __builtin_prefetch(&core->batch_state.src_endnodes[BITMASK_WORD(in_bin->edges[i+1].src)], 0, 3);
 //        __builtin_prefetch(&core->batch_state.dst_endnodes[BITMASK_WORD(in_bin->edges[i+1].dst)], 0, 3);
-		uint16_t src = in_bin->edges[i].src;
-		uint16_t dst = in_bin->edges[i].dst;
+		uint16_t src = bin_get(in_bin,i)->src;
+		uint16_t dst = bin_get(in_bin,i)->dst;
 
         rc = try_allocation(src, dst, core, status);
         if (rc == 1) {
 			// We cannot allocate this edge now - copy to queue_out
-			enqueue_bin(bin_out, src, dst);
+			enqueue_bin(bin_out, src, dst, 0);
         }
     }
 }
@@ -124,7 +153,7 @@ static inline void process_one_new_request(uint16_t src, uint16_t dst,
 	} else {
 		// We have not yet processed the bin for this src/dst pair
 		// Enqueue it to the working bins for later processing
-		enqueue_bin(core->new_request_bins[bin_index], src, dst);
+		enqueue_bin(core->new_request_bins[bin_index], src, dst, 0);
 	}
 }
 
@@ -221,7 +250,7 @@ void get_admissible_traffic(struct admission_core_state *core,
 				adm_log_waiting_for_q_bin_in(&core->stat, bin);
 				process_new_requests(status, core, bin);
 			}
-			adm_log_dequeued_bin_in(&core->stat, bin, bin_in->tail - bin_in->head);
+			adm_log_dequeued_bin_in(&core->stat, bin, bin_size(bin_in));
 			try_allocation_bin(bin_in, core, bin_out, status);
     	} else {
     	    /* wait for start time */

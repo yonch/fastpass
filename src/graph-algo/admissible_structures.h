@@ -44,7 +44,7 @@ struct admission_core_state {
     struct fp_ring *q_urgent_out;
     struct admission_core_statistics stat;
     struct bin *out_demands;
-};
+}  __attribute__((align(64))) /* don't want sharing between cores */;
 
 // Tracks status for admissible traffic (last send time and demand for all flows, etc.)
 // over the lifetime of a controller

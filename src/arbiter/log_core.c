@@ -117,8 +117,7 @@ void print_global_admission_log() {
 	uint64_t wait_for_q_bin_in = 0;
 
 	for (i = 0; i < N_ADMISSION_CORES; i++) {
-		uint16_t lcore = enabled_lcore[FIRST_ADMISSION_CORE+i];
-		struct admission_core_statistics *ast = &admission_core_state[lcore].stat;
+		struct admission_core_statistics *ast = &g_admissible_status.cores[i].stat;
 		wait_for_q_bin_in += ast->wait_for_q_bin_in;
 	}
 
@@ -143,10 +142,10 @@ void print_global_admission_log() {
 	memcpy(sv, st, sizeof(*sv));
 }
 
-void print_admission_core_log(uint16_t lcore) {
+void print_admission_core_log(uint16_t lcore, uint16_t adm_core_index) {
 	int i;
 	struct admission_log *al = &admission_core_logs[lcore];
-	struct admission_core_statistics *ast = &admission_core_state[lcore].stat;
+	struct admission_core_statistics *ast = &g_admissible_status.cores[adm_core_index].stat;
 	printf("admission lcore %d: %lu failed alloc, %lu no_timeslot, %lu need more (avg %0.2f), %lu done\n",
 			lcore, al->failed_admitted_traffic_alloc,
 			ast->no_available_timeslots_for_bin_entry,
@@ -198,7 +197,7 @@ int exec_log_core(void *void_cmd_p)
 		print_comm_log(enabled_lcore[FIRST_COMM_CORE]);
 		print_global_admission_log();
 		for (i = 0; i < N_ADMISSION_CORES; i++)
-			print_admission_core_log(enabled_lcore[FIRST_ADMISSION_CORE+i]);
+			print_admission_core_log(enabled_lcore[FIRST_ADMISSION_CORE+i], i);
 		fflush(stdout);
 
 		/* write log */

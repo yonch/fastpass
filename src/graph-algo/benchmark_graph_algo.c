@@ -220,7 +220,6 @@ int main(int argc, char **argv)
 
     // Data structures
     struct admissible_status *status;
-    struct admission_core_state core;
     struct fp_ring *q_bin;
     struct fp_ring *q_urgent;
     struct fp_ring *q_head;
@@ -228,8 +227,12 @@ int main(int argc, char **argv)
     struct admitted_traffic **admitted_batch;
     struct admitted_traffic **all_admitted;
     struct fp_mempool *head_bin_mempool;
-    struct fp_mempool *core_bin_mempool[ALGO_N_CORES];
+    struct fp_mempool *core_bin_mempool;
     struct fp_mempool *admitted_traffic_mempool;
+
+#if (ALGO_N_CORES != 1)
+#error "benchmark only supports ALGO_N_CORES == 1"
+#endif
 
     /* init queues */
     q_bin = fp_ring_create(NUM_BINS_SHIFT);
@@ -237,11 +240,8 @@ int main(int argc, char **argv)
     q_head = fp_ring_create(2 * FP_NODES_SHIFT);
     q_admitted_out = fp_ring_create(BATCH_SHIFT);
     head_bin_mempool = fp_mempool_create(HEAD_BIN_MEMPOOL_SIZE, bin_num_bytes(SMALL_BIN_SIZE));
-    for (i = 0; i < ALGO_N_CORES; i++) {
-    	core_bin_mempool[i] = fp_mempool_create(CORE_BIN_MEMPOOL_SIZE,
-    			bin_num_bytes(SMALL_BIN_SIZE));
-    	if (!core_bin_mempool[i]) exit(-1);
-    }
+   	core_bin_mempool = fp_mempool_create(CORE_BIN_MEMPOOL_SIZE,
+    									bin_num_bytes(SMALL_BIN_SIZE));
     admitted_traffic_mempool = fp_mempool_create(ADMITTED_TRAFFIC_MEMPOOL_SIZE,
     		sizeof(struct admitted_traffic));
     if (!q_bin) exit(-1);
@@ -249,15 +249,16 @@ int main(int argc, char **argv)
     if (!q_head) exit(-1);
     if (!q_admitted_out) exit(-1);
 	if (!head_bin_mempool) exit(-1);
+	if (!core_bin_mempool) exit(-1);
+	if (!admitted_traffic_mempool) exit(-1);
 
     /* init global status */
     status = create_admissible_status(false, 0, 0, 0, q_head, q_admitted_out,
-    		head_bin_mempool, &core_bin_mempool[0], admitted_traffic_mempool);
-
-    /* init core */
-    if (alloc_core_init(status, 0, &core, q_bin, q_bin, q_urgent, q_urgent) != 0) {
-        printf("Error initializing alloc core!\n");
-	exit(-1);
+    		head_bin_mempool, &core_bin_mempool, admitted_traffic_mempool,
+    		&q_bin, &q_urgent);
+    if (status == NULL) {
+        printf("Error initializing admissible_status!\n");
+        exit(-1);
     }
 
     /* make allocated_traffic containers */
@@ -365,7 +366,7 @@ int main(int argc, char **argv)
             // requests once we start timing
             struct request_info *next_request;
             run_experiment(requests, 0, warm_up_duration, num_requests,
-                           status, &next_request, &core, admitted_batch, per_batch_times);
+                           status, &next_request, &status->cores[0], admitted_batch, per_batch_times);
    
             if (benchmark_type == ADMISSIBLE) {
                 // Start timining
@@ -374,7 +375,7 @@ int main(int argc, char **argv)
                 // Run the experiment
                 uint32_t num_admitted = run_experiment(next_request, warm_up_duration, duration,
                                                        num_requests - (next_request - requests),
-                                                       status, &next_request, &core, admitted_batch,
+                                                       status, &next_request, &status->cores[0], admitted_batch,
                                                        per_batch_times);
                 uint64_t end_time = current_time();
 
@@ -399,7 +400,7 @@ int main(int argc, char **argv)
                 // Run the admissible algorithm to generate admitted traffic
                 uint32_t num_admitted = run_admissible(next_request, warm_up_duration, duration,
                                                        num_requests - (next_request - requests),
-                                                       status, &next_request, &core, admitted_batch,
+                                                       status, &next_request, &status->cores[0], admitted_batch,
                                                        all_admitted);
 
                 // Start timining

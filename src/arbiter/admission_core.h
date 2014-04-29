@@ -30,9 +30,6 @@ extern struct admissible_status g_admissible_status;
 /* admitted_traffic pool */
 extern struct rte_mempool* admitted_traffic_pool[NB_SOCKETS];
 
-/* core state */
-extern struct admission_core_state admission_core_state[RTE_MAX_LCORE];
-
 /* Specifications for controller thread */
 struct admission_core_cmd {
 	uint64_t start_time;

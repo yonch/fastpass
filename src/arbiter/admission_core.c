@@ -18,8 +18,6 @@ struct rte_mempool* admitted_traffic_pool[NB_SOCKETS];
 
 struct admission_log admission_core_logs[RTE_MAX_LCORE];
 
-struct admission_core_state admission_core_state[RTE_MAX_LCORE];
-
 struct rte_ring *q_head;
 struct rte_ring *q_bin[N_ADMISSION_CORES];
 struct rte_ring *q_urgent[N_ADMISSION_CORES];
@@ -96,11 +94,6 @@ void admission_init_global(struct rte_ring *q_admitted_out)
 					socketid, (uint64_t)ADMITTED_TRAFFIC_MEMPOOL_SIZE);
 	}
 
-	init_admissible_status(&g_admissible_status, OVERSUBSCRIBED,
-			INTER_RACK_CAPACITY, OUT_OF_BOUNDARY_CAPACITY, NUM_NODES, q_head,
-			q_admitted_out, head_bin_mempool, &core_bin_mempool[0],
-			admitted_traffic_pool[0]);
-
 	/* init log */
 	for (i = 0; i < RTE_MAX_LCORE; i++)
 		admission_log_init(&admission_core_logs[i]);
@@ -122,6 +115,13 @@ void admission_init_global(struct rte_ring *q_admitted_out)
 			rte_exit(EXIT_FAILURE,
 					"Cannot init q_urgent[%d]: %s\n", i, rte_strerror(rte_errno));
 	}
+
+	/* init admissible_status */
+	init_admissible_status(&g_admissible_status, OVERSUBSCRIBED,
+			INTER_RACK_CAPACITY, OUT_OF_BOUNDARY_CAPACITY, NUM_NODES, q_head,
+			q_admitted_out, head_bin_mempool, &core_bin_mempool[0],
+			admitted_traffic_pool[0], &q_bin[0], &q_urgent[0]);
+
 
 	/* push bins into first q_bin */
 	for (i = 0; i < NUM_BINS; i++) {
@@ -150,21 +150,12 @@ int exec_admission_core(void *void_cmd_p)
 	struct admission_core_cmd *cmd = (struct admission_core_cmd *)void_cmd_p;
 	uint32_t core_ind = cmd->admission_core_index;
 	uint64_t current_timeslot = cmd->start_timeslot;
-	struct admission_core_state *core = &admission_core_state[rte_lcore_id()];
+	struct admission_core_state *core = &g_admissible_status.cores[core_ind];
 	/* int traffic_pool_socketid = rte_lcore_to_socket_id(rte_lcore_id()); */
 	int traffic_pool_socketid = 0;
 	struct admitted_traffic *admitted[BATCH_SIZE];
 	int rc;
 	uint64_t start_time_first_timeslot;
-
-	/* initialize core */
-	rc = alloc_core_init(&g_admissible_status, core_ind, core,
-			q_bin[core_ind],
-			q_bin[(core_ind + 1) % N_ADMISSION_CORES],
-			q_urgent[core_ind],
-			q_urgent[(core_ind + 1) % N_ADMISSION_CORES]);
-	if (rc != 0)
-		rte_exit(EXIT_FAILURE, "could not successfully init admission_core_state\n");
 
 	/* if we're first core, we should have the token */
 	if (core_ind == 0)

@@ -38,8 +38,6 @@ struct admission_core_state {
     struct batch_state batch_state;
     struct admitted_traffic **admitted;
     uint8_t is_head;
-    struct fp_ring *q_bin_in;
-    struct fp_ring *q_bin_out;
     struct fp_ring *q_urgent_in;
     struct fp_ring *q_urgent_out;
     struct admission_core_statistics stat;

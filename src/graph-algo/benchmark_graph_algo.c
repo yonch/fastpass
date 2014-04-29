@@ -23,7 +23,8 @@
 #define NUM_RACKS_P 4
 #define NUM_NODES_P 1024
 #define PROCESSOR_SPEED 2.8
-#define BIN_MEMPOOL_SIZE 1024
+#define HEAD_BIN_MEMPOOL_SIZE 1024
+#define CORE_BIN_MEMPOOL_SIZE 1024
 
 const double admissible_fractions [NUM_FRACTIONS_A] =
     {0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9, 0.95, 0.99};
@@ -225,29 +226,35 @@ int main(int argc, char **argv)
     struct fp_ring *q_admitted_out;
     struct admitted_traffic **admitted_batch;
     struct admitted_traffic **all_admitted;
-    struct fp_mempool *bin_mempool;
+    struct fp_mempool *head_bin_mempool;
+    struct fp_mempool *core_bin_mempool[ALGO_N_CORES];
 
     /* init queues */
     q_bin = fp_ring_create(NUM_BINS_SHIFT);
     q_urgent = fp_ring_create(2 * FP_NODES_SHIFT + 1);
     q_head = fp_ring_create(2 * FP_NODES_SHIFT);
     q_admitted_out = fp_ring_create(BATCH_SHIFT);
-    bin_mempool = fp_mempool_create(BIN_MEMPOOL_SIZE, bin_num_bytes(SMALL_BIN_SIZE));
+    head_bin_mempool = fp_mempool_create(HEAD_BIN_MEMPOOL_SIZE, bin_num_bytes(SMALL_BIN_SIZE));
+    for (i = 0; i < ALGO_N_CORES; i++) {
+    	core_bin_mempool[i] = fp_mempool_create(CORE_BIN_MEMPOOL_SIZE,
+    			bin_num_bytes(SMALL_BIN_SIZE));
+    	if (!core_bin_mempool[i]) exit(-1);
+    }
     if (!q_bin) exit(-1);
     if (!q_urgent) exit(-1);
     if (!q_head) exit(-1);
     if (!q_admitted_out) exit(-1);
-	if (!bin_mempool) exit(-1);
-
-    /* init core */
-    if (alloc_core_init(&core, q_bin, q_bin, q_urgent, q_urgent) != 0) {
-        printf("Error initializing alloc core!\n");
-	exit(-1);
-    }
+	if (!head_bin_mempool) exit(-1);
 
     /* init global status */
     status = create_admissible_status(false, 0, 0, 0, q_head, q_admitted_out,
-    		bin_mempool);
+    		head_bin_mempool, &core_bin_mempool[0]);
+
+    /* init core */
+    if (alloc_core_init(status, 0, &core, q_bin, q_bin, q_urgent, q_urgent) != 0) {
+        printf("Error initializing alloc core!\n");
+	exit(-1);
+    }
 
     /* make allocated_traffic containers */
     admitted_batch = malloc(sizeof(struct admitted_traffic *) * BATCH_SIZE);

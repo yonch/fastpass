@@ -17,13 +17,14 @@
 #include "fp_ring.h"
 #include "platform.h"
 
+#include "algo_config.h"
 
 #include "backlog.h"
 #include "batch.h"
 #include "bin.h"
 #include "admitted.h"
 
-#define SMALL_BIN_SIZE (MAX_NODES * MAX_NODES) // TODO: try smaller values
+#define SMALL_BIN_SIZE (10*MAX_NODES) // TODO: try smaller values
 #define LARGE_BIN_SIZE (MAX_NODES * MAX_NODES) // TODO: try smaller values
 #define NUM_BINS_SHIFT 5
 #define NUM_BINS 32 // 2^NUM_BINS_SHIFT
@@ -42,6 +43,7 @@ struct admission_core_state {
     struct fp_ring *q_urgent_in;
     struct fp_ring *q_urgent_out;
     struct admission_core_statistics stat;
+    struct bin *out_demands;
 };
 
 // Tracks status for admissible traffic (last send time and demand for all flows, etc.)
@@ -58,7 +60,8 @@ struct admissible_status {
     struct fp_ring *q_head;
     struct fp_ring *q_admitted_out;
     struct admission_statistics stat;
-    struct fp_mempool *bin_mempool;
+    struct fp_mempool *head_bin_mempool;
+    struct fp_mempool *core_bin_mempool[ALGO_N_CORES];
 };
 
 
@@ -147,6 +150,10 @@ void alloc_core_reset(struct admission_core_state *core,
     core->admitted = admitted;
 
     core->is_head = 0;
+
+    /* out_demands should have been flushed out */
+    assert(core->out_demands != NULL);
+    assert(is_empty_bin(core->out_demands));
 }
 
 
@@ -155,7 +162,9 @@ void alloc_core_reset(struct admission_core_state *core,
  * Returns: 0 if successful, -1 on error.
  * @note: doesn't clean up memory on error - may leak!
  */
-static inline int alloc_core_init(struct admission_core_state* core,
+static inline int alloc_core_init(struct admissible_status *status,
+		uint32_t core_index,
+		struct admission_core_state* core,
 		struct fp_ring *q_bin_in, struct fp_ring *q_bin_out,
 		struct fp_ring *q_urgent_in, struct fp_ring *q_urgent_out)
 {
@@ -182,6 +191,11 @@ static inline int alloc_core_init(struct admission_core_state* core,
 	core->q_urgent_in = q_urgent_in;
 	core->q_urgent_out = q_urgent_out;
 
+	 if (fp_mempool_get(status->core_bin_mempool[core_index],
+			 (void**)&core->out_demands) != 0)
+		 return -1;
+	init_bin(core->out_demands);
+
 	return 0;
 }
 
@@ -193,7 +207,8 @@ void init_admissible_status(struct admissible_status *status,
                             bool oversubscribed, uint16_t inter_rack_capacity,
                             uint16_t out_of_boundary_capacity, uint16_t num_nodes,
                             struct fp_ring *q_head, struct fp_ring *q_admitted_out,
-                            struct fp_mempool *bin_mempool)
+                            struct fp_mempool *head_bin_mempool,
+                            struct fp_mempool **core_bin_mempool)
 {
     assert(status != NULL);
 
@@ -202,9 +217,11 @@ void init_admissible_status(struct admissible_status *status,
 
     status->q_head = q_head;
     status->q_admitted_out = q_admitted_out;
-    status->bin_mempool = bin_mempool;
+    status->head_bin_mempool = head_bin_mempool;
+    memcpy(&status->core_bin_mempool[0], &core_bin_mempool[0],
+    		sizeof(status->core_bin_mempool));
 
-    fp_mempool_get(bin_mempool, (void**)&status->new_demands);
+    fp_mempool_get(head_bin_mempool, (void**)&status->new_demands);
     init_bin(status->new_demands);
 }
 
@@ -218,7 +235,8 @@ struct admissible_status *create_admissible_status(bool oversubscribed,
                                                    uint16_t num_nodes,
                                                    struct fp_ring *q_head,
                                                    struct fp_ring *q_admitted_out,
-                                                   struct fp_mempool *bin_mempool)
+                                                   struct fp_mempool *head_bin_mempool,
+                                                   struct fp_mempool **core_bin_mempool)
 {
     struct admissible_status *status =
     		fp_malloc("admissible_status", sizeof(struct admissible_status));
@@ -228,7 +246,7 @@ struct admissible_status *create_admissible_status(bool oversubscribed,
 
     init_admissible_status(status, oversubscribed, inter_rack_capacity,
                            out_of_boundary_capacity, num_nodes, q_head,
-                           q_admitted_out, bin_mempool);
+                           q_admitted_out, head_bin_mempool, core_bin_mempool);
 
     return status;
 }

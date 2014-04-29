@@ -10,6 +10,7 @@
 #include "main.h"
 #include "admission_log.h"
 #include "../graph-algo/admissible_traffic.h"
+#include "../graph-algo/algo_config.h"
 
 struct admissible_status g_admissible_status;
 
@@ -28,7 +29,8 @@ void admission_init_global(struct rte_ring *q_admitted_out)
 	int i;
 	char s[64];
 	struct rte_ring *q_head;
-	struct rte_mempool *bin_mempool;
+	struct rte_mempool *head_bin_mempool;
+	struct rte_mempool *core_bin_mempool[ALGO_N_CORES];
 
 	/* init q_head */
 	q_head = rte_ring_create("q_head", Q_HEAD_RING_SIZE, 0, 0);
@@ -36,29 +38,48 @@ void admission_init_global(struct rte_ring *q_admitted_out)
 		rte_exit(EXIT_FAILURE,
 				"Cannot init q_head: %s\n", rte_strerror(rte_errno));
 
-	/* allocate bin_mempool */
+	/* allocate head_bin_mempool */
 	uint32_t pool_index = 0;
 	uint32_t socketid = 0;
-	rte_snprintf(s, sizeof(s), "bin_pool_%d", pool_index);
-	bin_mempool =
+	rte_snprintf(s, sizeof(s), "head_bin_pool_%d", pool_index);
+	head_bin_mempool =
 		rte_mempool_create(s,
-			BIN_MEMPOOL_SIZE, /* num elements */
-			sizeof(struct admitted_traffic), /* element size */
-			BIN_MEMPOOL_CACHE_SIZE, /* cache size */
+			HEAD_BIN_MEMPOOL_SIZE, /* num elements */
+			bin_num_bytes(SMALL_BIN_SIZE), /* element size */
+			HEAD_BIN_MEMPOOL_CACHE_SIZE, /* cache size */
 			0, NULL, NULL, NULL, NULL, /* custom initialization, disabled */
 			socketid, 0);
-	if (bin_mempool == NULL)
+	if (head_bin_mempool == NULL)
 		rte_exit(EXIT_FAILURE,
-				"Cannot init bin mempool on socket %d: %s\n", socketid,
+				"Cannot init head bin mempool on socket %d: %s\n", socketid,
 				rte_strerror(rte_errno));
 	else
-		RTE_LOG(INFO, ADMISSION, "Allocated bin mempool on socket %d - %lu bufs\n",
-				socketid, (uint64_t)BIN_MEMPOOL_SIZE);
+		RTE_LOG(INFO, ADMISSION, "Allocated head bin mempool on socket %d - %lu bufs\n",
+				socketid, (uint64_t)HEAD_BIN_MEMPOOL_SIZE);
+
+	/* allocate core_bin_mempool */
+	for (pool_index = 0; pool_index < ALGO_N_CORES; pool_index++) {
+		rte_snprintf(s, sizeof(s), "core_bin_pool_%d", pool_index);
+		core_bin_mempool[pool_index] =
+			rte_mempool_create(s,
+				CORE_BIN_MEMPOOL_SIZE, /* num elements */
+				bin_num_bytes(SMALL_BIN_SIZE), /* element size */
+				CORE_BIN_MEMPOOL_CACHE_SIZE, /* cache size */
+				0, NULL, NULL, NULL, NULL, /* custom initialization, disabled */
+				socketid, 0);
+		if (core_bin_mempool[pool_index] == NULL)
+			rte_exit(EXIT_FAILURE,
+					"Cannot init core bin mempool on socket %d: %s\n", socketid,
+					rte_strerror(rte_errno));
+		else
+			RTE_LOG(INFO, ADMISSION, "Allocated core bin mempool on socket %d - %lu bufs\n",
+					socketid, (uint64_t)CORE_BIN_MEMPOOL_SIZE);
+	}
 
 
 	init_admissible_status(&g_admissible_status, OVERSUBSCRIBED,
 			INTER_RACK_CAPACITY, OUT_OF_BOUNDARY_CAPACITY, NUM_NODES, q_head,
-			q_admitted_out, bin_mempool);
+			q_admitted_out, head_bin_mempool, &core_bin_mempool[0]);
 
 	/* init log */
 	for (i = 0; i < RTE_MAX_LCORE; i++)
@@ -137,7 +158,7 @@ int exec_admission_core(void *void_cmd_p)
 	uint64_t start_time_first_timeslot;
 
 	/* initialize core */
-	rc = alloc_core_init(core,
+	rc = alloc_core_init(&g_admissible_status, core_ind, core,
 			q_bin[core_ind],
 			q_bin[(core_ind + 1) % N_ADMISSION_CORES],
 			q_urgent[core_ind],

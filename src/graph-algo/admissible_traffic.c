@@ -27,7 +27,7 @@ static void _flush_backlog_now(struct admissible_status *status)
 		/* retry */;
 
 	/* get a fresh bin for status->new_backlogs */
-	while(fp_mempool_get(status->bin_mempool, (void**)&status->new_demands) == -ENOENT)
+	while(fp_mempool_get(status->head_bin_mempool, (void**)&status->new_demands) == -ENOENT)
 		/* retry */;
 
 	init_bin(status->new_demands);
@@ -203,7 +203,7 @@ process_head:
     }
 
 	/* free the bin */
-	fp_mempool_put(status->bin_mempool, head_bin);
+	fp_mempool_put(status->head_bin_mempool, head_bin);
 //	if (n > 0)
 //		goto process_head;
 }
@@ -314,6 +314,10 @@ process_more_requests:
 
     // Update current timeslot
     status->current_timeslot += BATCH_SIZE;
+
+    /* out_demands should have been flushed out */
+    assert(core->out_demands != NULL);
+    assert(is_empty_bin(core->out_demands));
 }
 
 // Reset state of all flows for which src is the sender

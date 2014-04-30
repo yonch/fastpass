@@ -20,7 +20,6 @@ struct admission_log admission_core_logs[RTE_MAX_LCORE];
 
 struct rte_ring *q_head;
 struct rte_ring *q_bin[N_ADMISSION_CORES];
-struct rte_ring *q_urgent[N_ADMISSION_CORES];
 
 void admission_init_global(struct rte_ring *q_admitted_out)
 {
@@ -107,20 +106,11 @@ void admission_init_global(struct rte_ring *q_admitted_out)
 					"Cannot init q_bin[%d]: %s\n", i, rte_strerror(rte_errno));
 	}
 
-	/* init q_urgent */
-	for (i = 0; i < N_ADMISSION_CORES; i++) {
-		rte_snprintf(s, sizeof(s), "q_urgent_%d", i);
-		q_urgent[i] = rte_ring_create(s, URGENT_RING_SIZE, 0, 0);
-		if (q_urgent[i] == NULL)
-			rte_exit(EXIT_FAILURE,
-					"Cannot init q_urgent[%d]: %s\n", i, rte_strerror(rte_errno));
-	}
-
 	/* init admissible_status */
 	init_admissible_status(&g_admissible_status, OVERSUBSCRIBED,
 			INTER_RACK_CAPACITY, OUT_OF_BOUNDARY_CAPACITY, NUM_NODES, q_head,
 			q_admitted_out, head_bin_mempool, &core_bin_mempool[0],
-			admitted_traffic_pool[0], &q_bin[0], &q_urgent[0]);
+			admitted_traffic_pool[0], &q_bin[0]);
 
 
 	/* push bins into first q_bin */
@@ -159,7 +149,7 @@ int exec_admission_core(void *void_cmd_p)
 
 	/* if we're first core, we should have the token */
 	if (core_ind == 0)
-		rte_ring_enqueue(q_urgent[core_ind], (void*)URGENT_Q_HEAD_TOKEN);
+		rte_ring_enqueue(q_bin[core_ind], NULL);
 
 	ADMISSION_DEBUG("core %d admission %d starting allocations\n",
 			rte_lcore_id(), core_ind);

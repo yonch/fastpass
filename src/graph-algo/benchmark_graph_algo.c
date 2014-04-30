@@ -219,7 +219,6 @@ int main(int argc, char **argv)
     // Data structures
     struct admissible_status *status;
     struct fp_ring *q_bin;
-    struct fp_ring *q_urgent;
     struct fp_ring *q_head;
     struct fp_ring *q_admitted_out;
     struct admitted_traffic **admitted_batch;
@@ -234,7 +233,6 @@ int main(int argc, char **argv)
 
     /* init queues */
     q_bin = fp_ring_create(2 * NUM_BINS_SHIFT);
-    q_urgent = fp_ring_create(2 * FP_NODES_SHIFT + 1);
     q_head = fp_ring_create(2 * FP_NODES_SHIFT);
     q_admitted_out = fp_ring_create(BATCH_SHIFT);
     head_bin_mempool = fp_mempool_create(HEAD_BIN_MEMPOOL_SIZE, bin_num_bytes(SMALL_BIN_SIZE));
@@ -243,7 +241,6 @@ int main(int argc, char **argv)
     admitted_traffic_mempool = fp_mempool_create(ADMITTED_TRAFFIC_MEMPOOL_SIZE,
     		sizeof(struct admitted_traffic));
     if (!q_bin) exit(-1);
-    if (!q_urgent) exit(-1);
     if (!q_head) exit(-1);
     if (!q_admitted_out) exit(-1);
 	if (!head_bin_mempool) exit(-1);
@@ -253,7 +250,7 @@ int main(int argc, char **argv)
     /* init global status */
     status = create_admissible_status(false, 0, 0, 0, q_head, q_admitted_out,
     		head_bin_mempool, &core_bin_mempool, admitted_traffic_mempool,
-    		&q_bin, &q_urgent);
+    		&q_bin);
     if (status == NULL) {
         printf("Error initializing admissible_status!\n");
         exit(-1);
@@ -335,13 +332,8 @@ int main(int argc, char **argv)
             	if (b != NULL)
             		fp_mempool_put(core_bin_mempool, b);
             }
+
             fp_ring_enqueue(q_bin, NULL);
-
-            void *vp;
-            while (fp_ring_dequeue(q_urgent, &vp) == 0)
-            	/* continue to dequeue */ ;
-
-            fp_ring_enqueue(q_urgent, (void*)URGENT_Q_HEAD_TOKEN);
 
             // Allocate enough space for new requests
             // (this is sufficient for <= 1 request per node per timeslot)

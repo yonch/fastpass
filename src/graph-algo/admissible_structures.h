@@ -35,15 +35,11 @@
 // Data structures associated with one allocation core
 struct admission_core_state {
 	struct bin *new_request_bins[NUM_BINS + BATCH_SIZE]; // pool of backlog bins for incoming requests
-	struct bin *temporary_bins[BATCH_SIZE]; // hold spare allocated bins during run
 	uint64_t non_empty_bins[BIN_MASK_SIZE];
     struct batch_state batch_state;
     struct admitted_traffic **admitted;
-    uint8_t is_head;
-    struct fp_ring *q_urgent_in;
-    struct fp_ring *q_urgent_out;
-    struct admission_core_statistics stat;
     struct bin *out_bin;
+    struct admission_core_statistics stat;
 }  __attribute__((aligned(64))) /* don't want sharing between cores */;
 
 // Tracks status for admissible traffic (last send time and demand for all flows, etc.)
@@ -59,14 +55,13 @@ struct admissible_status {
     struct bin *new_demands;
     struct fp_ring *q_head;
     struct fp_ring *q_admitted_out;
-    struct admission_statistics stat;
     struct fp_mempool *head_bin_mempool;
     struct fp_mempool *core_bin_mempool[ALGO_N_CORES];
     struct fp_mempool *admitted_traffic_mempool;
     struct admission_core_state cores[ALGO_N_CORES];
     struct fp_ring *q_bin[ALGO_N_CORES];
+    struct admission_statistics stat;
 };
-
 
 
 #ifdef NO_DPDK
@@ -152,8 +147,6 @@ void alloc_core_reset(struct admission_core_state *core,
         init_admitted_traffic(admitted[i]);
     core->admitted = admitted;
 
-    core->is_head = 0;
-
     /* out_demands should have been flushed out */
     assert(core->out_bin != NULL);
     assert(is_empty_bin(core->out_bin));
@@ -166,30 +159,16 @@ void alloc_core_reset(struct admission_core_state *core,
  * @note: doesn't clean up memory on error - may leak!
  */
 static inline int alloc_core_init(struct admissible_status *status,
-		uint32_t core_index,
-		struct fp_ring *q_urgent_in, struct fp_ring *q_urgent_out)
+		uint32_t core_index)
 {
 	int j;
 	struct admission_core_state* core = &status->cores[core_index];
 
-	for (j = 0; j < NUM_BINS; j++) {
-		core->new_request_bins[j] = create_bin(SMALL_BIN_SIZE);
-		if (core->new_request_bins[j] == NULL)
-			return -1;
-	}
-
-	for (j = NUM_BINS; j < NUM_BINS + BATCH_SIZE; j++) {
+	for (j = 0; j < NUM_BINS + BATCH_SIZE; j++) {
 		core->new_request_bins[j] = create_bin(LARGE_BIN_SIZE);
 		if (core->new_request_bins[j] == NULL)
 			return -1;
 	}
-
-	core->temporary_bins[0] = create_bin(LARGE_BIN_SIZE);
-	if (core->temporary_bins[0] == NULL)
-		return -1;
-
-	core->q_urgent_in = q_urgent_in;
-	core->q_urgent_out = q_urgent_out;
 
 	 if (fp_mempool_get(status->core_bin_mempool[core_index],
 			 (void**)&core->out_bin) != 0)
@@ -210,7 +189,7 @@ int init_admissible_status(struct admissible_status *status,
                             struct fp_mempool *head_bin_mempool,
                             struct fp_mempool **core_bin_mempool,
                             struct fp_mempool *admitted_traffic_mempool,
-                            struct fp_ring **q_bin, struct fp_ring **q_urgent)
+                            struct fp_ring **q_bin)
 {
     assert(status != NULL);
     uint32_t i;
@@ -232,8 +211,7 @@ int init_admissible_status(struct admissible_status *status,
     init_bin(status->new_demands);
 
     for (i = 0; i < ALGO_N_CORES; i++) {
-    	rc = alloc_core_init(status, i,
-    			q_urgent[i], q_urgent[(i + 1) % ALGO_N_CORES]);
+    	rc = alloc_core_init(status, i);
     	if (rc != 0)
     		return -1;
     }
@@ -252,8 +230,7 @@ struct admissible_status *create_admissible_status(bool oversubscribed,
                                                    struct fp_mempool *head_bin_mempool,
                                                    struct fp_mempool **core_bin_mempool,
                                                    struct fp_mempool *admitted_traffic_mempool,
-                                                   struct fp_ring **q_bin,
-                                                   struct fp_ring **q_urgent)
+                                                   struct fp_ring **q_bin)
 {
     struct admissible_status *status =
     		fp_malloc("admissible_status", sizeof(struct admissible_status));
@@ -264,7 +241,7 @@ struct admissible_status *create_admissible_status(bool oversubscribed,
     init_admissible_status(status, oversubscribed, inter_rack_capacity,
                            out_of_boundary_capacity, num_nodes, q_head,
                            q_admitted_out, head_bin_mempool, core_bin_mempool,
-                           admitted_traffic_mempool, q_bin, q_urgent);
+                           admitted_traffic_mempool, q_bin);
 
     return status;
 }

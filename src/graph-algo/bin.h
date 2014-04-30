@@ -44,6 +44,14 @@ void enqueue_bin(struct bin *bin, uint16_t src, uint16_t dst, uint32_t metric) {
     bin->edges[n].metric = metric;
 }
 
+// Insert new edge to the back of this bin, when given an edge already.
+static inline __attribute__((always_inline))
+void enqueue_bin_edge(struct bin *bin, struct backlog_edge *edge) {
+    assert(bin != NULL);
+    uint32_t n = bin->size++;
+    memcpy(&bin->edges[n], edge, sizeof(struct backlog_edge));
+}
+
 // Insert new edge to the back of this bin
 static inline __attribute__((always_inline))
 uint32_t bin_size(struct bin *bin) {

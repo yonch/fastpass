@@ -41,7 +41,7 @@ void reset_sender(struct admissible_status *status, uint16_t src);
  * Returns the bin index a flow last allocated at timeslot @last_allocated
  *   should fit in, when allocating a batch that starts with @current_timeslot
  */
-static inline
+static inline __attribute__((always_inline))
 uint16_t bin_index_from_timeslot(uint32_t last_allocated,
 	uint64_t current_timeslot)
 {
@@ -74,6 +74,22 @@ uint16_t bin_index_from_timeslot(uint32_t last_allocated,
 	bin_gap |= (1 << 15) - is_large_gap;
 
 	return BATCH_SIZE - 1 - (bin_gap & (BATCH_SIZE-1));
+}
+
+static inline __attribute__((always_inline))
+uint32_t new_metric_after_alloc(uint16_t src, uint16_t dst, uint32_t old_metric,
+		uint16_t batch_timeslot,
+		struct admission_core_state *core, struct admissible_status *status)
+{
+	return status->current_timeslot + batch_timeslot;
+}
+
+static inline __attribute__((always_inline))
+uint32_t bin_after_alloc(uint16_t src, uint16_t dst, uint32_t metric,
+		uint16_t batch_timeslot,
+		struct admission_core_state *core, struct admissible_status *status)
+{
+	return NUM_BINS + batch_timeslot;
 }
 
 // Helper method for testing in Python. Enqueues the head token.

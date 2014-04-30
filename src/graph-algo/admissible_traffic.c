@@ -76,12 +76,35 @@ void add_backlog(struct admissible_status *status,
 			status->last_alloc_tslot[get_status_index(src,dst)]);
 }
 
+static inline __attribute__((always_inline))
+void set_bin_non_empty(struct admission_core_state *core, uint16_t bin_index)
+{
+	asm("bts %1,%0" : "+m" (*(uint64_t *)&core->non_empty_bins[0]) : "r" (bin_index));
+}
+
+static inline __attribute__((always_inline))
+void incoming_bin_to_core(struct admissible_status *status,
+		struct admission_core_state *core, struct bin *bin)
+{
+	uint32_t n = bin_size(bin);
+	uint32_t i;
+	for (i = 0; i < n; i++) {
+		/* where to put the entry? */
+		uint16_t bin_index = bin_index_from_timeslot(bin_get(bin, i)->metric,
+													status->current_timeslot);
+		/* put it there */
+		enqueue_bin_edge(core->new_request_bins[bin_index], bin_get(bin, i));
+		/* mark that the bin is non-empty */
+		set_bin_non_empty(core, bin_index);
+	}
+}
+
 /**
  * Try to allocate the given edge
  * Returns false, if the flow will be handled internally,
  * 		   true, if more backlog remains and should be handled by the caller
  */
-static inline bool try_allocation(uint16_t src, uint16_t dst,
+static inline bool try_allocation(uint16_t src, uint16_t dst, uint32_t metric,
 		struct admission_core_state *core,
 		struct admissible_status *status)
 {
@@ -106,16 +129,20 @@ static inline bool try_allocation(uint16_t src, uint16_t dst,
 
 	// We can allocate this edge now
 	batch_state_set_occupied(&core->batch_state, src, dst, batch_timeslot);
+	metric = new_metric_after_alloc(src, dst, metric, batch_timeslot, core, status);
 
 	insert_admitted_edge(core->admitted[batch_timeslot], src, dst);
-	status->last_alloc_tslot[index] = status->current_timeslot + batch_timeslot;
 
 	backlog = backlog_decrease(&status->backlog, src, dst);
 	if (backlog != 0) {
     	adm_log_allocated_backlog_remaining(&core->stat, src, dst, backlog);
-		enqueue_bin(core->new_request_bins[NUM_BINS + batch_timeslot], src, dst, 0);
+    	uint16_t bin_index = bin_after_alloc(src, dst, metric, batch_timeslot,
+    			core, status);
+		enqueue_bin(core->new_request_bins[bin_index], src, dst, metric);
+		set_bin_non_empty(core, bin_index);
 	} else {
 		adm_log_allocator_no_backlog(&core->stat, src, dst);
+		status->last_alloc_tslot[index] = metric;
 	}
 
 	return false;
@@ -134,7 +161,7 @@ static void try_allocation_bin(struct bin *in_bin, struct admission_core_state *
 		uint16_t dst = bin_get(in_bin,i)->dst;
 		uint32_t metric = bin_get(in_bin, i)->metric;
 
-        rc = try_allocation(src, dst, core, status);
+        rc = try_allocation(src, dst, metric, core, status);
         if (rc == true) {
 			// We cannot allocate this edge now - copy to queue_out
 			bin_enqueue_buffered(&core->out_bin, queue_out, bin_mp_out,
@@ -143,29 +170,31 @@ static void try_allocation_bin(struct bin *in_bin, struct admission_core_state *
     }
 }
 
-static inline void process_one_new_request(uint16_t src, uint16_t dst,
-		uint16_t bin_index, struct admission_core_state* core,
-		struct admissible_status* status, uint16_t current_bin)
+static inline __attribute__((always_inline))
+void try_allocation_core(struct admission_core_state *core,
+                    struct fp_ring *queue_out, struct admissible_status *status,
+                    struct fp_mempool *bin_mp_out)
 {
-	if (bin_index < current_bin) {
-		// We have already processed the bin for this src/dst pair
-		// Try to allocate immediately
-		if (try_allocation(src, dst, core, status) == true) {
-			/* couldn't process, pass on to next core */
-			bin_index = (bin_index >= 2 * BATCH_SIZE) ?
-							(bin_index - BATCH_SIZE) :
-							(bin_index / 2);
-			while(fp_ring_enqueue(core->q_urgent_out,
-					MAKE_EDGE(bin_index, src, dst)) == -ENOBUFS)
-				status->stat.wait_for_space_in_q_urgent++;
+	uint32_t bin_mask_ind;
+
+	for (bin_mask_ind = 0; bin_mask_ind < BIN_MASK_SIZE; bin_mask_ind++) {
+		uint64_t mask = core->non_empty_bins[bin_mask_ind];
+		uint64_t bin_index;
+		while (mask) {
+			/* get the index of the lsb that is set */
+			asm("bsfq %1,%0" : "=r"(bin_index) : "r"(mask));
+			/* turn off the set bit in the mask */
+			core->non_empty_bins[bin_mask_ind] = (mask & (mask - 1));
+
+			try_allocation_bin(core->new_request_bins[bin_index], core,
+					queue_out, status, bin_mp_out);
+			init_bin(core->new_request_bins[bin_index]);
+
+			/* re-read mask */
+			mask = core->non_empty_bins[bin_mask_ind];
 		}
-	} else {
-		// We have not yet processed the bin for this src/dst pair
-		// Enqueue it to the working bins for later processing
-		enqueue_bin(core->new_request_bins[bin_index], src, dst, 0);
 	}
 }
-
 
 // Sets the last send time for new requests based on the contents of status
 // and sorts them
@@ -176,56 +205,16 @@ static inline void process_new_requests(struct admissible_status *status,
     assert(status != NULL);
     assert(core != NULL);
 
-    uint64_t edges[RING_DEQUEUE_BURST_SIZE];
-    struct bin *head_bin;
-    int n;
-    int i;
+    struct bin *bins[RING_DEQUEUE_BURST_SIZE];
+    int n, i;
 
-    /* likely because we want fast branch prediction when is_head = true */
-    if (likely(core->is_head))
-    	goto process_head;
-
-process_q_urgent:
-    n = fp_ring_dequeue_burst(core->q_urgent_in, (void **)&edges[0],
+    n = fp_ring_dequeue_burst(status->q_head, (void **)&bins[0],
     		RING_DEQUEUE_BURST_SIZE);
+
     for (i = 0; i < n; i++) {
-    	uint64_t edge = edges[i];
-        if (unlikely(edge == URGENT_Q_HEAD_TOKEN)) {
-        	/* got token! */
-        	core->is_head = 1; /* TODO: what about the entries i+1..n-1 ?? */
-        	goto process_head;
-        }
-
-        process_one_new_request(EDGE_SRC(edge), EDGE_DST(edge), EDGE_BIN(edge),
-        		core, status, current_bin);
+    	incoming_bin_to_core(status, core, bins[i]);
+		fp_mempool_put(status->head_bin_mempool, bins[i]);
     }
-//    adm_log_processed_q_urgent(&core->stat, current_bin, n);
-    if (n > 0)
-    	goto process_q_urgent;
-
-    return;
-
-process_head:
-    // Add new requests to the appropriate working bin
-	n = fp_ring_dequeue(status->q_head, (void **)&head_bin);
-	if (n != 0)
-		return; /* nothing to dequeue */
-
-	n = bin_size(head_bin);
-	for (i = 0; i < n; i++) {
-        uint16_t src = bin_get(head_bin, i)->src;
-        uint16_t dst = bin_get(head_bin, i)->dst;
-		uint32_t metric = bin_get(head_bin, i)->metric;
-        uint16_t bin_index = bin_index_from_timeslot(
-        		metric, status->current_timeslot);
-        
-        process_one_new_request(src, dst, bin_index, core, status, current_bin);
-    }
-
-	/* free the bin */
-	fp_mempool_put(status->head_bin_mempool, head_bin);
-//	if (n > 0)
-//		goto process_head;
 }
 
 // Determine admissible traffic for one timeslot from queue_in
@@ -277,7 +266,7 @@ void get_admissible_traffic(struct admissible_status *status,
     	prev_timeslot = now_timeslot;
 
 		/* if time is not close enough to process bins, continue */
-		if (likely(time_before64(now_timeslot, first_timeslot - NUM_BINS)))
+		if (likely(time_before64((__u64)now_timeslot, (__u64)(first_timeslot - NUM_BINS))))
 			goto handle_inputs;
 
 		uint64_t slot_gap = now_timeslot - first_timeslot + NUM_BINS + 1;
@@ -319,25 +308,19 @@ handle_inputs:
     			queue_in_done = true;
     		} else {
     			adm_log_dequeued_bin_in(&core->stat, bin++, bin_size(bin_in));
-    			try_allocation_bin(bin_in, core, queue_out, status, bin_mp_out);
+    			incoming_bin_to_core(status, core, bin_in);
     			fp_mempool_put(bin_mp_in, bin_in);
     		}
     	}
+
+		try_allocation_core(core, queue_out, status, bin_mp_out);
     }
 
 wrap_up:
-	while (!core->is_head)
-		process_new_requests(status, core, bin);
-
 	if (!is_empty_bin(core->out_bin))
 		_flush_bin_now(&core->out_bin, queue_out, bin_mp_out);
 
     while(fp_ring_enqueue(queue_out, NULL) == -ENOBUFS)
-    	status->stat.waiting_to_pass_token++;
-
-    /* hand over token to next core. this should happen after enqueuing _all_
-     * allocated_traffic structs, to prevent allocation re-ordering */
-    while(fp_ring_enqueue(core->q_urgent_out, (void*)URGENT_Q_HEAD_TOKEN) == -ENOBUFS)
     	status->stat.waiting_to_pass_token++;
 
     // Update current timeslot

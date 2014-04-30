@@ -30,11 +30,13 @@
 #define NUM_BINS 32 // 2^NUM_BINS_SHIFT
 #define NUM_SRC_DST_PAIRS (MAX_NODES * (MAX_NODES))  // include dst == out of boundary
 
+#define BIN_MASK_SIZE		((NUM_BINS + BATCH_SIZE + 63) / 64)
 
 // Data structures associated with one allocation core
 struct admission_core_state {
 	struct bin *new_request_bins[NUM_BINS + BATCH_SIZE]; // pool of backlog bins for incoming requests
 	struct bin *temporary_bins[BATCH_SIZE]; // hold spare allocated bins during run
+	uint64_t non_empty_bins[BIN_MASK_SIZE];
     struct batch_state batch_state;
     struct admitted_traffic **admitted;
     uint8_t is_head;

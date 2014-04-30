@@ -14,10 +14,6 @@
 
 #define MAX(a,b) (((a) > (b)) ? (a) : (b))
 
-#define EDGE_BIN(edge)		((uint16_t)(edge >> 32))
-#define EDGE_SRC(edge)		((uint16_t)(edge >> 16))
-#define EDGE_DST(edge)		((uint16_t)(edge	  ))
-
 #define RING_DEQUEUE_BURST_SIZE		256
 
 #define URGENT_NUM_TIMESLOTS_START		BATCH_SIZE
@@ -104,16 +100,14 @@ void incoming_bin_to_core(struct admissible_status *status,
  * Returns false, if the flow will be handled internally,
  * 		   true, if more backlog remains and should be handled by the caller
  */
-static inline bool try_allocation(uint16_t src, uint16_t dst, uint32_t metric,
+static inline __attribute__((always_inline))
+bool try_allocation(uint16_t src, uint16_t dst, uint32_t metric,
 		struct admission_core_state *core,
 		struct admissible_status *status)
 {
 	int32_t backlog;
     assert(core != NULL);
     assert(status != NULL);
-
-	uint32_t index = get_status_index(src, dst);
-	__builtin_prefetch(&status->last_alloc_tslot[index], 1, 1);
 
 	uint64_t timeslot_bitmap = batch_state_get_avail_bitmap(
 			&core->batch_state, src, dst);
@@ -142,13 +136,14 @@ static inline bool try_allocation(uint16_t src, uint16_t dst, uint32_t metric,
 		set_bin_non_empty(core, bin_index);
 	} else {
 		adm_log_allocator_no_backlog(&core->stat, src, dst);
-		status->last_alloc_tslot[index] = metric;
+		status->last_alloc_tslot[get_status_index(src, dst)] = metric;
 	}
 
 	return false;
 }
 
-static void try_allocation_bin(struct bin *in_bin, struct admission_core_state *core,
+static inline __attribute__((always_inline))
+void try_allocation_bin(struct bin *in_bin, struct admission_core_state *core,
                     struct fp_ring *queue_out, struct admissible_status *status,
                     struct fp_mempool *bin_mp_out)
 {
@@ -230,7 +225,6 @@ void get_admissible_traffic(struct admissible_status *status,
 
     struct admission_core_state *core = &status->cores[core_index];
 
-    // TODO: use multiple cores
     struct fp_ring *queue_in = status->q_bin[core_index];
     struct fp_ring *queue_out = status->q_bin[(core_index + 1) % ALGO_N_CORES];
     struct fp_mempool *bin_mp_in = status->core_bin_mempool[core_index];

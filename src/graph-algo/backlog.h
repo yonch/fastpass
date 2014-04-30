@@ -41,7 +41,7 @@ uint32_t backlog_get(struct backlog *backlog, uint16_t src, uint16_t dst) {
 /**
  * Decreases backlog for the (src,dst) pair by 1
  */
-static inline
+static inline __attribute__((always_inline))
 uint32_t backlog_decrease(struct backlog *backlog, uint16_t src, uint16_t dst) {
 	uint32_t index = _backlog_index(src, dst);
 	return atomic32_sub_return(&backlog->n[index], 1);

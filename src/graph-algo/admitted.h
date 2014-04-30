@@ -30,7 +30,7 @@ void init_admitted_traffic(struct admitted_traffic *admitted) {
 }
 
 // Insert an edge into the admitted traffic
-static inline
+static inline __attribute__((always_inline))
 void insert_admitted_edge(struct admitted_traffic *admitted, uint16_t src,
                           uint16_t dst) {
     assert(admitted != NULL);
@@ -44,7 +44,7 @@ void insert_admitted_edge(struct admitted_traffic *admitted, uint16_t src,
 }
 
 // Get a pointer to an edge of admitted traffic
-static inline
+static inline __attribute__((always_inline))
 struct admitted_edge *get_admitted_edge(struct admitted_traffic *admitted,
                                         uint16_t index) {
     assert(admitted != NULL);

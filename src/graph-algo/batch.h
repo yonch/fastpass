@@ -78,7 +78,7 @@ void batch_state_init(struct batch_state *state, bool oversubscribed,
 }
 
 // Returns the available timeslot bitmap for src and dst (lsb is closest timeslot)
-static inline
+static inline __attribute__((always_inline))
 uint64_t batch_state_get_avail_bitmap(struct batch_state *state,
 		uint16_t src, uint16_t dst)
 {
@@ -106,7 +106,7 @@ uint64_t batch_state_get_avail_bitmap(struct batch_state *state,
 }
 
 // Sets a timeslot as occupied for src and dst
-static inline
+static inline __attribute__((always_inline))
 void batch_state_set_occupied(struct batch_state *state, uint16_t src,
                            uint16_t dst, uint8_t timeslot) {
     assert(state != NULL);

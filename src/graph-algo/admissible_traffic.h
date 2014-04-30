@@ -13,12 +13,6 @@
 
 #include <inttypes.h>
 
-#define URGENT_Q_HEAD_TOKEN		(~0UL)
-
-#define MAKE_EDGE(bin,src,dst) \
-	((void*)(((uint64_t)bin << 32) | ((uint32_t)src << 16) | dst))
-
-
 // Increase the backlog from src to dst
 void add_backlog(struct admissible_status *status,
                        uint16_t src, uint16_t dst,
@@ -90,14 +84,6 @@ uint32_t bin_after_alloc(uint16_t src, uint16_t dst, uint32_t metric,
 		struct admission_core_state *core, struct admissible_status *status)
 {
 	return NUM_BINS + batch_timeslot;
-}
-
-// Helper method for testing in Python. Enqueues the head token.
-static inline
-void enqueue_head_token(struct fp_ring *ring) {
-    assert(ring != NULL);
-
-    fp_ring_enqueue(ring, (void *) URGENT_Q_HEAD_TOKEN);
 }
 
 // Helper method for testing in Python. Dequeues and returns an admitted traffic struct.

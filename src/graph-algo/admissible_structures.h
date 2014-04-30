@@ -41,7 +41,7 @@ struct admission_core_state {
     struct fp_ring *q_urgent_in;
     struct fp_ring *q_urgent_out;
     struct admission_core_statistics stat;
-    struct bin *out_demands;
+    struct bin *out_bin;
 }  __attribute__((aligned(64))) /* don't want sharing between cores */;
 
 // Tracks status for admissible traffic (last send time and demand for all flows, etc.)
@@ -153,8 +153,8 @@ void alloc_core_reset(struct admission_core_state *core,
     core->is_head = 0;
 
     /* out_demands should have been flushed out */
-    assert(core->out_demands != NULL);
-    assert(is_empty_bin(core->out_demands));
+    assert(core->out_bin != NULL);
+    assert(is_empty_bin(core->out_bin));
 }
 
 
@@ -190,9 +190,9 @@ static inline int alloc_core_init(struct admissible_status *status,
 	core->q_urgent_out = q_urgent_out;
 
 	 if (fp_mempool_get(status->core_bin_mempool[core_index],
-			 (void**)&core->out_demands) != 0)
+			 (void**)&core->out_bin) != 0)
 		 return -1;
-	init_bin(core->out_demands);
+	init_bin(core->out_bin);
 
 	return 0;
 }

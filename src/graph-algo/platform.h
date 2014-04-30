@@ -28,7 +28,7 @@
 #define fp_free(ptr)                            free(ptr)
 #define fp_calloc(typestr, num, size)           calloc(num, size)
 #define fp_malloc(typestr, size)		malloc(size)
-#define fp_get_time_ns()				(1UL << 62)
+#define fp_get_time_ns()				(1UL << 40)
 #define fp_pause()						while (0) {}
 
 #ifndef likely

@@ -45,7 +45,6 @@ struct fp_ring *fp_ring_create(uint32_t log_size) {
 static inline
 int fp_ring_enqueue(struct fp_ring *ring, void *elem) {
 	assert(ring != NULL);
-	assert(elem != NULL);
 	assert(ring->tail != ring->head - ring->mask - 1);
 
 	ring->elem[ring->tail & ring->mask] = elem;

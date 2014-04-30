@@ -61,7 +61,6 @@ uint32_t run_experiment(struct request_info *requests, uint32_t start_time, uint
     struct request_info *current_request = requests;
 
     assert(requests != NULL);
-    assert(status->q_bin[0]->tail == status->q_bin[0]->head + NUM_BINS);
 
     uint64_t prev_time = current_time();
     start_b = start_time >> BATCH_SHIFT;
@@ -97,7 +96,6 @@ uint32_t run_experiment(struct request_info *requests, uint32_t start_time, uint
 
     *next_request = current_request;
 
-    assert(status->q_bin[0]->tail == status->q_bin[0]->head + NUM_BINS);
 	return num_admitted;
 }
 
@@ -235,7 +233,7 @@ int main(int argc, char **argv)
 #endif
 
     /* init queues */
-    q_bin = fp_ring_create(NUM_BINS_SHIFT);
+    q_bin = fp_ring_create(2 * NUM_BINS_SHIFT);
     q_urgent = fp_ring_create(2 * FP_NODES_SHIFT + 1);
     q_head = fp_ring_create(2 * FP_NODES_SHIFT);
     q_admitted_out = fp_ring_create(BATCH_SHIFT);
@@ -284,9 +282,7 @@ int main(int argc, char **argv)
     }
 
     /* fill bin_queue with empty bins */
-    for (i = 0; i < NUM_BINS; i++) {
-        fp_ring_enqueue(q_bin, create_bin(LARGE_BIN_SIZE));
-    }
+	fp_ring_enqueue(q_bin, NULL);
 
     /* allocate space to record times */
     uint16_t num_batches = (duration - warm_up_duration) / BATCH_SIZE;
@@ -334,12 +330,13 @@ int main(int argc, char **argv)
                 reset_admissible_status(status, false, 0, 0, num_nodes);
             }
 
-            for (k = 0; k < NUM_BINS; k++) {
-            	struct bin *b;
-            	fp_ring_dequeue(q_bin, (void **)&b);
-                init_bin(b);
-                fp_ring_enqueue(q_bin, b);
+            struct bin *b;
+            while (fp_ring_dequeue(q_bin, (void **)&b) == 0) {
+            	if (b != NULL)
+            		fp_mempool_put(core_bin_mempool, b);
             }
+            fp_ring_enqueue(q_bin, NULL);
+
             void *vp;
             while (fp_ring_dequeue(q_urgent, &vp) == 0)
             	/* continue to dequeue */ ;

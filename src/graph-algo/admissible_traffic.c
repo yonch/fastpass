@@ -20,23 +20,47 @@
 
 #define RING_DEQUEUE_BURST_SIZE		256
 
-static void _flush_backlog_now(struct admissible_status *status)
+#define URGENT_NUM_TIMESLOTS_START		BATCH_SIZE
+#define URGENT_NUM_TIMESLOTS_END		6
+
+/* auxiliary functions */
+
+/**
+ * Flushes bin to queue, and allocates a new bin
+ */
+static inline __attribute__((always_inline))
+void _flush_bin_now(struct bin **bin_pp, struct fp_ring *queue,
+		struct fp_mempool *bin_mempool)
 {
 	/* enqueue status->new_backlogs */
-	while(fp_ring_enqueue(status->q_head, status->new_demands) == -ENOBUFS)
+	while(fp_ring_enqueue(queue, *bin_pp) == -ENOBUFS)
 		/* retry */;
 
 	/* get a fresh bin for status->new_backlogs */
-	while(fp_mempool_get(status->head_bin_mempool, (void**)&status->new_demands) == -ENOENT)
+	while(fp_mempool_get(bin_mempool, (void**)bin_pp) == -ENOENT)
 		/* retry */;
 
-	init_bin(status->new_demands);
+	init_bin(*bin_pp);
 }
+
+static inline __attribute__((always_inline))
+void bin_enqueue_buffered(struct bin **bin_pp, struct fp_ring *queue,
+		struct fp_mempool *bin_mempool, uint16_t src, uint16_t dst,
+		uint32_t metric)
+{
+	/* add to status->new_demands */
+	enqueue_bin(*bin_pp, src, dst, metric);
+
+	if (unlikely(bin_size(*bin_pp) == SMALL_BIN_SIZE))
+		_flush_bin_now(bin_pp, queue, bin_mempool);
+}
+
+/* end auxiliary functions */
 
 void flush_backlog(struct admissible_status *status) {
 	if (unlikely(is_empty_bin(status->new_demands)))
 		return;
-	_flush_backlog_now(status);
+	_flush_bin_now(&status->new_demands, status->q_head, status->head_bin_mempool);
 }
 
 void add_backlog(struct admissible_status *status,
@@ -47,19 +71,17 @@ void add_backlog(struct admissible_status *status,
 		return; /* no need to enqueue */
 
 	/* add to status->new_demands */
-	enqueue_bin(status->new_demands, src, dst,
+	bin_enqueue_buffered(&status->new_demands, status->q_head,
+			status->head_bin_mempool, src, dst,
 			status->last_alloc_tslot[get_status_index(src,dst)]);
-
-	if (unlikely(bin_size(status->new_demands) == SMALL_BIN_SIZE))
-		_flush_backlog_now(status);
 }
 
 /**
  * Try to allocate the given edge
- * Returns 0 if the flow will be handled internally,
- * 		   1 if more backlog remains and should be handled by the caller
+ * Returns false, if the flow will be handled internally,
+ * 		   true, if more backlog remains and should be handled by the caller
  */
-static inline int try_allocation(uint16_t src, uint16_t dst,
+static inline bool try_allocation(uint16_t src, uint16_t dst,
 		struct admission_core_state *core,
 		struct admissible_status *status)
 {
@@ -76,7 +98,7 @@ static inline int try_allocation(uint16_t src, uint16_t dst,
     if (timeslot_bitmap == 0ULL) {
     	adm_algo_log_no_available_timeslots_for_bin_entry(&core->stat, src, dst);
     	/* caller should handle allocation of this flow */
-    	return 1;
+    	return true;
     }
 
 	uint64_t batch_timeslot;
@@ -96,29 +118,27 @@ static inline int try_allocation(uint16_t src, uint16_t dst,
 		adm_log_allocator_no_backlog(&core->stat, src, dst);
 	}
 
-	return 0;
+	return false;
 }
 
 static void try_allocation_bin(struct bin *in_bin, struct admission_core_state *core,
-                    struct bin *bin_out, struct admissible_status *status)
+                    struct fp_ring *queue_out, struct admissible_status *status,
+                    struct fp_mempool *bin_mp_out)
 {
-	int rc;
+	bool rc;
     uint32_t i;
     uint32_t n_elem = bin_size(in_bin);
 
-//    __builtin_prefetch(&core->batch_state.src_endnodes[BITMASK_WORD(in_bin->edges[head].src)], 0, 3);
-//    __builtin_prefetch(&core->batch_state.dst_endnodes[BITMASK_WORD(in_bin->edges[head].dst)], 0, 3);
-
     for (i = 0; i < n_elem; i++) {
-//        __builtin_prefetch(&core->batch_state.src_endnodes[BITMASK_WORD(in_bin->edges[i+1].src)], 0, 3);
-//        __builtin_prefetch(&core->batch_state.dst_endnodes[BITMASK_WORD(in_bin->edges[i+1].dst)], 0, 3);
 		uint16_t src = bin_get(in_bin,i)->src;
 		uint16_t dst = bin_get(in_bin,i)->dst;
+		uint32_t metric = bin_get(in_bin, i)->metric;
 
         rc = try_allocation(src, dst, core, status);
-        if (rc == 1) {
+        if (rc == true) {
 			// We cannot allocate this edge now - copy to queue_out
-			enqueue_bin(bin_out, src, dst, 0);
+			bin_enqueue_buffered(&core->out_bin, queue_out, bin_mp_out,
+					src, dst, metric);
         }
     }
 }
@@ -130,7 +150,7 @@ static inline void process_one_new_request(uint16_t src, uint16_t dst,
 	if (bin_index < current_bin) {
 		// We have already processed the bin for this src/dst pair
 		// Try to allocate immediately
-		if (try_allocation(src, dst, core, status) == 1) {
+		if (try_allocation(src, dst, core, status) == true) {
 			/* couldn't process, pass on to next core */
 			bin_index = (bin_index >= 2 * BATCH_SIZE) ?
 							(bin_index - BATCH_SIZE) :
@@ -224,102 +244,104 @@ void get_admissible_traffic(struct admissible_status *status,
     // TODO: use multiple cores
     struct fp_ring *queue_in = status->q_bin[core_index];
     struct fp_ring *queue_out = status->q_bin[(core_index + 1) % ALGO_N_CORES];
+    struct fp_mempool *bin_mp_in = status->core_bin_mempool[core_index];
+    struct fp_mempool *bin_mp_out = status->core_bin_mempool[(core_index + 1) % ALGO_N_CORES];
 
     // Initialize this core for a new batch of processing
     alloc_core_reset(core, status, admitted);
 
+    assert(core->out_bin != NULL);
+    assert(is_empty_bin(core->out_bin));
+
     // Process all bins from previous core, then process all bins from
     // residual backlog from traffic admitted in this batch
     struct bin *bin_in, *bin_out;
-    uint16_t bin;
-
-    bin_out = core->temporary_bins[0];
-    assert(is_empty_bin(bin_out));
+    uint16_t bin = 0;
+    uint64_t prev_timeslot = ((fp_get_time_ns() * tslot_mul) >> tslot_shift) - 1;
+    uint16_t processed_bins = 0;
+    bool queue_in_done = false;
 
     process_new_requests(status, core, 0);
 
-    for (bin = 0; bin < NUM_BINS + BATCH_SIZE - 1; bin++) {
+    while (1) {
+#ifdef NO_DPDK
+    	/* for benchmark */
+    	uint64_t now_timeslot = queue_in_done ? first_timeslot + BATCH_SIZE : first_timeslot - NUM_BINS - 1;
+#else
+    	uint64_t now_timeslot = (fp_get_time_ns() * tslot_mul) >> tslot_shift;
+#endif
 
-    	if (likely(bin < NUM_BINS)) {
-			while (fp_ring_dequeue(queue_in, (void **)&bin_in) != 0) {
-				adm_log_waiting_for_q_bin_in(&core->stat, bin);
-				process_new_requests(status, core, bin);
+    	if (likely(now_timeslot == prev_timeslot))
+    		goto handle_inputs;
+
+    	prev_timeslot = now_timeslot;
+
+		/* if time is not close enough to process bins, continue */
+		if (likely(time_before64(now_timeslot, first_timeslot - NUM_BINS)))
+			goto handle_inputs;
+
+		uint64_t slot_gap = now_timeslot - first_timeslot + NUM_BINS + 1;
+		uint16_t new_processed_bins =
+				(slot_gap > BATCH_SIZE + NUM_BINS) ? BATCH_SIZE + NUM_BINS : slot_gap;
+
+		for (bin = processed_bins; bin < new_processed_bins; bin++) {
+			if (likely(bin >= NUM_BINS)) {
+				/* send out the admitted traffic */
+				while(fp_ring_enqueue(status->q_admitted_out,
+						core->admitted[bin - NUM_BINS]) == -ENOBUFS)
+					status->stat.wait_for_space_in_q_admitted_out++;
+
+				/* disallow that timeslot */
+				batch_state_disallow_lsb_timeslot(&core->batch_state);
 			}
-			adm_log_dequeued_bin_in(&core->stat, bin, bin_size(bin_in));
-			try_allocation_bin(bin_in, core, bin_out, status);
-    	} else {
-    	    /* wait for start time */
-    	    if (bin % 4 == 0) {
-    	    	uint64_t start_timeslot = first_timeslot + (bin - NUM_BINS);
-    	    	uint64_t now_timeslot;
 
-process_more_requests:
-				/* process requests */
-				process_new_requests(status, core, bin);
-				/* at least until the next core had finished allocating */
-				/*  and we reach the start time */
-				now_timeslot = (fp_get_time_ns() * tslot_mul) >> tslot_shift;
-
-        	    if (unlikely(now_timeslot < start_timeslot)) {
-        	    	adm_log_pacing_wait(&core->stat, bin);
-        	    	goto process_more_requests;
-        	    } else if (unlikely(!core->is_head)) {
-        	    	adm_log_waiting_for_head(&core->stat);
-        	    	goto process_more_requests;
-        	    }
-    	    }
-
-    	    /* enqueue the allocated traffic for this timeslot */
-    	    while(fp_ring_enqueue(status->q_admitted_out,
-    	    		core->admitted[bin - NUM_BINS]) == -ENOBUFS)
-    	    	status->stat.wait_for_space_in_q_admitted_out++;
-
-    	    /* disallow further allocations to that timeslot */
-    	    batch_state_disallow_lsb_timeslot(&core->batch_state);
-
-    	    /* will process flows that this batch had previously allocated to timeslot */
-    	    bin_in = core->new_request_bins[bin];
-    	}
-
-		try_allocation_bin(core->new_request_bins[bin], core, bin_out, status);
-
-		if (likely(bin & ((~0UL << (BATCH_SHIFT+1)) | 1))) {
-			while(fp_ring_enqueue(queue_out, bin_out) == -ENOBUFS)
-				status->stat.wait_for_space_in_q_bin_out++;
-			bin_out = bin_in;
-	    	init_bin(bin_out);
-		} else {
-			/* we keep the same bin_out to fold 2-into-1. */
-			core->temporary_bins[bin / 2] = bin_in;
+			try_allocation_bin(core->new_request_bins[bin], core, queue_out,
+					status, bin_mp_out);
 		}
+		processed_bins = new_processed_bins;
+
+		if (unlikely(queue_in_done && (processed_bins == BATCH_SIZE + NUM_BINS)))
+			goto wrap_up;
+
+handle_inputs:
+    	/* process new requests if this core is responsible for them */
+//    	if (unlikely(   (first_timeslot - now_timeslot > URGENT_NUM_TIMESLOTS_END)
+//				     && (first_timeslot - now_timeslot <= URGENT_NUM_TIMESLOTS_START)))
+//		{
+			process_new_requests(status, core, processed_bins - 1);
+//		}
+
+    	/* try to dequeue a bin from queue_in */
+    	if (likely(   !queue_in_done
+    			   && fp_ring_dequeue(queue_in, (void **)&bin_in) == 0))
+    	{
+    		if (unlikely(bin_in == NULL)) {
+    			queue_in_done = true;
+    		} else {
+    			adm_log_dequeued_bin_in(&core->stat, bin++, bin_size(bin_in));
+    			try_allocation_bin(bin_in, core, queue_out, status, bin_mp_out);
+    			fp_mempool_put(bin_mp_in, bin_in);
+    		}
+    	}
     }
 
-    /* enqueue the last allocated timeslot */
-    while(fp_ring_enqueue(status->q_admitted_out,
-    		core->admitted[BATCH_SIZE - 1]) == -ENOBUFS)
-    	status->stat.wait_for_space_in_q_bin_out++;
+wrap_up:
+	while (!core->is_head)
+		process_new_requests(status, core, bin);
+
+	if (!is_empty_bin(core->out_bin))
+		_flush_bin_now(&core->out_bin, queue_out, bin_mp_out);
+
+    while(fp_ring_enqueue(queue_out, NULL) == -ENOBUFS)
+    	status->stat.waiting_to_pass_token++;
 
     /* hand over token to next core. this should happen after enqueuing _all_
      * allocated_traffic structs, to prevent allocation re-ordering */
     while(fp_ring_enqueue(core->q_urgent_out, (void*)URGENT_Q_HEAD_TOKEN) == -ENOBUFS)
     	status->stat.waiting_to_pass_token++;
 
-    /* enqueue the last bin in batch as-is, next batch will take care of it */
-    while(fp_ring_enqueue(queue_out,
-    		core->new_request_bins[NUM_BINS + BATCH_SIZE - 1]) == -ENOBUFS)
-    	status->stat.wait_for_space_in_q_bin_out++;
-
-    /* re-arrange memory */
-    for (bin = 0; bin < BATCH_SIZE; bin++)
-    	core->new_request_bins[NUM_BINS + bin] = core->temporary_bins[bin];
-    core->temporary_bins[0] = bin_out;
-
     // Update current timeslot
     status->current_timeslot += BATCH_SIZE;
-
-    /* out_demands should have been flushed out */
-    assert(core->out_demands != NULL);
-    assert(is_empty_bin(core->out_demands));
 }
 
 // Reset state of all flows for which src is the sender

@@ -277,9 +277,6 @@ void get_admissible_traffic(struct admissible_status *status,
 				/* disallow that timeslot */
 				batch_state_disallow_lsb_timeslot(&core->batch_state);
 			}
-
-			try_allocation_bin(core->new_request_bins[bin], core, queue_out,
-					status, bin_mp_out);
 		}
 		processed_bins = new_processed_bins;
 

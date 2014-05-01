@@ -59,7 +59,7 @@ struct admission_statistics {
 	uint64_t backlog_sum_inc_to_queue;
 };
 
-static inline
+static inline __attribute__((always_inline))
 void adm_algo_log_no_available_timeslots_for_bin_entry(
 		struct admission_core_statistics *st,
 		uint16_t src, uint16_t dst)
@@ -69,7 +69,8 @@ void adm_algo_log_no_available_timeslots_for_bin_entry(
 		st->no_available_timeslots_for_bin_entry++;
 }
 
-static inline void adm_log_allocated_backlog_remaining(
+static inline __attribute__((always_inline))
+void adm_log_allocated_backlog_remaining(
 		struct admission_core_statistics *st,
 		uint16_t src, uint16_t dst, int32_t backlog) {
 	(void)src;(void)dst;
@@ -86,14 +87,16 @@ static inline void adm_log_allocated_backlog_remaining(
 	}
 }
 
-static inline void adm_log_allocator_no_backlog(
+static inline __attribute__((always_inline))
+void adm_log_allocator_no_backlog(
 		struct admission_core_statistics *st, uint16_t src, uint16_t dst) {
 	(void)src;(void)dst;
 	if (MAINTAIN_ADM_LOG_COUNTERS)
 		st->allocated_no_backlog++;
 }
 
-static inline void adm_log_increased_backlog_to_queue(
+static inline __attribute__((always_inline))
+void adm_log_increased_backlog_to_queue(
 		struct admission_statistics *ast, uint32_t amt, int32_t new_backlog) {
 	if (MAINTAIN_ADM_LOG_COUNTERS) {
 		ast->added_backlog_to_queue++;
@@ -103,7 +106,8 @@ static inline void adm_log_increased_backlog_to_queue(
 	}
 }
 
-static inline void adm_log_increased_backlog_atomically(
+static inline __attribute__((always_inline))
+void adm_log_increased_backlog_atomically(
 		struct admission_statistics *ast, uint32_t amt, int32_t new_backlog) {
 	if (MAINTAIN_ADM_LOG_COUNTERS) {
 		ast->added_backlog_atomically++;
@@ -112,7 +116,8 @@ static inline void adm_log_increased_backlog_atomically(
 	}
 }
 
-static inline void adm_log_dequeued_bin_in(
+static inline __attribute__((always_inline))
+void adm_log_dequeued_bin_in(
 		struct admission_core_statistics *st, uint16_t bin_index,
 		uint16_t bin_size) {
 	if (MAINTAIN_ADM_LOG_COUNTERS) {
@@ -126,19 +131,22 @@ static inline void adm_log_dequeued_bin_in(
 	}
 }
 
-static inline void adm_log_waiting_for_q_bin_in(
+static inline __attribute__((always_inline))
+void adm_log_waiting_for_q_bin_in(
 		struct admission_core_statistics *st, uint16_t bin) {
 	if (MAINTAIN_ADM_LOG_COUNTERS)
 		st->wait_for_q_bin_in++;
 }
 
-static inline void adm_log_pacing_wait(
+static inline __attribute__((always_inline))
+void adm_log_pacing_wait(
 		struct admission_core_statistics *st, uint16_t bin) {
 	if (MAINTAIN_ADM_LOG_COUNTERS)
 		st->pacing_wait++;
 }
 
-static inline void adm_log_waiting_for_head(
+static inline __attribute__((always_inline))
+void adm_log_waiting_for_head(
 		struct admission_core_statistics *st) {
 	if (MAINTAIN_ADM_LOG_COUNTERS)
 		st->wait_for_head++;

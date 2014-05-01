@@ -19,7 +19,7 @@
 #include "../protocol/topology.h"
 #include "comm_log.h"
 
-#define STRESS_TEST_MIN_LOOP_TIME_SEC		2e-6
+#define STRESS_TEST_MIN_LOOP_TIME_SEC		1e-6
 
 /* logs */
 struct stress_test_log {

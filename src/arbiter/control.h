@@ -6,11 +6,12 @@
 #define CONTROL_H_
 
 #include <stdint.h>
+#include "../graph-algo/algo_config.h"
 
 #define I_AM_MASTER				1
 #define IS_STRESS_TEST			1
 
-#define STRESS_TEST_MEAN_T_BETWEEN_REQUESTS_SEC		1.5e+4
+#define STRESS_TEST_MEAN_T_BETWEEN_REQUESTS_SEC		1.5e-4
 #define STRESS_TEST_NUM_NODES						256
 #define STRESS_TEST_DEMAND_TSLOTS					10
 #define STRESS_TEST_DURATION_SEC					100
@@ -18,7 +19,7 @@
 #define STRESS_TEST_RATE_INCREASE_GAP_SEC			100
 #define STRESS_TEST_INITIAL_SOURCES					40
 #define STRESS_TEST_INITIAL_DSTS_PER_SRC			1
-#define STRESS_TEST_INITIAL_FLOW_SIZE				(1000*1000*1000)
+#define STRESS_TEST_INITIAL_FLOW_SIZE				(10)
 
 /* bits 1-3 occupied by other experiments */
 #define LAUNCH_CONTROLLER_EXPT 			0x8
@@ -28,7 +29,7 @@
 #define EXPT_RUN_MASK 0
 
 #define N_CONTROLLER_PORTS		0
-#define N_ADMISSION_CORES		1
+#define N_ADMISSION_CORES		ALGO_N_CORES
 #define N_PATH_SEL_CORES		0
 #define N_COMM_CORES			1
 #define N_LOG_CORES				1

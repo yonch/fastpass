@@ -19,44 +19,62 @@
 #define URGENT_NUM_TIMESLOTS_START		BATCH_SIZE
 #define URGENT_NUM_TIMESLOTS_END		6
 
-/* auxiliary functions */
+/**
+ * Flushes bin to queue, and allocates a new bin
+ */
+static inline __attribute__((always_inline))
+void core_flush_q_out(struct admission_core_state *core,
+		struct fp_ring *queue, struct fp_mempool *bin_mempool)
+{
+	/* enqueue status->new_backlogs */
+	while(fp_ring_enqueue(queue, core->out_bin) == -ENOBUFS)
+		adm_log_wait_for_space_in_q_bin_out(&core->stat);
+
+	/* get a fresh bin for status->new_backlogs */
+	while(fp_mempool_get(bin_mempool, (void**)&core->out_bin) == -ENOENT)
+		adm_log_out_bin_alloc_failed(&core->stat);
+
+	init_bin(core->out_bin);
+}
+
+static inline __attribute__((always_inline))
+void core_enqueue_to_q_out(struct admission_core_state *core,
+		struct fp_ring *queue_out, struct fp_mempool *bin_mempool,
+		uint16_t src, uint16_t dst, uint32_t metric)
+{
+	/* add to status->new_demands */
+	enqueue_bin(core->out_bin, src, dst, metric);
+
+	if (unlikely(bin_size(core->out_bin) == SMALL_BIN_SIZE)) {
+		adm_log_q_out_flush_bin_full(&core->stat);
+		core_flush_q_out(core, queue_out, bin_mempool);
+	}
+}
 
 /**
  * Flushes bin to queue, and allocates a new bin
  */
 static inline __attribute__((always_inline))
-void _flush_bin_now(struct bin **bin_pp, struct fp_ring *queue,
-		struct fp_mempool *bin_mempool)
+void _flush_backlog_now(struct admissible_status *status)
 {
-	/* enqueue status->new_backlogs */
-	while(fp_ring_enqueue(queue, *bin_pp) == -ENOBUFS)
-		/* retry */;
+	/* enqueue status->new_demands */
+	while(fp_ring_enqueue(status->q_head, status->new_demands) == -ENOBUFS)
+		adm_log_wait_for_space_in_q_head(&status->stat);
 
-	/* get a fresh bin for status->new_backlogs */
-	while(fp_mempool_get(bin_mempool, (void**)bin_pp) == -ENOENT)
-		/* retry */;
+	/* get a fresh bin for status->new_demands */
+	while(fp_mempool_get(status->head_bin_mempool,
+						  (void**)&status->new_demands) == -ENOENT)
+		adm_log_new_demands_bin_alloc_failed(&status->stat);
 
-	init_bin(*bin_pp);
+	init_bin(status->new_demands);
 }
 
-static inline __attribute__((always_inline))
-void bin_enqueue_buffered(struct bin **bin_pp, struct fp_ring *queue,
-		struct fp_mempool *bin_mempool, uint16_t src, uint16_t dst,
-		uint32_t metric)
-{
-	/* add to status->new_demands */
-	enqueue_bin(*bin_pp, src, dst, metric);
-
-	if (unlikely(bin_size(*bin_pp) == SMALL_BIN_SIZE))
-		_flush_bin_now(bin_pp, queue, bin_mempool);
-}
-
-/* end auxiliary functions */
 
 void flush_backlog(struct admissible_status *status) {
 	if (unlikely(is_empty_bin(status->new_demands)))
 		return;
-	_flush_bin_now(&status->new_demands, status->q_head, status->head_bin_mempool);
+	adm_log_forced_backlog_flush(&status->stat);
+	_flush_backlog_now(status);
 }
 
 void add_backlog(struct admissible_status *status,
@@ -67,9 +85,14 @@ void add_backlog(struct admissible_status *status,
 		return; /* no need to enqueue */
 
 	/* add to status->new_demands */
-	bin_enqueue_buffered(&status->new_demands, status->q_head,
-			status->head_bin_mempool, src, dst,
+	enqueue_bin(status->new_demands, src, dst,
 			status->last_alloc_tslot[get_status_index(src,dst)]);
+
+	if (unlikely(bin_size(status->new_demands) == SMALL_BIN_SIZE)) {
+		adm_log_backlog_flush_bin_full(&status->stat);
+		_flush_backlog_now(status);
+	}
+
 }
 
 static inline __attribute__((always_inline))
@@ -143,23 +166,24 @@ bool try_allocation(uint16_t src, uint16_t dst, uint32_t metric,
 }
 
 static inline __attribute__((always_inline))
-void try_allocation_bin(struct bin *in_bin, struct admission_core_state *core,
+void try_allocation_bin(struct admission_core_state *core, uint64_t bin_index,
                     struct fp_ring *queue_out, struct admissible_status *status,
                     struct fp_mempool *bin_mp_out)
 {
 	bool rc;
     uint32_t i;
-    uint32_t n_elem = bin_size(in_bin);
+    struct bin *bin = core->new_request_bins[bin_index];
+    uint32_t n_elem = bin_size(bin);
 
     for (i = 0; i < n_elem; i++) {
-		uint16_t src = bin_get(in_bin,i)->src;
-		uint16_t dst = bin_get(in_bin,i)->dst;
-		uint32_t metric = bin_get(in_bin, i)->metric;
+		uint16_t src = bin_get(bin,i)->src;
+		uint16_t dst = bin_get(bin,i)->dst;
+		uint32_t metric = bin_get(bin, i)->metric;
 
         rc = try_allocation(src, dst, metric, core, status);
         if (rc == true) {
 			// We cannot allocate this edge now - copy to queue_out
-			bin_enqueue_buffered(&core->out_bin, queue_out, bin_mp_out,
+			core_enqueue_to_q_out(core, queue_out, bin_mp_out,
 					src, dst, metric);
         }
     }
@@ -181,7 +205,7 @@ void try_allocation_core(struct admission_core_state *core,
 			/* turn off the set bit in the mask */
 			core->non_empty_bins[bin_mask_ind] = (mask & (mask - 1));
 
-			try_allocation_bin(core->new_request_bins[bin_index], core,
+			try_allocation_bin(core, bin_index,
 					queue_out, status, bin_mp_out);
 			init_bin(core->new_request_bins[bin_index]);
 
@@ -202,14 +226,19 @@ static inline void process_new_requests(struct admissible_status *status,
 
     struct bin *bins[RING_DEQUEUE_BURST_SIZE];
     int n, i;
+    uint32_t num_entries = 0;
+    uint32_t num_bins = 0;
 
     n = fp_ring_dequeue_burst(status->q_head, (void **)&bins[0],
     		RING_DEQUEUE_BURST_SIZE);
 
     for (i = 0; i < n; i++) {
+    	num_entries += bin_size(bins[i]);
+    	num_bins++;
     	incoming_bin_to_core(status, core, bins[i]);
 		fp_mempool_put(status->head_bin_mempool, bins[i]);
     }
+    adm_log_processed_new_requests(&core->stat, num_bins, num_entries);
 }
 
 // Determine admissible traffic for one timeslot from queue_in
@@ -243,8 +272,6 @@ void get_admissible_traffic(struct admissible_status *status,
     uint16_t processed_bins = 0;
     bool queue_in_done = false;
 
-    process_new_requests(status, core, 0);
-
     while (1) {
 #ifdef NO_DPDK
     	/* for benchmark */
@@ -271,7 +298,7 @@ void get_admissible_traffic(struct admissible_status *status,
 				/* send out the admitted traffic */
 				while(fp_ring_enqueue(status->q_admitted_out,
 						core->admitted[bin - NUM_BINS]) == -ENOBUFS)
-					status->stat.wait_for_space_in_q_admitted_out++;
+					adm_log_wait_for_space_in_q_admitted_traffic(&core->stat);
 
 				/* disallow that timeslot */
 				batch_state_disallow_lsb_timeslot(&core->batch_state);
@@ -297,7 +324,7 @@ handle_inputs:
     		if (unlikely(bin_in == NULL)) {
     			queue_in_done = true;
     		} else {
-    			adm_log_dequeued_bin_in(&core->stat, bin++, bin_size(bin_in));
+    			adm_log_dequeued_bin_in(&core->stat, processed_bins, bin_size(bin_in));
     			incoming_bin_to_core(status, core, bin_in);
     			fp_mempool_put(bin_mp_in, bin_in);
     		}
@@ -307,11 +334,13 @@ handle_inputs:
     }
 
 wrap_up:
-	if (!is_empty_bin(core->out_bin))
-		_flush_bin_now(&core->out_bin, queue_out, bin_mp_out);
+	if (!is_empty_bin(core->out_bin)) {
+		adm_log_q_out_flush_batch_finished(&core->stat);
+		core_flush_q_out(core, queue_out, bin_mp_out);
+	}
 
     while(fp_ring_enqueue(queue_out, NULL) == -ENOBUFS)
-    	status->stat.waiting_to_pass_token++;
+    	adm_log_wait_for_q_bin_out_enqueue_token(&core->stat);
 
     // Update current timeslot
     status->current_timeslot += BATCH_SIZE;

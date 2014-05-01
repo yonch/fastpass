@@ -19,7 +19,6 @@
  * logged information for a core
  */
 struct admission_log {
-	uint64_t failed_admitted_traffic_alloc;
 	uint64_t batches_started;
 	uint64_t last_started_alloc_tsc;
 };
@@ -40,14 +39,6 @@ extern struct admission_log admission_core_logs[RTE_MAX_LCORE];
 static inline void admission_log_init(struct admission_log *al)
 {
 	memset(al, 0, sizeof(*al));
-}
-
-static inline
-void admission_log_failed_to_allocate_admitted_traffic(void)
-{
-	AL->failed_admitted_traffic_alloc++;
-//	ADMISSION_DEBUG("core %d could not allocate admitted_traffic (event #%lu)\n",
-//			rte_lcore_id(), AL->failed_admitted_traffic_alloc);
 }
 
 static inline

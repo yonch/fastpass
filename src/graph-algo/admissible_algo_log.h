@@ -18,9 +18,6 @@
 #define		BIN_SIZE_HISTOGRAM_NUM_BINS		16
 #define		BIN_SIZE_HISTOGRAM_SHIFT		4
 
-#define		NEW_REQUEST_HISTOGRAM_NUM_BINS	16
-#define		NEW_REQUEST_HISTOGRAM_SHIFT		4
-
 
 /**
  * Per-core statistics, in struct admission_core_state
@@ -32,11 +29,16 @@ struct admission_core_statistics {
 	uint64_t allocated_no_backlog;
 	uint64_t backlog_histogram[BACKLOG_HISTOGRAM_NUM_BINS];
 	uint64_t bin_size_histogram[BIN_SIZE_HISTOGRAM_NUM_BINS];
-	uint64_t new_request_histogram[NEW_REQUEST_HISTOGRAM_NUM_BINS];
 
-	uint64_t wait_for_q_bin_in;
-	uint64_t wait_for_head;
-	uint64_t pacing_wait;
+	uint64_t admitted_traffic_alloc_failed;
+	uint64_t wait_for_space_in_q_bin_out;
+	uint64_t wait_for_space_in_q_admitted_out;
+	uint64_t out_bin_alloc_failed;
+	uint64_t q_out_flush_bin_full;
+	uint64_t q_out_flush_batch_finished;
+	uint64_t new_request_bins;
+	uint64_t new_requests;
+	uint64_t waiting_to_pass_token;
 };
 
 /**
@@ -44,11 +46,7 @@ struct admission_core_statistics {
  */
 struct admission_statistics {
 	uint64_t wait_for_space_in_q_head;
-	uint64_t wait_for_space_in_q_urgent;
-	uint64_t wait_for_space_in_q_admitted_out;
-	uint64_t wait_for_space_in_q_bin_out;
-	uint64_t waiting_to_pass_token;
-	uint64_t pacing_wait;
+	uint64_t new_demands_bin_alloc_failed;
 	/* atomic increase statistics */
 	uint64_t added_backlog_atomically;
 	uint64_t backlog_sum_atomically;
@@ -57,7 +55,61 @@ struct admission_statistics {
 	uint64_t added_backlog_to_queue;
 	uint64_t backlog_sum_to_queue;
 	uint64_t backlog_sum_inc_to_queue;
+	uint64_t backlog_flush_forced;
+	uint64_t backlog_flush_bin_full;
 };
+
+/* GLOBAL STATS (in admissible_status) */
+static inline __attribute__((always_inline))
+void adm_log_wait_for_space_in_q_head(
+		struct admission_statistics *st) {
+	if (MAINTAIN_ADM_LOG_COUNTERS)
+		st->wait_for_space_in_q_head++;
+}
+
+static inline __attribute__((always_inline))
+void adm_log_new_demands_bin_alloc_failed(
+		struct admission_statistics *st) {
+	if (MAINTAIN_ADM_LOG_COUNTERS)
+		st->new_demands_bin_alloc_failed++;
+}
+
+static inline __attribute__((always_inline))
+void adm_log_increased_backlog_to_queue(
+		struct admission_statistics *ast, uint32_t amt, int32_t new_backlog) {
+	if (MAINTAIN_ADM_LOG_COUNTERS) {
+		ast->added_backlog_to_queue++;
+		ast->backlog_sum_inc_to_queue += amt;
+		ast->backlog_sum_to_queue += new_backlog;
+/*		printf("\n added backlog to queue amt %u new_backlog %u\n", amt, new_backlog); */
+	}
+}
+
+static inline __attribute__((always_inline))
+void adm_log_increased_backlog_atomically(
+		struct admission_statistics *ast, uint32_t amt, int32_t new_backlog) {
+	if (MAINTAIN_ADM_LOG_COUNTERS) {
+		ast->added_backlog_atomically++;
+		ast->backlog_sum_inc_atomically += amt;
+		ast->backlog_sum_atomically += new_backlog;
+	}
+}
+
+static inline __attribute__((always_inline))
+void adm_log_forced_backlog_flush(
+		struct admission_statistics *st) {
+	if (MAINTAIN_ADM_LOG_COUNTERS)
+		st->backlog_flush_forced++;
+}
+
+static inline __attribute__((always_inline))
+void adm_log_backlog_flush_bin_full(
+		struct admission_statistics *st) {
+	if (MAINTAIN_ADM_LOG_COUNTERS)
+		st->backlog_flush_bin_full++;
+}
+
+/* PER CORE STATS */
 
 static inline __attribute__((always_inline))
 void adm_algo_log_no_available_timeslots_for_bin_entry(
@@ -96,27 +148,6 @@ void adm_log_allocator_no_backlog(
 }
 
 static inline __attribute__((always_inline))
-void adm_log_increased_backlog_to_queue(
-		struct admission_statistics *ast, uint32_t amt, int32_t new_backlog) {
-	if (MAINTAIN_ADM_LOG_COUNTERS) {
-		ast->added_backlog_to_queue++;
-		ast->backlog_sum_inc_to_queue += amt;
-		ast->backlog_sum_to_queue += new_backlog;
-/*		printf("\n added backlog to queue amt %u new_backlog %u\n", amt, new_backlog); */
-	}
-}
-
-static inline __attribute__((always_inline))
-void adm_log_increased_backlog_atomically(
-		struct admission_statistics *ast, uint32_t amt, int32_t new_backlog) {
-	if (MAINTAIN_ADM_LOG_COUNTERS) {
-		ast->added_backlog_atomically++;
-		ast->backlog_sum_inc_atomically += amt;
-		ast->backlog_sum_atomically += new_backlog;
-	}
-}
-
-static inline __attribute__((always_inline))
 void adm_log_dequeued_bin_in(
 		struct admission_core_statistics *st, uint16_t bin_index,
 		uint16_t bin_size) {
@@ -132,26 +163,62 @@ void adm_log_dequeued_bin_in(
 }
 
 static inline __attribute__((always_inline))
-void adm_log_waiting_for_q_bin_in(
-		struct admission_core_statistics *st, uint16_t bin) {
-	if (MAINTAIN_ADM_LOG_COUNTERS)
-		st->wait_for_q_bin_in++;
-}
-
-static inline __attribute__((always_inline))
-void adm_log_pacing_wait(
-		struct admission_core_statistics *st, uint16_t bin) {
-	if (MAINTAIN_ADM_LOG_COUNTERS)
-		st->pacing_wait++;
-}
-
-static inline __attribute__((always_inline))
-void adm_log_waiting_for_head(
+void adm_log_wait_for_space_in_q_bin_out(
 		struct admission_core_statistics *st) {
 	if (MAINTAIN_ADM_LOG_COUNTERS)
-		st->wait_for_head++;
+		st->wait_for_space_in_q_bin_out++;
 }
 
+static inline __attribute__((always_inline))
+void adm_log_wait_for_space_in_q_admitted_traffic(
+		struct admission_core_statistics *st) {
+	if (MAINTAIN_ADM_LOG_COUNTERS)
+		st->wait_for_space_in_q_admitted_out++;
+}
 
+static inline __attribute__((always_inline))
+void adm_log_admitted_traffic_alloc_failed(
+		struct admission_core_statistics *st) {
+	if (MAINTAIN_ADM_LOG_COUNTERS)
+		st->admitted_traffic_alloc_failed++;
+}
+
+static inline __attribute__((always_inline))
+void adm_log_out_bin_alloc_failed(
+		struct admission_core_statistics *st) {
+	if (MAINTAIN_ADM_LOG_COUNTERS)
+		st->out_bin_alloc_failed++;
+}
+
+static inline __attribute__((always_inline))
+void adm_log_q_out_flush_bin_full(
+		struct admission_core_statistics *st) {
+	if (MAINTAIN_ADM_LOG_COUNTERS)
+		st->q_out_flush_bin_full++;
+}
+
+static inline __attribute__((always_inline))
+void adm_log_q_out_flush_batch_finished(
+		struct admission_core_statistics *st) {
+	if (MAINTAIN_ADM_LOG_COUNTERS)
+		st->q_out_flush_batch_finished++;
+}
+
+static inline __attribute__((always_inline))
+void adm_log_processed_new_requests(
+		struct admission_core_statistics *st, int num_bins,
+		uint32_t num_demands) {
+	if (MAINTAIN_ADM_LOG_COUNTERS) {
+		st->new_request_bins += num_bins;
+		st->new_requests += num_demands;
+	}
+}
+
+static inline __attribute__((always_inline))
+void adm_log_wait_for_q_bin_out_enqueue_token(
+		struct admission_core_statistics *st) {
+	if (MAINTAIN_ADM_LOG_COUNTERS)
+		st->waiting_to_pass_token++;
+}
 
 #endif /* ADMISSIBLE_ALGO_LOG_H_ */

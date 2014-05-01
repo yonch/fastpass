@@ -114,21 +114,11 @@ void print_global_admission_log() {
 	struct admission_statistics *st = &g_admissible_status.stat;
 	struct admission_statistics *sv = &saved_admission_statistics;
 	int i;
-	uint64_t wait_for_q_bin_in = 0;
-
-	for (i = 0; i < N_ADMISSION_CORES; i++) {
-		struct admission_core_statistics *ast = &g_admissible_status.cores[i].stat;
-		wait_for_q_bin_in += ast->wait_for_q_bin_in;
-	}
 
 #define D(X) (st->X - sv->X)
 	printf("\nadmission core");
-	printf("\n  enqueue waits: %lu q_head, %lu q_urgent, %lu q_admitted, %lu q_bin",
-			st->wait_for_space_in_q_head, st->wait_for_space_in_q_urgent,
-			st->wait_for_space_in_q_admitted_out, st->wait_for_space_in_q_bin_out);
-	printf("\n  %lu delay in passing token (+%lu)", st->waiting_to_pass_token, D(waiting_to_pass_token));
-	printf("\n  %lu pacing wait (+%lu)", st->pacing_wait, D(pacing_wait));
-	printf("\n  %lu wait for q_bin_in", wait_for_q_bin_in);
+	printf("\n  enqueue waits: %lu q_head, %lu alloc_new_demands",
+			st->wait_for_space_in_q_head, st->new_demands_bin_alloc_failed);
 	printf("\n  add_backlog; %lu atomic add %0.2f to avg %0.2f; %lu queue add %0.2f to avg %0.2f",
 			st->added_backlog_atomically,
 			(float)st->backlog_sum_inc_atomically / (float)(st->added_backlog_atomically+1),
@@ -136,30 +126,48 @@ void print_global_admission_log() {
 			st->added_backlog_to_queue,
 			(float)st->backlog_sum_inc_to_queue / (float)(st->added_backlog_to_queue+1),
 			(float)st->backlog_sum_to_queue / (float)(st->added_backlog_to_queue+1));
+	printf("\n    %lu bin enqueues (%lu automatic, %lu forced)",
+			st->backlog_flush_bin_full + st->backlog_flush_forced,
+			st->backlog_flush_bin_full,
+			st->backlog_flush_forced);
 	printf("\n");
 #undef D
 
 	memcpy(sv, st, sizeof(*sv));
 }
 
+struct admission_core_statistics saved_admission_core_statistics[N_ADMISSION_CORES];
+
 void print_admission_core_log(uint16_t lcore, uint16_t adm_core_index) {
 	int i;
 	struct admission_log *al = &admission_core_logs[lcore];
-	struct admission_core_statistics *ast = &g_admissible_status.cores[adm_core_index].stat;
-	printf("admission lcore %d: %lu failed alloc, %lu no_timeslot, %lu need more (avg %0.2f), %lu done\n",
-			lcore, al->failed_admitted_traffic_alloc,
-			ast->no_available_timeslots_for_bin_entry,
-			ast->allocated_backlog_remaining,
-			(float)ast->backlog_sum / (float)(ast->allocated_backlog_remaining+1),
-			ast->allocated_no_backlog);
+	struct admission_core_statistics *st = &g_admissible_status.cores[adm_core_index].stat;
+	struct admission_core_statistics *sv = &saved_admission_core_statistics[adm_core_index];
+
+#define D(X) (st->X - sv->X)
+	printf("admission lcore %d: %lu no_timeslot, %lu need more (avg %0.2f), %lu done",
+			lcore, st->no_available_timeslots_for_bin_entry,
+			st->allocated_backlog_remaining,
+			(float)st->backlog_sum / (float)(st->allocated_backlog_remaining+1),
+			st->allocated_no_backlog);
+	printf("\n  %lu fail_alloc_admitted, %lu q_admitted_full. %lu bin_alloc_fail, %lu q_out_full, %lu wait_token",
+			st->admitted_traffic_alloc_failed, st->wait_for_space_in_q_admitted_out,
+			st->out_bin_alloc_failed, st->wait_for_space_in_q_bin_out,
+			st->waiting_to_pass_token);
+	printf("\n  %lu flushed q_out (%lu automatic, %lu forced); processed from q_head %lu bins, %lu demands",
+			st->q_out_flush_bin_full + st->q_out_flush_batch_finished,
+			st->q_out_flush_bin_full, st->q_out_flush_batch_finished,
+			st->new_request_bins, st->new_requests);
+	printf("\n");
+#undef D
 
 	for (i = 0; i < BACKLOG_HISTOGRAM_NUM_BINS; i++)
-		printf("%lu ", ast->backlog_histogram[i]);
+		printf("%lu ", st->backlog_histogram[i]);
 	printf ("\n");
 
 	printf("bin_index << %d: ", BIN_SIZE_HISTOGRAM_SHIFT);
 	for (i = 0; i < BIN_SIZE_HISTOGRAM_NUM_BINS; i++)
-		printf("%lu ", ast->bin_size_histogram[i]);
+		printf("%lu ", st->bin_size_histogram[i]);
 	printf ("\n");
 }
 
@@ -188,6 +196,10 @@ int exec_log_core(void *void_cmd_p)
 			sizeof(saved_comm_log));
 	memcpy(&saved_admission_statistics, &g_admissible_status.stat,
 			sizeof(saved_admission_statistics));
+	for (i = 0; i < N_ADMISSION_CORES; i++)
+		memcpy(&saved_admission_core_statistics[i],
+				&g_admissible_status.cores[i].stat,
+				sizeof(saved_admission_core_statistics[i]));
 
 	while (1) {
 		/* wait until proper time */

@@ -115,7 +115,7 @@ void alloc_core_reset(struct admission_core_state *core,
 
     while (fp_mempool_get_bulk(status->admitted_traffic_mempool,
     		(void **)&core->admitted[0], BATCH_SIZE) != 0)
-    	/* retry */;
+    	adm_log_admitted_traffic_alloc_failed(&core->stat);
 
     for (i = 0; i < BATCH_SIZE; i++)
         init_admitted_traffic(core->admitted[i]);

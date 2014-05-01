@@ -21,6 +21,7 @@
 #define fp_mempool	 			rte_mempool
 #define fp_mempool_get	 		rte_mempool_get
 #define fp_mempool_put	 		rte_mempool_put
+#define fp_mempool_get_bulk		rte_mempool_get_bulk
 
 #else
 
@@ -91,6 +92,16 @@ static inline void __attribute__((always_inline))
 fp_mempool_put(struct fp_mempool *mp, void *obj) {
 	mp->elements[mp->cur_elements++] = obj;
 }
+static inline int __attribute__((always_inline))
+fp_mempool_get_bulk(struct fp_mempool *mp, void **obj_table, unsigned n)
+{
+	if(unlikely(mp->cur_elements < n))
+		return -ENOENT;
+	mp->cur_elements -= n;
+	memcpy(obj_table, &mp->elements[mp->cur_elements], n * sizeof(void *));
+	return 0;
+}
+
 
 #endif
 

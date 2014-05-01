@@ -143,7 +143,6 @@ int exec_admission_core(void *void_cmd_p)
 	struct admission_core_state *core = &g_admissible_status.cores[core_ind];
 	/* int traffic_pool_socketid = rte_lcore_to_socket_id(rte_lcore_id()); */
 	int traffic_pool_socketid = 0;
-	struct admitted_traffic *admitted[BATCH_SIZE];
 	int rc;
 	uint64_t start_time_first_timeslot;
 
@@ -156,18 +155,10 @@ int exec_admission_core(void *void_cmd_p)
 
 	/* do allocation loop */
 	while (1) {
-		/* get admitted_traffic structures */
-		rc = rte_mempool_get_bulk(admitted_traffic_pool[traffic_pool_socketid],
-				(void **)&admitted[0], BATCH_SIZE);
-		if (unlikely(rc != 0)) {
-			admission_log_failed_to_allocate_admitted_traffic();
-			continue; /* we try again */
-		}
-
 		/* perform allocation */
 		admission_log_allocation_begin(current_timeslot,
 				start_time_first_timeslot);
-		get_admissible_traffic(&g_admissible_status, core_ind, &admitted[0],
+		get_admissible_traffic(&g_admissible_status, core_ind,
 				current_timeslot - PREALLOC_DURATION_TIMESLOTS,
 				TIMESLOT_MUL, TIMESLOT_SHIFT);
 		admission_log_allocation_end();

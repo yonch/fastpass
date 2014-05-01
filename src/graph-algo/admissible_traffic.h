@@ -24,7 +24,6 @@ void flush_backlog(struct admissible_status *status);
 // Determine admissible traffic for one timeslot from queue_in
 void get_admissible_traffic(struct admissible_status *status,
 								uint32_t core_index,
-								struct admitted_traffic **admitted,
 								uint64_t first_timeslot, uint32_t tslot_mul,
 								uint32_t tslot_shift);
 

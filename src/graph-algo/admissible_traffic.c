@@ -217,7 +217,6 @@ static inline void process_new_requests(struct admissible_status *status,
 // Allocate BATCH_SIZE timeslots at once
 void get_admissible_traffic(struct admissible_status *status,
 								uint32_t core_index,
-								struct admitted_traffic **admitted,
 								uint64_t first_timeslot, uint32_t tslot_mul,
 								uint32_t tslot_shift)
 {
@@ -231,7 +230,7 @@ void get_admissible_traffic(struct admissible_status *status,
     struct fp_mempool *bin_mp_out = status->core_bin_mempool[(core_index + 1) % ALGO_N_CORES];
 
     // Initialize this core for a new batch of processing
-    alloc_core_reset(core, status, admitted);
+    alloc_core_reset(core, status);
 
     assert(core->out_bin != NULL);
     assert(is_empty_bin(core->out_bin));

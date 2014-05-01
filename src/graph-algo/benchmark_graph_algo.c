@@ -25,7 +25,8 @@
 #define PROCESSOR_SPEED 2.8
 #define HEAD_BIN_MEMPOOL_SIZE 1024
 #define CORE_BIN_MEMPOOL_SIZE 1024
-#define ADMITTED_TRAFFIC_MEMPOOL_SIZE	(2*BATCH_SIZE)
+#define ADMITTED_TRAFFIC_MEMPOOL_SIZE	(51*1000)
+#define ADMITTED_OUT_RING_LOG_SIZE		16
 
 const double admissible_fractions [NUM_FRACTIONS_A] =
     {0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9, 0.95, 0.99};
@@ -49,7 +50,6 @@ uint32_t run_experiment(struct request_info *requests, uint32_t start_time, uint
                         uint32_t num_requests, struct admissible_status *status,
                         struct request_info **next_request,
                         struct admission_core_state *core,
-                        struct admitted_traffic **admitted_batch,
                         uint32_t *per_batch_times)
 {
     struct admitted_traffic *admitted;
@@ -76,7 +76,7 @@ uint32_t run_experiment(struct request_info *requests, uint32_t start_time, uint
         flush_backlog(status);
  
         // Get admissible traffic
-        get_admissible_traffic(status, 0, admitted_batch, 0, 1, 0);
+        get_admissible_traffic(status, 0, 0, 1, 0);
 
         for (i = 0; i < BATCH_SIZE; i++) {
         	/* get admitted traffic */
@@ -84,7 +84,7 @@ uint32_t run_experiment(struct request_info *requests, uint32_t start_time, uint
         	/* update statistics */
         	num_admitted += admitted->size;
         	/* return admitted traffic to core */
-        	admitted_batch[i] = admitted;
+        	fp_mempool_put(status->admitted_traffic_mempool, admitted);
         }
 
         // Record per-batch time
@@ -101,19 +101,16 @@ uint32_t run_experiment(struct request_info *requests, uint32_t start_time, uint
 
 // Runs the admissible algorithm for many timeslots, saving the admitted traffic for
 // further benchmarking
-uint32_t run_admissible(struct request_info *requests, uint32_t start_time, uint32_t end_time,
+void run_admissible(struct request_info *requests, uint32_t start_time, uint32_t end_time,
                         uint32_t num_requests, struct admissible_status *status,
                         struct request_info **next_request,
-                        struct admission_core_state *core,
-                        struct admitted_traffic **admitted_batch,
-                        struct admitted_traffic **all_admitted)
+                        struct admission_core_state *core)
 {
     struct admitted_traffic *admitted;
     struct fp_ring *queue_tmp;
 
     uint32_t b;
     uint8_t i;
-    uint32_t num_admitted = 0;
     struct request_info *current_request = requests;
     uint32_t admitted_index = BATCH_SIZE;  // already BATCH_SIZE admitted structs in admitted_batch
 
@@ -131,22 +128,12 @@ uint32_t run_admissible(struct request_info *requests, uint32_t start_time, uint
         flush_backlog(status);
 
         // Get admissible traffic
-        get_admissible_traffic(status, 0, admitted_batch, 0, 1, 0);
-
-        for (i = 0; i < BATCH_SIZE; i++) { 
-            /* get admitted traffic */
-            fp_ring_dequeue(status->q_admitted_out, (void **)&admitted);
-            /* update statistics */
-            num_admitted += admitted->size;
-            /* supply a new admitted traffic to core */
-            admitted_batch[i] = all_admitted[admitted_index++];
-        }
+        get_admissible_traffic(status, 0, 0, 1, 0);
     }
 
     *next_request = current_request;
 
     assert(status->q_bin[0]->tail == status->q_bin[0]->head + NUM_BINS);
-    return num_admitted;
 }
 
 void print_usage(char **argv) {
@@ -221,8 +208,6 @@ int main(int argc, char **argv)
     struct fp_ring *q_bin;
     struct fp_ring *q_head;
     struct fp_ring *q_admitted_out;
-    struct admitted_traffic **admitted_batch;
-    struct admitted_traffic **all_admitted;
     struct fp_mempool *head_bin_mempool;
     struct fp_mempool *core_bin_mempool;
     struct fp_mempool *admitted_traffic_mempool;
@@ -231,10 +216,22 @@ int main(int argc, char **argv)
 #error "benchmark only supports ALGO_N_CORES == 1"
 #endif
 
+    if (ADMITTED_TRAFFIC_MEMPOOL_SIZE < duration - warm_up_duration) {
+    	printf("need at least %u elements in admitted_traffic to run experiments, got %u\n",
+    			duration- warm_up_duration, ADMITTED_TRAFFIC_MEMPOOL_SIZE);
+    	exit(-1);
+    }
+    if ((1 << ADMITTED_OUT_RING_LOG_SIZE) <= duration - warm_up_duration) {
+    	printf("need at least %u elements in q_admitted to run experiments, got %u\n",
+    			duration- warm_up_duration, 1 << ADMITTED_OUT_RING_LOG_SIZE);
+    	exit(-1);
+    }
+
+
     /* init queues */
     q_bin = fp_ring_create(2 * NUM_BINS_SHIFT);
     q_head = fp_ring_create(2 * FP_NODES_SHIFT);
-    q_admitted_out = fp_ring_create(BATCH_SHIFT);
+    q_admitted_out = fp_ring_create(ADMITTED_OUT_RING_LOG_SIZE);
     head_bin_mempool = fp_mempool_create(HEAD_BIN_MEMPOOL_SIZE, bin_num_bytes(SMALL_BIN_SIZE));
    	core_bin_mempool = fp_mempool_create(CORE_BIN_MEMPOOL_SIZE,
     									bin_num_bytes(SMALL_BIN_SIZE));
@@ -254,28 +251,6 @@ int main(int argc, char **argv)
     if (status == NULL) {
         printf("Error initializing admissible_status!\n");
         exit(-1);
-    }
-
-    /* make allocated_traffic containers */
-    admitted_batch = malloc(sizeof(struct admitted_traffic *) * BATCH_SIZE);
-    if (!admitted_batch) exit(-1);
-
-    if (benchmark_type == ADMISSIBLE) {
-        for (i = 0; i < BATCH_SIZE; i++) {
-            admitted_batch[i] = create_admitted_traffic();
-            if (!admitted_batch[i]) exit(-1);
-        }
-    }
-    else {
-        /* make containers for all admitted traffic in the experiment */
-        all_admitted = malloc(sizeof(struct admitted_traffic *) * (duration - warm_up_duration));
-        if (!all_admitted) exit(-1);
-
-        // Initialize all admitted structs
-        for (i = 0; i < duration - warm_up_duration; i++) {
-            all_admitted[i] = create_admitted_traffic();
-            if (!all_admitted[i]) exit(-1);
-        }
     }
 
     /* fill bin_queue with empty bins */
@@ -344,18 +319,11 @@ int main(int argc, char **argv)
             uint32_t num_requests = generate_requests_poisson(requests, max_requests, num_nodes,
                                                               duration, fraction, mean);
 
-            if (benchmark_type == PATH_SELECTION_OVERSUBSCRIPTION ||
-                benchmark_type == PATH_SELECTION_RACKS) {
-                // Re-initialize admitted_batch pointers
-                for (k = 0; k < BATCH_SIZE; k++)
-                    admitted_batch[k] = all_admitted[k];            
-            }
-
             // Issue/process some requests. This is a warm-up period so that there are pending
             // requests once we start timing
             struct request_info *next_request;
             run_experiment(requests, 0, warm_up_duration, num_requests,
-                           status, &next_request, &status->cores[0], admitted_batch, per_batch_times);
+                           status, &next_request, &status->cores[0], per_batch_times);
    
             if (benchmark_type == ADMISSIBLE) {
                 // Start timining
@@ -364,7 +332,7 @@ int main(int argc, char **argv)
                 // Run the experiment
                 uint32_t num_admitted = run_experiment(next_request, warm_up_duration, duration,
                                                        num_requests - (next_request - requests),
-                                                       status, &next_request, &status->cores[0], admitted_batch,
+                                                       status, &next_request, &status->cores[0],
                                                        per_batch_times);
                 uint64_t end_time = current_time();
 
@@ -387,18 +355,24 @@ int main(int argc, char **argv)
             else if (benchmark_type == PATH_SELECTION_OVERSUBSCRIPTION ||
                      benchmark_type == PATH_SELECTION_RACKS) {
                 // Run the admissible algorithm to generate admitted traffic
-                uint32_t num_admitted = run_admissible(next_request, warm_up_duration, duration,
+                run_admissible(next_request, warm_up_duration, duration,
                                                        num_requests - (next_request - requests),
-                                                       status, &next_request, &status->cores[0], admitted_batch,
-                                                       all_admitted);
+                                                       status, &next_request, &status->cores[0]);
 
                 // Start timining
                 uint64_t start_time = current_time();
 
+                uint32_t num_admitted = 0;
                 uint64_t prev_time = current_time();
                 for (k = 0; k < duration - warm_up_duration; k++) {
-                    struct admitted_traffic *admitted = all_admitted[k];
+                    struct admitted_traffic *admitted;
 
+                    /* get admitted traffic */
+                    fp_ring_dequeue(status->q_admitted_out, (void **)&admitted);
+                    /* update statistics */
+                    num_admitted += admitted->size;
+
+                    /* supply a new admitted traffic to core */
                     select_paths(admitted, num_nodes / MAX_NODES_PER_RACK);
                     
                     // Record time
@@ -409,6 +383,9 @@ int main(int argc, char **argv)
 
                     // Record num admitted
                     per_timeslot_num_admitted[k] = admitted->size;
+
+                    /* free back the admitted_traffic */
+                    fp_mempool_put(status->admitted_traffic_mempool, admitted);
                 }
 
                 uint64_t end_time = current_time();

@@ -37,7 +37,7 @@ struct admission_core_state {
 	struct bin *new_request_bins[NUM_BINS + BATCH_SIZE]; // pool of backlog bins for incoming requests
 	uint64_t non_empty_bins[BIN_MASK_SIZE];
     struct batch_state batch_state;
-    struct admitted_traffic **admitted;
+    struct admitted_traffic *admitted[BATCH_SIZE];
     struct bin *out_bin;
     struct admission_core_statistics stat;
 }  __attribute__((aligned(64))) /* don't want sharing between cores */;
@@ -131,8 +131,7 @@ uint32_t get_status_index(uint16_t src, uint16_t dst) {
 // a new batch of processing
 static inline
 void alloc_core_reset(struct admission_core_state *core,
-                          struct admissible_status *status,
-                          struct admitted_traffic **admitted) {
+                          struct admissible_status *status) {
     assert(core != NULL);
 
     uint16_t i;
@@ -145,9 +144,12 @@ void alloc_core_reset(struct admission_core_state *core,
 
     memset(core->non_empty_bins, 0, sizeof(core->non_empty_bins));
 
+    while (fp_mempool_get_bulk(status->admitted_traffic_mempool,
+    		(void **)&core->admitted[0], BATCH_SIZE) != 0)
+    	/* retry */;
+
     for (i = 0; i < BATCH_SIZE; i++)
-        init_admitted_traffic(admitted[i]);
-    core->admitted = admitted;
+        init_admitted_traffic(core->admitted[i]);
 
     /* out_demands should have been flushed out */
     assert(core->out_bin != NULL);

@@ -143,6 +143,8 @@ void alloc_core_reset(struct admission_core_state *core,
                      status->inter_rack_capacity, status->out_of_boundary_capacity,
                      status->num_nodes);
 
+    memset(core->non_empty_bins, 0, sizeof(core->non_empty_bins));
+
     for (i = 0; i < BATCH_SIZE; i++)
         init_admitted_traffic(admitted[i]);
     core->admitted = admitted;

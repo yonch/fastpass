@@ -162,12 +162,28 @@ int main(int argc, char **argv)
         return -1;
     }
 
-    uint16_t i, j, k;
-
     // keep both durations an even number of batches so that bin pointers return to queue_0
     uint32_t warm_up_duration = ((10000 + 127) / 128) * 128;
     uint32_t duration = warm_up_duration + ((50000 + 127) / 128) * 128;
     double mean = 10; // Mean request size and inter-arrival time
+
+    /* sanity checks */
+#if (ALGO_N_CORES != 1)
+#error "benchmark only supports ALGO_N_CORES == 1"
+#endif
+
+    if (ADMITTED_TRAFFIC_MEMPOOL_SIZE < duration - warm_up_duration) {
+    	printf("need at least %u elements in admitted_traffic to run experiments, got %u\n",
+    			duration- warm_up_duration, ADMITTED_TRAFFIC_MEMPOOL_SIZE);
+    	exit(-1);
+    }
+    if ((1 << ADMITTED_OUT_RING_LOG_SIZE) <= duration - warm_up_duration) {
+    	printf("need at least %u elements in q_admitted to run experiments, got %u\n",
+    			duration- warm_up_duration, 1 << ADMITTED_OUT_RING_LOG_SIZE);
+    	exit(-1);
+    }
+
+    uint16_t i, j, k;
 
     // Each experiment tries out a different combination of target network utilization
     // and number of nodes
@@ -211,22 +227,6 @@ int main(int argc, char **argv)
     struct fp_mempool *head_bin_mempool;
     struct fp_mempool *core_bin_mempool;
     struct fp_mempool *admitted_traffic_mempool;
-
-#if (ALGO_N_CORES != 1)
-#error "benchmark only supports ALGO_N_CORES == 1"
-#endif
-
-    if (ADMITTED_TRAFFIC_MEMPOOL_SIZE < duration - warm_up_duration) {
-    	printf("need at least %u elements in admitted_traffic to run experiments, got %u\n",
-    			duration- warm_up_duration, ADMITTED_TRAFFIC_MEMPOOL_SIZE);
-    	exit(-1);
-    }
-    if ((1 << ADMITTED_OUT_RING_LOG_SIZE) <= duration - warm_up_duration) {
-    	printf("need at least %u elements in q_admitted to run experiments, got %u\n",
-    			duration- warm_up_duration, 1 << ADMITTED_OUT_RING_LOG_SIZE);
-    	exit(-1);
-    }
-
 
     /* init queues */
     q_bin = fp_ring_create(2 * NUM_BINS_SHIFT);

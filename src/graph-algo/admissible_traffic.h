@@ -85,15 +85,4 @@ uint32_t bin_after_alloc(uint16_t src, uint16_t dst, uint32_t metric,
 	return NUM_BINS + batch_timeslot;
 }
 
-// Helper method for testing in Python. Dequeues and returns an admitted traffic struct.
-static inline
-struct admitted_traffic *dequeue_admitted_traffic(struct admissible_status *status) {
-    assert(status != NULL);
-
-    struct admitted_traffic *traffic;
-    fp_ring_dequeue(status->q_admitted_out, (void **)&traffic);
-
-    return traffic;
-}
-
 #endif /* ADMISSIBLE_TRAFFIC_H_ */

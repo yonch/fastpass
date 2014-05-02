@@ -27,8 +27,7 @@ void admission_init_global(struct rte_ring *q_admitted_out)
 	int i;
 	char s[64];
 	struct rte_ring *q_head;
-	struct rte_mempool *head_bin_mempool;
-	struct rte_mempool *core_bin_mempool[ALGO_N_CORES];
+	struct rte_mempool *bin_mempool;
 
 	/* init q_head */
 	q_head = rte_ring_create("q_head", Q_HEAD_RING_SIZE, 0, 0);
@@ -40,39 +39,20 @@ void admission_init_global(struct rte_ring *q_admitted_out)
 	uint32_t pool_index = 0;
 	uint32_t socketid = 0;
 	rte_snprintf(s, sizeof(s), "head_bin_pool_%d", pool_index);
-	head_bin_mempool =
+	bin_mempool =
 		rte_mempool_create(s,
-			HEAD_BIN_MEMPOOL_SIZE, /* num elements */
+			BIN_MEMPOOL_SIZE, /* num elements */
 			bin_num_bytes(SMALL_BIN_SIZE), /* element size */
-			HEAD_BIN_MEMPOOL_CACHE_SIZE, /* cache size */
+			BIN_MEMPOOL_CACHE_SIZE, /* cache size */
 			0, NULL, NULL, NULL, NULL, /* custom initialization, disabled */
 			socketid, 0);
-	if (head_bin_mempool == NULL)
+	if (bin_mempool == NULL)
 		rte_exit(EXIT_FAILURE,
 				"Cannot init head bin mempool on socket %d: %s\n", socketid,
 				rte_strerror(rte_errno));
 	else
-		RTE_LOG(INFO, ADMISSION, "Allocated head bin mempool on socket %d - %lu bufs\n",
-				socketid, (uint64_t)HEAD_BIN_MEMPOOL_SIZE);
-
-	/* allocate core_bin_mempool */
-	for (pool_index = 0; pool_index < ALGO_N_CORES; pool_index++) {
-		rte_snprintf(s, sizeof(s), "core_bin_pool_%d", pool_index);
-		core_bin_mempool[pool_index] =
-			rte_mempool_create(s,
-				CORE_BIN_MEMPOOL_SIZE, /* num elements */
-				bin_num_bytes(SMALL_BIN_SIZE), /* element size */
-				CORE_BIN_MEMPOOL_CACHE_SIZE, /* cache size */
-				0, NULL, NULL, NULL, NULL, /* custom initialization, disabled */
-				socketid, MEMPOOL_F_SP_PUT | MEMPOOL_F_SC_GET);
-		if (core_bin_mempool[pool_index] == NULL)
-			rte_exit(EXIT_FAILURE,
-					"Cannot init core bin mempool on socket %d: %s\n", socketid,
-					rte_strerror(rte_errno));
-		else
-			RTE_LOG(INFO, ADMISSION, "Allocated core bin mempool on socket %d - %lu bufs\n",
-					socketid, (uint64_t)CORE_BIN_MEMPOOL_SIZE);
-	}
+		RTE_LOG(INFO, ADMISSION, "Allocated bin mempool on socket %d - %lu bufs\n",
+				socketid, (uint64_t)BIN_MEMPOOL_SIZE);
 
 	/* allocate admitted_traffic_pool */
 	pool_index = 0;
@@ -110,8 +90,8 @@ void admission_init_global(struct rte_ring *q_admitted_out)
 	/* init admissible_status */
 	init_admissible_status(&g_admissible_status, OVERSUBSCRIBED,
 			INTER_RACK_CAPACITY, OUT_OF_BOUNDARY_CAPACITY, NUM_NODES, q_head,
-			q_admitted_out, head_bin_mempool, &core_bin_mempool[0],
-			admitted_traffic_pool[0], &q_bin[0]);
+			q_admitted_out, bin_mempool, admitted_traffic_pool[0],
+			&q_bin[0]);
 
 
 	/* push bins into first q_bin */

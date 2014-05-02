@@ -76,7 +76,7 @@ void _flush_backlog_now(struct admissible_status *status)
 		adm_log_wait_for_space_in_q_head(&status->stat);
 
 	/* get a fresh bin for status->new_demands */
-	while(fp_mempool_get(status->head_bin_mempool,
+	while(fp_mempool_get(status->bin_mempool,
 						  (void**)&status->new_demands) == -ENOENT)
 		adm_log_new_demands_bin_alloc_failed(&status->stat);
 
@@ -285,7 +285,7 @@ static inline void process_new_requests(struct admissible_status *status,
     	num_entries += bin_size(bins[i]);
     	num_bins++;
     	incoming_bin_to_core(status, core, bins[i]);
-		fp_mempool_put(status->head_bin_mempool, bins[i]);
+		fp_mempool_put(status->bin_mempool, bins[i]);
     }
     adm_log_processed_new_requests(&core->stat, num_bins, num_entries);
 }
@@ -304,8 +304,8 @@ void get_admissible_traffic(struct admissible_status *status,
 
     struct fp_ring *queue_in = status->q_bin[core_index];
     struct fp_ring *queue_out = status->q_bin[(core_index + 1) % ALGO_N_CORES];
-    struct fp_mempool *bin_mp_in = status->core_bin_mempool[core_index];
-    struct fp_mempool *bin_mp_out = status->core_bin_mempool[(core_index + 1) % ALGO_N_CORES];
+    struct fp_mempool *bin_mp_in = status->bin_mempool;
+    struct fp_mempool *bin_mp_out = status->bin_mempool;
 
     // Initialize this core for a new batch of processing
     alloc_core_reset(core, status);
@@ -398,6 +398,11 @@ handle_inputs:
 wrap_up:
 	/* copy all demands to output. no need to process */
 	move_core_to_q_out(status, core, queue_out, bin_mp_out);
+	/* flush q_out if there is more there */
+	if (!is_empty_bin(core->out_bin)) {
+		adm_log_q_out_flush_batch_finished(&core->stat);
+		core_flush_q_out(core, queue_out, bin_mp_out);
+	}
 	/* go through all remaining bins in q_in*/
 	while (!queue_in_done) {
 		if(fp_ring_dequeue(queue_in, (void **)&bin_in) == 0) {
@@ -405,15 +410,10 @@ wrap_up:
     			queue_in_done = true;
     		} else {
     			adm_log_dequeued_bin_during_wrap_up(&core->stat, bin_size(bin_in));
-    			move_bin_to_q_out(status, core, queue_out, bin_mp_out, bin_in);
-    			fp_mempool_put(bin_mp_in, bin_in);
+    			while(fp_ring_enqueue(queue_out, bin_in) == -ENOBUFS)
+    				adm_log_wait_for_space_in_q_bin_out(&core->stat);
     		}
 		}
-	}
-	/* flush q_out if there is more there */
-	if (!is_empty_bin(core->out_bin)) {
-		adm_log_q_out_flush_batch_finished(&core->stat);
-		core_flush_q_out(core, queue_out, bin_mp_out);
 	}
 
     while(fp_ring_enqueue(queue_out, NULL) == -ENOBUFS)

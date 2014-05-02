@@ -55,8 +55,8 @@ struct admissible_status {
     struct bin *new_demands;
     struct fp_ring *q_head;
     struct fp_ring *q_admitted_out;
-    struct fp_mempool *head_bin_mempool;
-    struct fp_mempool *core_bin_mempool[ALGO_N_CORES];
+    struct fp_mempool *bin_mempool;
+    struct fp_mempool *core_bin_mempool;
     struct fp_mempool *admitted_traffic_mempool;
     struct admission_core_state cores[ALGO_N_CORES];
     struct fp_ring *q_bin[ALGO_N_CORES];
@@ -136,7 +136,7 @@ static inline int alloc_core_init(struct admissible_status *status,
 			return -1;
 	}
 
-	 if (fp_mempool_get(status->core_bin_mempool[core_index],
+	 if (fp_mempool_get(status->bin_mempool,
 			 (void**)&core->out_bin) != 0)
 		 return -1;
 	init_bin(core->out_bin);
@@ -152,8 +152,7 @@ int init_admissible_status(struct admissible_status *status,
                             bool oversubscribed, uint16_t inter_rack_capacity,
                             uint16_t out_of_boundary_capacity, uint16_t num_nodes,
                             struct fp_ring *q_head, struct fp_ring *q_admitted_out,
-                            struct fp_mempool *head_bin_mempool,
-                            struct fp_mempool **core_bin_mempool,
+                            struct fp_mempool *bin_mempool,
                             struct fp_mempool *admitted_traffic_mempool,
                             struct fp_ring **q_bin)
 {
@@ -166,14 +165,12 @@ int init_admissible_status(struct admissible_status *status,
 
     status->q_head = q_head;
     status->q_admitted_out = q_admitted_out;
-    status->head_bin_mempool = head_bin_mempool;
-    memcpy(&status->core_bin_mempool[0], &core_bin_mempool[0],
-    		sizeof(status->core_bin_mempool));
+    status->bin_mempool = bin_mempool;
     status->admitted_traffic_mempool = admitted_traffic_mempool;
 
     memcpy(&status->q_bin, q_bin, sizeof(status->q_bin));
 
-    fp_mempool_get(head_bin_mempool, (void**)&status->new_demands);
+    fp_mempool_get(bin_mempool, (void**)&status->new_demands);
     init_bin(status->new_demands);
 
     for (i = 0; i < ALGO_N_CORES; i++) {
@@ -194,7 +191,6 @@ struct admissible_status *create_admissible_status(bool oversubscribed,
                                                    struct fp_ring *q_head,
                                                    struct fp_ring *q_admitted_out,
                                                    struct fp_mempool *head_bin_mempool,
-                                                   struct fp_mempool **core_bin_mempool,
                                                    struct fp_mempool *admitted_traffic_mempool,
                                                    struct fp_ring **q_bin)
 {
@@ -206,7 +202,7 @@ struct admissible_status *create_admissible_status(bool oversubscribed,
 
     init_admissible_status(status, oversubscribed, inter_rack_capacity,
                            out_of_boundary_capacity, num_nodes, q_head,
-                           q_admitted_out, head_bin_mempool, core_bin_mempool,
+                           q_admitted_out, head_bin_mempool,
                            admitted_traffic_mempool, q_bin);
 
     return status;

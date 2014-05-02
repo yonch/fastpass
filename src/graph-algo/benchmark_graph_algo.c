@@ -23,8 +23,7 @@
 #define NUM_RACKS_P 4
 #define NUM_NODES_P 1024
 #define PROCESSOR_SPEED 2.8
-#define HEAD_BIN_MEMPOOL_SIZE 1024
-#define CORE_BIN_MEMPOOL_SIZE 1024
+#define BIN_MEMPOOL_SIZE 2048
 #define ADMITTED_TRAFFIC_MEMPOOL_SIZE	(51*1000)
 #define ADMITTED_OUT_RING_LOG_SIZE		16
 
@@ -224,29 +223,25 @@ int main(int argc, char **argv)
     struct fp_ring *q_bin;
     struct fp_ring *q_head;
     struct fp_ring *q_admitted_out;
-    struct fp_mempool *head_bin_mempool;
-    struct fp_mempool *core_bin_mempool;
+    struct fp_mempool *bin_mempool;
     struct fp_mempool *admitted_traffic_mempool;
 
     /* init queues */
     q_bin = fp_ring_create(2 * NUM_BINS_SHIFT);
     q_head = fp_ring_create(2 * FP_NODES_SHIFT);
     q_admitted_out = fp_ring_create(ADMITTED_OUT_RING_LOG_SIZE);
-    head_bin_mempool = fp_mempool_create(HEAD_BIN_MEMPOOL_SIZE, bin_num_bytes(SMALL_BIN_SIZE));
-   	core_bin_mempool = fp_mempool_create(CORE_BIN_MEMPOOL_SIZE,
-    									bin_num_bytes(SMALL_BIN_SIZE));
+    bin_mempool = fp_mempool_create(BIN_MEMPOOL_SIZE, bin_num_bytes(SMALL_BIN_SIZE));
     admitted_traffic_mempool = fp_mempool_create(ADMITTED_TRAFFIC_MEMPOOL_SIZE,
     		sizeof(struct admitted_traffic));
     if (!q_bin) exit(-1);
     if (!q_head) exit(-1);
     if (!q_admitted_out) exit(-1);
-	if (!head_bin_mempool) exit(-1);
-	if (!core_bin_mempool) exit(-1);
+	if (!bin_mempool) exit(-1);
 	if (!admitted_traffic_mempool) exit(-1);
 
     /* init global status */
     status = create_admissible_status(false, 0, 0, 0, q_head, q_admitted_out,
-    		head_bin_mempool, &core_bin_mempool, admitted_traffic_mempool,
+    		bin_mempool, admitted_traffic_mempool,
     		&q_bin);
     if (status == NULL) {
         printf("Error initializing admissible_status!\n");

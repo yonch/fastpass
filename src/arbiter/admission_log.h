@@ -21,6 +21,7 @@
 struct admission_log {
 	uint64_t batches_started;
 	uint64_t last_started_alloc_tsc;
+	uint64_t batches_skipped;
 };
 
 extern struct admission_log admission_core_logs[RTE_MAX_LCORE];
@@ -60,6 +61,12 @@ static inline void admission_log_allocation_end(void) {
 //			rte_lcore_id(), AL->batches_started, now,
 //			now - AL->last_started_alloc_tsc);
 }
+
+static inline
+void admission_log_skipped_batch() {
+	AL->batches_skipped++;
+}
+
 
 #undef CL
 

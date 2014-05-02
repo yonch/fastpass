@@ -9,6 +9,7 @@
 
 #include "main.h"
 #include "admission_log.h"
+#include "../protocol/platform.h"
 #include "../graph-algo/admissible_traffic.h"
 #include "../graph-algo/algo_config.h"
 
@@ -63,7 +64,7 @@ void admission_init_global(struct rte_ring *q_admitted_out)
 				bin_num_bytes(SMALL_BIN_SIZE), /* element size */
 				CORE_BIN_MEMPOOL_CACHE_SIZE, /* cache size */
 				0, NULL, NULL, NULL, NULL, /* custom initialization, disabled */
-				socketid, 0);
+				socketid, MEMPOOL_F_SP_PUT | MEMPOOL_F_SC_GET);
 		if (core_bin_mempool[pool_index] == NULL)
 			rte_exit(EXIT_FAILURE,
 					"Cannot init core bin mempool on socket %d: %s\n", socketid,
@@ -100,7 +101,7 @@ void admission_init_global(struct rte_ring *q_admitted_out)
 	/* init q_bin */
 	for (i = 0; i < N_ADMISSION_CORES; i++) {
 		rte_snprintf(s, sizeof(s), "q_bin_%d", i);
-		q_bin[i] = rte_ring_create(s, 4 * NUM_BINS, 0, 0);
+		q_bin[i] = rte_ring_create(s, Q_BIN_RING_SIZE, 0, 0);
 		if (q_bin[i] == NULL)
 			rte_exit(EXIT_FAILURE,
 					"Cannot init q_bin[%d]: %s\n", i, rte_strerror(rte_errno));
@@ -139,7 +140,7 @@ int exec_admission_core(void *void_cmd_p)
 {
 	struct admission_core_cmd *cmd = (struct admission_core_cmd *)void_cmd_p;
 	uint32_t core_ind = cmd->admission_core_index;
-	uint64_t current_timeslot = cmd->start_timeslot;
+	uint64_t logical_timeslot = cmd->start_timeslot;
 	struct admission_core_state *core = &g_admissible_status.cores[core_ind];
 	/* int traffic_pool_socketid = rte_lcore_to_socket_id(rte_lcore_id()); */
 	int traffic_pool_socketid = 0;
@@ -155,15 +156,23 @@ int exec_admission_core(void *void_cmd_p)
 
 	/* do allocation loop */
 	while (1) {
+		/* decide whether to skip timeslots */
+		uint64_t actual_timeslot = (fp_get_time_ns() * TIMESLOT_MUL) >> TIMESLOT_SHIFT;
+		uint64_t earliest_logical_timeslot = actual_timeslot - ALLOWED_TIMESLOT_LAG;
+		while (time_before64(logical_timeslot, earliest_logical_timeslot)) {
+			logical_timeslot += BATCH_SIZE * N_ADMISSION_CORES;
+			admission_log_skipped_batch();
+		}
+
 		/* perform allocation */
-		admission_log_allocation_begin(current_timeslot,
+		admission_log_allocation_begin(logical_timeslot,
 				start_time_first_timeslot);
 		get_admissible_traffic(&g_admissible_status, core_ind,
-				current_timeslot - PREALLOC_DURATION_TIMESLOTS,
+				logical_timeslot - PREALLOC_DURATION_TIMESLOTS,
 				TIMESLOT_MUL, TIMESLOT_SHIFT);
 		admission_log_allocation_end();
 
-		current_timeslot += BATCH_SIZE * N_ADMISSION_CORES;
+		logical_timeslot += BATCH_SIZE * N_ADMISSION_CORES;
 
 		/* manage timers: timer documentation asks for this to run on all cores
 		 * there shouldn't be any timers on this core */

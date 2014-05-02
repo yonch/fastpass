@@ -113,13 +113,6 @@ void alloc_core_reset(struct admission_core_state *core,
 
     memset(core->non_empty_bins, 0, sizeof(core->non_empty_bins));
 
-    while (fp_mempool_get_bulk(status->admitted_traffic_mempool,
-    		(void **)&core->admitted[0], BATCH_SIZE) != 0)
-    	adm_log_admitted_traffic_alloc_failed(&core->stat);
-
-    for (i = 0; i < BATCH_SIZE; i++)
-        init_admitted_traffic(core->admitted[i]);
-
     /* out_demands should have been flushed out */
     assert(core->out_bin != NULL);
     assert(is_empty_bin(core->out_bin));

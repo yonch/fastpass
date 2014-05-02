@@ -39,6 +39,10 @@ struct admission_core_statistics {
 	uint64_t new_request_bins;
 	uint64_t new_requests;
 	uint64_t waiting_to_pass_token;
+	uint64_t dequeue_bin_during_wrap_up;
+	uint64_t dequeued_demands_during_wrap_up;
+	uint64_t wrap_up_non_empty_bin;
+	uint64_t wrap_up_non_empty_bin_demands;
 };
 
 /**
@@ -159,6 +163,24 @@ void adm_log_dequeued_bin_in(
 		if (unlikely(hist_bin >= BIN_SIZE_HISTOGRAM_NUM_BINS))
 			hist_bin = BIN_SIZE_HISTOGRAM_NUM_BINS - 1;
 		st->bin_size_histogram[hist_bin]+= bin_size;
+	}
+}
+
+static inline __attribute__((always_inline))
+void adm_log_dequeued_bin_during_wrap_up(
+		struct admission_core_statistics *st, uint32_t bin_size) {
+	if (MAINTAIN_ADM_LOG_COUNTERS) {
+		st->dequeue_bin_during_wrap_up++;
+		st->dequeued_demands_during_wrap_up += bin_size;
+	}
+}
+
+static inline __attribute__((always_inline))
+void adm_log_wrap_up_non_empty_bin(
+		struct admission_core_statistics *st, uint32_t bin_size) {
+	if (MAINTAIN_ADM_LOG_COUNTERS) {
+		st->wrap_up_non_empty_bin++;
+		st->wrap_up_non_empty_bin_demands += bin_size;
 	}
 }
 

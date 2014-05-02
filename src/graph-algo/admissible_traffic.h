@@ -74,7 +74,7 @@ uint32_t new_metric_after_alloc(uint16_t src, uint16_t dst, uint32_t old_metric,
 		uint16_t batch_timeslot,
 		struct admission_core_state *core, struct admissible_status *status)
 {
-	return status->current_timeslot + batch_timeslot;
+	return core->current_timeslot + batch_timeslot;
 }
 
 static inline __attribute__((always_inline))

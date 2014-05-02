@@ -40,12 +40,12 @@ struct admission_core_state {
     struct admitted_traffic *admitted[BATCH_SIZE];
     struct bin *out_bin;
     struct admission_core_statistics stat;
+    uint64_t current_timeslot;
 }  __attribute__((aligned(64))) /* don't want sharing between cores */;
 
 // Tracks status for admissible traffic (last send time and demand for all flows, etc.)
 // over the lifetime of a controller
 struct admissible_status {
-    uint64_t current_timeslot;
     bool oversubscribed;
     uint16_t out_of_boundary_capacity;
     uint16_t inter_rack_capacity;  // Only valid if oversubscribed is true
@@ -77,7 +77,6 @@ void reset_admissible_status(struct admissible_status *status, bool oversubscrib
     	exit(-1);
     }
 
-    status->current_timeslot = NUM_BINS;  // simplifies logic in request_timeslots
     status->oversubscribed = oversubscribed;
     status->inter_rack_capacity = inter_rack_capacity;
     status->out_of_boundary_capacity = out_of_boundary_capacity;
@@ -125,7 +124,7 @@ void alloc_core_reset(struct admission_core_state *core,
  * @note: doesn't clean up memory on error - may leak!
  */
 static inline int alloc_core_init(struct admissible_status *status,
-		uint32_t core_index)
+		uint32_t core_index, uint64_t timeslot)
 {
 	int j;
 	struct admission_core_state* core = &status->cores[core_index];
@@ -140,6 +139,8 @@ static inline int alloc_core_init(struct admissible_status *status,
 			 (void**)&core->out_bin) != 0)
 		 return -1;
 	init_bin(core->out_bin);
+
+	core->current_timeslot = timeslot;
 
 	return 0;
 }
@@ -174,7 +175,7 @@ int init_admissible_status(struct admissible_status *status,
     init_bin(status->new_demands);
 
     for (i = 0; i < ALGO_N_CORES; i++) {
-    	rc = alloc_core_init(status, i);
+    	rc = alloc_core_init(status, i, NUM_BINS + i * BATCH_SIZE);
     	if (rc != 0)
     		return -1;
     }

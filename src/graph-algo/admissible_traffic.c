@@ -124,7 +124,7 @@ void incoming_bin_to_core(struct admissible_status *status,
 	for (i = 0; i < n; i++) {
 		/* where to put the entry? */
 		uint16_t bin_index = bin_index_from_timeslot(bin_get(bin, i)->metric,
-													status->current_timeslot);
+													core->current_timeslot);
 		/* put it there */
 		enqueue_bin_edge(core->new_request_bins[bin_index], bin_get(bin, i));
 		/* mark that the bin is non-empty */
@@ -420,7 +420,7 @@ wrap_up:
     	adm_log_wait_for_q_bin_out_enqueue_token(&core->stat);
 
     // Update current timeslot
-    status->current_timeslot += BATCH_SIZE;
+    core->current_timeslot += ALGO_N_CORES * BATCH_SIZE;
 }
 
 // Reset state of all flows for which src is the sender

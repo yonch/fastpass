@@ -20,7 +20,7 @@ struct rte_mempool* admitted_traffic_pool[NB_SOCKETS];
 struct admission_log admission_core_logs[RTE_MAX_LCORE];
 
 struct rte_ring *q_head;
-struct rte_ring *q_bin[N_ADMISSION_CORES];
+struct rte_ring *q_bin[2 * N_ADMISSION_CORES];
 
 void admission_init_global(struct rte_ring *q_admitted_out)
 {
@@ -38,7 +38,7 @@ void admission_init_global(struct rte_ring *q_admitted_out)
 	/* allocate head_bin_mempool */
 	uint32_t pool_index = 0;
 	uint32_t socketid = 0;
-	rte_snprintf(s, sizeof(s), "head_bin_pool_%d", pool_index);
+	rte_snprintf(s, sizeof(s), "bin_pool_%d", pool_index);
 	bin_mempool =
 		rte_mempool_create(s,
 			BIN_MEMPOOL_SIZE, /* num elements */
@@ -48,7 +48,7 @@ void admission_init_global(struct rte_ring *q_admitted_out)
 			socketid, 0);
 	if (bin_mempool == NULL)
 		rte_exit(EXIT_FAILURE,
-				"Cannot init head bin mempool on socket %d: %s\n", socketid,
+				"Cannot init bin mempool on socket %d: %s\n", socketid,
 				rte_strerror(rte_errno));
 	else
 		RTE_LOG(INFO, ADMISSION, "Allocated bin mempool on socket %d - %lu bufs\n",
@@ -79,7 +79,7 @@ void admission_init_global(struct rte_ring *q_admitted_out)
 		admission_log_init(&admission_core_logs[i]);
 
 	/* init q_bin */
-	for (i = 0; i < N_ADMISSION_CORES; i++) {
+	for (i = 0; i < 2 * N_ADMISSION_CORES; i++) {
 		rte_snprintf(s, sizeof(s), "q_bin_%d", i);
 		q_bin[i] = rte_ring_create(s, Q_BIN_RING_SIZE, 0, 0);
 		if (q_bin[i] == NULL)
@@ -139,7 +139,7 @@ int exec_admission_core(void *void_cmd_p)
 		/* decide whether to skip timeslots */
 		uint64_t actual_timeslot = (fp_get_time_ns() * TIMESLOT_MUL) >> TIMESLOT_SHIFT;
 		uint64_t earliest_logical_timeslot = actual_timeslot - ALLOWED_TIMESLOT_LAG;
-		while (time_before64(logical_timeslot, earliest_logical_timeslot)) {
+		while (time_before64((__u64)logical_timeslot, (__u64)earliest_logical_timeslot)) {
 			logical_timeslot += BATCH_SIZE * N_ADMISSION_CORES;
 			admission_log_skipped_batch();
 		}

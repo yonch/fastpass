@@ -36,7 +36,8 @@
 struct admission_core_state {
 	struct bin *new_request_bins[NUM_BINS + BATCH_SIZE]; // pool of backlog bins for incoming requests
 	uint64_t non_empty_bins[BIN_MASK_SIZE];
-    struct batch_state batch_state;
+	uint64_t allowed_bins[BIN_MASK_SIZE];
+	struct batch_state batch_state;
     struct admitted_traffic *admitted[BATCH_SIZE];
     struct bin *out_bin;
     struct admission_core_statistics stat;
@@ -134,6 +135,10 @@ static inline int alloc_core_init(struct admissible_status *status,
 		if (core->new_request_bins[j] == NULL)
 			return -1;
 	}
+
+	core->allowed_bins[0] = 0x1;
+	for (j = 1; j < BIN_MASK_SIZE; j++)
+		core->allowed_bins[j] = 0;
 
 	 if (fp_mempool_get(status->bin_mempool,
 			 (void**)&core->out_bin) != 0)

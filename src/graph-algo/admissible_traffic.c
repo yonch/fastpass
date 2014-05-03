@@ -245,21 +245,24 @@ void try_allocation_core(struct admission_core_state *core,
 	uint32_t bin_mask_ind;
 
 	for (bin_mask_ind = 0; bin_mask_ind < BIN_MASK_SIZE; bin_mask_ind++) {
-		uint64_t mask = core->non_empty_bins[bin_mask_ind];
+		uint64_t allowed = core->allowed_bins[bin_mask_ind];
+		uint64_t mask = core->non_empty_bins[bin_mask_ind] & allowed;
 		uint64_t bin_index;
 		while (mask) {
 			/* get the index of the lsb that is set */
 			asm("bsfq %1,%0" : "=r"(bin_index) : "r"(mask));
 			/* turn off the set bit in the mask */
-			core->non_empty_bins[bin_mask_ind] = (mask & (mask - 1));
+			core->non_empty_bins[bin_mask_ind] ^= (mask & (-mask));
 			bin_index += 64 * bin_mask_ind;
 
+			adm_log_processed_core_bin(&core->stat, bin_index,
+					bin_size(core->new_request_bins[bin_index]));
 			try_allocation_bin(core, bin_index,
 					queue_out, status, bin_mp_out);
 			init_bin(core->new_request_bins[bin_index]);
 
 			/* re-read mask */
-			mask = core->non_empty_bins[bin_mask_ind];
+			mask = core->non_empty_bins[bin_mask_ind] & allowed;
 		}
 	}
 }
@@ -356,6 +359,9 @@ void get_admissible_traffic(struct admissible_status *status,
 				(slot_gap > BATCH_SIZE + NUM_BINS) ? BATCH_SIZE + NUM_BINS : slot_gap;
 
 		for (bin = processed_bins; bin < new_processed_bins; bin++) {
+			/* allow more bins to be processed */
+			asm("bts %1,%0" : "+m" (*(uint64_t *)&core->allowed_bins[0]) : "r" (bin));
+
 			if (likely(bin >= NUM_BINS)) {
 				/* send out the admitted traffic */
 				while(fp_ring_enqueue(status->q_admitted_out,
@@ -386,7 +392,7 @@ handle_inputs:
     		if (unlikely(bin_in == NULL)) {
     			queue_in_done = true;
     		} else {
-    			adm_log_dequeued_bin_in(&core->stat, processed_bins, bin_size(bin_in));
+    			adm_log_dequeued_bin_in(&core->stat, bin_size(bin_in));
     			incoming_bin_to_core(status, core, bin_in);
     			fp_mempool_put(bin_mp_in, bin_in);
     		}

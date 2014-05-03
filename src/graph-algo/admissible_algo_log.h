@@ -18,6 +18,9 @@
 #define		BIN_SIZE_HISTOGRAM_NUM_BINS		16
 #define		BIN_SIZE_HISTOGRAM_SHIFT		4
 
+#define		MAINTAIN_CORE_BIN_HISTOGRAM		1
+#define		CORE_BIN_HISTOGRAM_NUM_BINS		16
+#define		CORE_BIN_HISTOGRAM_SHIFT		2
 
 /**
  * Per-core statistics, in struct admission_core_state
@@ -29,6 +32,7 @@ struct admission_core_statistics {
 	uint64_t allocated_no_backlog;
 	uint64_t backlog_histogram[BACKLOG_HISTOGRAM_NUM_BINS];
 	uint64_t bin_size_histogram[BIN_SIZE_HISTOGRAM_NUM_BINS];
+	uint64_t core_bins_histogram[CORE_BIN_HISTOGRAM_NUM_BINS];
 
 	uint64_t admitted_traffic_alloc_failed;
 	uint64_t wait_for_space_in_q_bin_out;
@@ -153,18 +157,33 @@ void adm_log_allocator_no_backlog(
 
 static inline __attribute__((always_inline))
 void adm_log_dequeued_bin_in(
-		struct admission_core_statistics *st, uint16_t bin_index,
-		uint16_t bin_size) {
+		struct admission_core_statistics *st, uint16_t bin_size) {
 	if (MAINTAIN_ADM_LOG_COUNTERS) {
 		uint32_t hist_bin;
 
 		/* mainatain histogram */
-		hist_bin = bin_index >> BIN_SIZE_HISTOGRAM_SHIFT;
+		hist_bin = bin_size >> BIN_SIZE_HISTOGRAM_SHIFT;
 		if (unlikely(hist_bin >= BIN_SIZE_HISTOGRAM_NUM_BINS))
 			hist_bin = BIN_SIZE_HISTOGRAM_NUM_BINS - 1;
-		st->bin_size_histogram[hist_bin]+= bin_size;
+		st->bin_size_histogram[hist_bin]++;
 	}
 }
+
+static inline __attribute__((always_inline))
+void adm_log_processed_core_bin(
+		struct admission_core_statistics *st, uint16_t bin_index,
+		uint16_t bin_size) {
+	if (MAINTAIN_CORE_BIN_HISTOGRAM) {
+		uint32_t hist_bin;
+
+		/* mainatain histogram */
+		hist_bin = bin_index >> CORE_BIN_HISTOGRAM_SHIFT;
+		if (unlikely(hist_bin >= CORE_BIN_HISTOGRAM_NUM_BINS))
+			hist_bin = BIN_SIZE_HISTOGRAM_NUM_BINS - 1;
+		st->core_bins_histogram[hist_bin]+= bin_size;
+	}
+}
+
 
 static inline __attribute__((always_inline))
 void adm_log_dequeued_bin_during_wrap_up(

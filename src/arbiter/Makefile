@@ -27,6 +27,7 @@ CFLAGS += -DPRINT_CONN_LOG_TO_STDOUT
 CFLAGS += -I${PWD} 
 #CFLAGS += -g -O1
 CFLAGS += -g 
-#CFLAGS += -DNDEBUG
+CFLAGS += -DNDEBUG
+CFLAGS += -march=core2
 
 include $(RTE_SDK)/mk/rte.extapp.mk

@@ -15,28 +15,27 @@
  * A structure for the state of a grant partition
  */
 struct pim_state {
-	struct ga_adj requests[GA_N_PARTITIONS];
+        struct ga_adj requests_by_src[N_PARTITIONS];
 	struct ga_partd_edgelist grants;
-	struct ga_adj grants_adj[GA_N_PARTITIONS];
+	struct ga_adj grants_by_dst[N_PARTITIONS];
 	struct ga_partd_edgelist accepts;
-	struct
 };
 
 /**
- * For all destination (right-hand) nodes in partition 'partition_index',
+ * For all source (left-hand) nodes in partition 'partition_index',
  *    selects edges to grant. These are added to 'grants'.
  */
 void pim_do_grant(struct pim_state *state, uint16_t partition_index);
 
 /**
- * For every source (left-hand) node in partition 'partition_index', select
- *    among its granted edges which edge to accept. These edges are added to
- *    'accepts'
+ * For every destination (right-hand) node in partition 'partition_index',
+ *    select among its granted edges which edge to accept. These edges are
+ *    added to 'accepts'
  */
 void pim_do_accept(struct pim_state *state, uint16_t partition_index);
 
 void pim_process_accepts(struct pim_state *state, uint16_t partition_index);
 
-void pim_add_backlog(struct pim_state *state, );
+void pim_add_backlog(struct pim_state *state, uint16_t src, uint16_t dst);
 
 #endif /* PIM_H_ */

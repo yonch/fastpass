@@ -22,7 +22,7 @@ struct ga_edge {
 /**
  * An adjacency structure for one partition of the graph.
  *   degree: the number of neighbors of each node in the partition
- *   neigh:  which are the neighbors to each node
+ *   neigh:  the neighbors of each node
  */
 struct ga_adj {
 	uint16_t	degree[PARTITION_N_NODES];
@@ -37,46 +37,36 @@ void inline ga_reset_adj(struct ga_adj *adj) {
 }
 
 /**
- * Adds neighbor 'src' to the node whose index in the partition is dst_index.
+ * Adds neighbor 'dst' to src
  */
-void inline ga_adj_add_edge(struct ga_adj *adj, uint16_t src,
-		uint16_t dst_index)
+void inline ga_adj_add_edge_by_src(struct ga_adj *adj, uint16_t src,
+		uint16_t dst)
 {
-	uint16_t degree = adj->degree[dst_index]++;
-	adj->neigh[dst_index][degree] = src;
-
+        uint16_t src_index = PARTITION_IDX(src);
+	uint16_t degree = adj->degree[src_index]++;
+	adj->neigh[src_index][degree] = dst;
 }
 
 /**
- * Removes the 'neigh_index'th edge from the node whose index in the partition
- *   is 'node_index'
+ * Adds neighbor 'src' to dst
  */
-void ga_adj_delete_neigh(struct ga_adj *adj, uint16_t node_index,
-		uint16_t neigh_index)
+void inline ga_adj_add_edge_by_dst(struct ga_adj *adj, uint16_t src,
+		uint16_t dst)
 {
-	uint16_t last_ind = --adj->degree[node_index];
-
-	/* fill the hole caused by the edge removal by moving the last edge into
-	 * the hole */
-	adj->neigh[node_index][neigh_index] = adj->neigh[node_index][last_ind];
+        uint16_t dst_index = PARTITION_IDX(dst);
+	uint16_t degree = adj->degree[dst_index]++;
+	adj->neigh[dst_index][degree] = src;
 }
 
 /**
  * Adds all edges in the list to the adjacency structure, by destination
  */
-void inline ga_edges_dst_to_adj(struct ga_edge *edges, uint32_t n_edges,
+void inline ga_edges_to_adj_by_dst(struct ga_edge *edges, uint32_t n_edges,
 		struct ga_adj *adj)
 {
 	uint32_t i;
 	for (i = 0; i < n_edges; i++)
-		ga_adj_add_edge(adj, edges[i].src, PARTITION_IDX(edges[i].dst));
+		ga_adj_add_edge_by_dst(adj, edges[i].src, edges[i].dst);
 }
-
-void ga_add_grant(uint16_t src, uint16_t dst);
-
-void ga_do_grant(int partition_index);
-void ga_do_accept(int partition_index);
-
-
 
 #endif /* GRANT_ACCEPT_H_ */

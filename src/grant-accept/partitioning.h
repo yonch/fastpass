@@ -4,7 +4,11 @@
 #include "../protocol/topology.h"
 
 #define PARTITION_N_NODES	128
-#define N_PARTITIONS			((MAX_NODES + PARTITION_N_NODES - 1) / PARTITION_N_NODES)
+#define N_PARTITIONS            1
+//#define N_PARTITIONS			((MAX_NODES + PARTITION_N_NODES - 1) / PARTITION_N_NODES)
+
+#define FIRST_IN_PART(part)             (part * N_PARTITIONS)
+#define LAST_IN_PART(part)              ((part == N_PARTITIONS - 1) ? (MAX_NODES - 1) : (FIRST_IN_PART(part + 1) - 1))
 
 #if (PARTITION_N_NODES >= MAX_NODES)
 #define PARTITION_OF(node)		(0)

@@ -32,14 +32,16 @@ struct ga_adj {
 /**
  * Erases all edges from the adjacency structure
  */
-void inline ga_reset_adj(struct ga_adj *adj) {
+static inline
+void ga_reset_adj(struct ga_adj *adj) {
 	memset(&adj->degree[0], 0, sizeof(adj->degree));
 }
 
 /**
  * Adds neighbor 'dst' to src
  */
-void inline ga_adj_add_edge_by_src(struct ga_adj *adj, uint16_t src,
+static inline
+void ga_adj_add_edge_by_src(struct ga_adj *adj, uint16_t src,
 		uint16_t dst)
 {
         uint16_t src_index = PARTITION_IDX(src);
@@ -50,7 +52,8 @@ void inline ga_adj_add_edge_by_src(struct ga_adj *adj, uint16_t src,
 /**
  * Adds neighbor 'src' to dst
  */
-void inline ga_adj_add_edge_by_dst(struct ga_adj *adj, uint16_t src,
+static inline
+void ga_adj_add_edge_by_dst(struct ga_adj *adj, uint16_t src,
 		uint16_t dst)
 {
         uint16_t dst_index = PARTITION_IDX(dst);
@@ -61,7 +64,8 @@ void inline ga_adj_add_edge_by_dst(struct ga_adj *adj, uint16_t src,
 /**
  * Adds all edges in the list to the adjacency structure, by destination
  */
-void inline ga_edges_to_adj_by_dst(struct ga_edge *edges, uint32_t n_edges,
+static inline
+void ga_edges_to_adj_by_dst(struct ga_edge *edges, uint32_t n_edges,
 		struct ga_adj *adj)
 {
 	uint32_t i;

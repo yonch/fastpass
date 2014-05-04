@@ -45,8 +45,8 @@ struct ga_partd_edgelist {
 /**
  * Adds edge to edgelist 'edgelist'
  */
-void inline ga_edgelist_add(struct ga_edgelist *edgelist, uint16_t src,
-		uint16_t dst)
+static inline
+void ga_edgelist_add(struct ga_edgelist *edgelist, uint16_t src, uint16_t dst)
 {
 	uint32_t n = edgelist->n++;
 	edgelist->edge[n].src = src;
@@ -56,7 +56,8 @@ void inline ga_edgelist_add(struct ga_edgelist *edgelist, uint16_t src,
 /**
  * Adds edge to the partitioned edgelist 'pedgelist'
  */
-void inline ga_partd_edgelist_add(struct ga_partd_edgelist *pedgelist,
+static inline
+void ga_partd_edgelist_add(struct ga_partd_edgelist *pedgelist,
 		uint16_t src, uint16_t dst)
 {
         struct ga_edgelist *edgelist;
@@ -67,7 +68,8 @@ void inline ga_partd_edgelist_add(struct ga_partd_edgelist *pedgelist,
 /**
  * Deletes all edges in source partition 'src_partition'
  */
-void inline ga_partd_edgelist_src_reset(struct ga_partd_edgelist *pedgelist,
+static inline
+void ga_partd_edgelist_src_reset(struct ga_partd_edgelist *pedgelist,
 		uint16_t src_partition)
 {
 	uint16_t dst_partition;
@@ -83,7 +85,8 @@ void inline ga_partd_edgelist_src_reset(struct ga_partd_edgelist *pedgelist,
  * @param dest_adj: the adjacency structure where edges to the destination will
  *    be added
  */
-void inline ga_edgelist_to_adj_by_dst(struct ga_partd_edgelist *pedgelist,
+static inline
+void ga_edgelist_to_adj_by_dst(struct ga_partd_edgelist *pedgelist,
 		uint16_t dst_partition, struct ga_adj *dest_adj)
 {
 	uint16_t src_partition;

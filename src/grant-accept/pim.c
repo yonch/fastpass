@@ -12,9 +12,11 @@
  *    selects edges to grant. These are added to 'grants'.
  */
 void pim_do_grant(struct pim_state *state, uint16_t partition_index) {
-        uint16_t src;
-        
+        /* reset grant edgelist */
+        ga_partd_edgelist_src_reset(&state->grants, partition_index);
+
         /* for each src in the partition, randomly choose a dst to grant to */
+        uint16_t src;
         for (src = FIRST_IN_PART(partition_index);
              src <= LAST_IN_PART(partition_index);
              src++) {
@@ -34,9 +36,15 @@ void pim_do_grant(struct pim_state *state, uint16_t partition_index) {
  *    added to 'accepts'
  */
 void pim_do_accept(struct pim_state *state, uint16_t partition_index) {
+        /* reset grant adjacency list */
+        ga_reset_adj(&state->grants_by_dst[partition_index]);
+
         /* sort grants from all src partitions by destination node */
         struct ga_adj *dest_adj = &state->grants_by_dst[partition_index];
         ga_edgelist_to_adj_by_dst(&state->grants, partition_index, dest_adj);
+
+        /* reset accept edgelist */
+        ga_partd_edgelist_src_reset(&state->accepts, partition_index);
 
         /* for each dst in the partition, randomly choose a src to accept */
         uint16_t dst;
@@ -77,15 +85,15 @@ int main() {
         struct pim_state state;
         for (src_partition = 0; src_partition < N_PARTITIONS; src_partition++) {
                 ga_reset_adj(&state.requests_by_src[src_partition]);
-                ga_partd_edgelist_src_reset(&state.grants, src_partition);
-                ga_reset_adj(&state.grants_by_dst[src_partition]);
-                ga_partd_edgelist_src_reset(&state.accepts, src_partition);
         }
 
         /* add a test edge */
         uint16_t test_src, test_dst;
         test_src = 1;
         test_dst = 3;
+        ga_adj_add_edge_by_src(&state.requests_by_src[0], test_src, test_dst);
+        test_src = 0;
+        test_dst = 5;
         ga_adj_add_edge_by_src(&state.requests_by_src[0], test_src, test_dst);
 
         /* run pim and print out accepted edges */

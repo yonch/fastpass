@@ -98,4 +98,39 @@ void ga_edgelist_to_adj_by_dst(struct ga_partd_edgelist *pedgelist,
 	}
 }
 
+/**
+ * Prints an edgelist to stdout for debugging
+ */
+static inline
+void print_edgelist(struct ga_edgelist *edgelist)
+{
+        printf("%d edges", edgelist->n);
+        uint32_t i;
+        for (i = 0; i < edgelist->n; i++) {
+                printf(", (%d, %d)", edgelist->edge[i].src, edgelist->edge[i].dst);
+        }
+        printf("\n");
+}
+
+/**
+ * Prints a partitioned edgelist to stdout for debugging
+ */
+static inline
+void print_partd_edgelist(struct ga_partd_edgelist *pedgelist)
+{
+        uint16_t src_part, dst_part;
+        for (src_part = 0; src_part < N_PARTITIONS; src_part++) {
+                for (dst_part = 0; dst_part < N_PARTITIONS; dst_part++) {
+                        struct ga_edgelist *edgelist;
+                        edgelist = &pedgelist->dst[dst_part].src[src_part];
+
+                        if (edgelist->n == 0)
+                                continue;
+
+                        printf("edgelist for partition (%d, %d): ", src_part, dst_part);
+                        print_edgelist(edgelist);
+                }
+        }
+}
+
 #endif /* EDGELIST_H_ */

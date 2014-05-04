@@ -4,11 +4,7 @@
 #include "../protocol/topology.h"
 
 #define PARTITION_N_NODES	128
-#define N_PARTITIONS            1
-//#define N_PARTITIONS			((MAX_NODES + PARTITION_N_NODES - 1) / PARTITION_N_NODES)
-
-#define FIRST_IN_PART(part)             (part * N_PARTITIONS)
-#define LAST_IN_PART(part)              ((part == N_PARTITIONS - 1) ? (MAX_NODES - 1) : (FIRST_IN_PART(part + 1) - 1))
+#define N_PARTITIONS			((MAX_NODES + PARTITION_N_NODES - 1) / PARTITION_N_NODES)
 
 #if (PARTITION_N_NODES >= MAX_NODES)
 #define PARTITION_OF(node)		(0)
@@ -17,5 +13,22 @@
 #define PARTITION_OF(node)		(node / PARTITION_N_NODES)
 #define PARTITION_IDX(node)		(node % PARTITION_N_NODES)
 #endif
+
+/**
+ * Returns the id of the first node in this partition
+ */
+static inline
+uint16_t first_in_partition(uint16_t partition) {
+        return partition * PARTITION_N_NODES;
+}
+
+/**
+ * Returns the id of the last node in this partition
+ */
+static inline
+uint16_t last_in_partition(uint16_t partition) {
+        return (partition == N_PARTITIONS - 1) ? (MAX_NODES - 1)
+                : (first_in_partition(partition + 1) - 1);
+}
 
 #endif /* PARTITIONING_H_ */

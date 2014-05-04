@@ -19,8 +19,8 @@ void pim_do_grant(struct pim_state *state, uint16_t partition_index) {
 
         /* for each src in the partition, randomly choose a dst to grant to */
         uint16_t src;
-        for (src = FIRST_IN_PART(partition_index);
-             src <= LAST_IN_PART(partition_index);
+        for (src = first_in_partition(partition_index);
+             src <= last_in_partition(partition_index);
              src++) {
                 uint16_t degree = state->requests_by_src[partition_index].degree[src];
                 if (degree == 0)
@@ -50,8 +50,8 @@ void pim_do_accept(struct pim_state *state, uint16_t partition_index) {
 
         /* for each dst in the partition, randomly choose a src to accept */
         uint16_t dst;
-        for (dst = FIRST_IN_PART(partition_index);
-             dst <= LAST_IN_PART(partition_index);
+        for (dst = first_in_partition(partition_index);
+             dst <= last_in_partition(partition_index);
              dst++) {
                 uint16_t degree = state->grants_by_dst[partition_index].degree[dst];
                 if (degree == 0)
@@ -102,7 +102,11 @@ int main() {
         }
 
         /* run one iteration of pim and print out accepted edges */
-        pim_do_grant(&state, 0);
-        pim_do_accept(&state, 0);
-        pim_process_accepts(&state, 0);
+        uint16_t partition;
+        for (partition = 0; partition < N_PARTITIONS; partition++)
+                pim_do_grant(&state, partition);
+        for (partition = 0; partition < N_PARTITIONS; partition++)
+                pim_do_accept(&state, partition);
+        for (partition = 0; partition < N_PARTITIONS; partition++)
+                pim_process_accepts(&state, partition);
 }

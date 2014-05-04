@@ -7,6 +7,8 @@
 
 #include "pim.h"
 
+#include <time.h> /* for seeding srand */
+
 /**
  * For all source (left-hand) nodes in partition 'partition_index',
  *    selects edges to grant. These are added to 'grants'.
@@ -79,24 +81,27 @@ void pim_process_accepts(struct pim_state *state, uint16_t partition_index) {
 
 /* simple test of pim */
 int main() {
-        uint16_t src_partition;
+        /* initialize rand */
+        srand(time(NULL));
 
         /* initialize state to all zeroes */
         struct pim_state state;
+        uint16_t src_partition;
         for (src_partition = 0; src_partition < N_PARTITIONS; src_partition++) {
                 ga_reset_adj(&state.requests_by_src[src_partition]);
         }
 
-        /* add a test edge */
-        uint16_t test_src, test_dst;
-        test_src = 1;
-        test_dst = 3;
-        ga_adj_add_edge_by_src(&state.requests_by_src[0], test_src, test_dst);
-        test_src = 0;
-        test_dst = 5;
-        ga_adj_add_edge_by_src(&state.requests_by_src[0], test_src, test_dst);
+        /* add some test edges */
+        struct ga_edge test_edges[] = {{1, 3}, {0, 5}, {1, 5}};
+        uint8_t i;
+        for (i = 0; i < sizeof(test_edges) / sizeof(struct ga_edge); i++) {
+                uint16_t src = test_edges[i].src;
+                uint16_t dst = test_edges[i].dst;
+                ga_adj_add_edge_by_src(&state.requests_by_src[PARTITION_OF(src)],
+                                       src, dst);
+        }
 
-        /* run pim and print out accepted edges */
+        /* run one iteration of pim and print out accepted edges */
         pim_do_grant(&state, 0);
         pim_do_accept(&state, 0);
         pim_process_accepts(&state, 0);

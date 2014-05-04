@@ -100,7 +100,7 @@ int main() {
                 uint16_t src = test_edges[i].src;
                 uint16_t dst = test_edges[i].dst;
                 ga_adj_add_edge_by_src(&state.requests_by_src[PARTITION_OF(src)],
-                                       src, dst);
+                                       PARTITION_IDX(src), dst);
         }
 
         /* run one iteration of pim and print out accepted edges */

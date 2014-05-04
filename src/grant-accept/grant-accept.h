@@ -38,39 +38,25 @@ void ga_reset_adj(struct ga_adj *adj) {
 }
 
 /**
- * Adds neighbor 'dst' to src
+ * Adds neighbor 'dst' to the src at src_index
  */
 static inline
-void ga_adj_add_edge_by_src(struct ga_adj *adj, uint16_t src,
+void ga_adj_add_edge_by_src(struct ga_adj *adj, uint16_t src_index,
 		uint16_t dst)
 {
-        uint16_t src_index = PARTITION_IDX(src);
-	uint16_t degree = adj->degree[src_index]++;
+        uint16_t degree = adj->degree[src_index]++;
 	adj->neigh[src_index][degree] = dst;
 }
 
 /**
- * Adds neighbor 'src' to dst
+ * Adds neighbor 'src' to the dst at dst_index
  */
 static inline
 void ga_adj_add_edge_by_dst(struct ga_adj *adj, uint16_t src,
-		uint16_t dst)
+		uint16_t dst_index)
 {
-        uint16_t dst_index = PARTITION_IDX(dst);
 	uint16_t degree = adj->degree[dst_index]++;
 	adj->neigh[dst_index][degree] = src;
-}
-
-/**
- * Adds all edges in the list to the adjacency structure, by destination
- */
-static inline
-void ga_edges_to_adj_by_dst(struct ga_edge *edges, uint32_t n_edges,
-		struct ga_adj *adj)
-{
-	uint32_t i;
-	for (i = 0; i < n_edges; i++)
-		ga_adj_add_edge_by_dst(adj, edges[i].src, edges[i].dst);
 }
 
 #endif /* GRANT_ACCEPT_H_ */

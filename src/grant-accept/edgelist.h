@@ -78,6 +78,19 @@ void ga_partd_edgelist_src_reset(struct ga_partd_edgelist *pedgelist,
 }
 
 /**
+ * Adds all edges in the list to the adjacency structure, by destination
+ */
+static inline
+void ga_edges_to_adj_by_dst(struct ga_edge *edges, uint32_t n_edges,
+		struct ga_adj *adj)
+{
+	uint32_t i;
+	for (i = 0; i < n_edges; i++)
+		ga_adj_add_edge_by_dst(adj, edges[i].src,
+                                       PARTITION_IDX(edges[i].dst));
+}
+
+/**
  * Adds all edges destined for a destination partition to an adjacency
  *   structure, keyed by destination node.
  * @param pedgelist: the partitioned edgelist structure

@@ -22,12 +22,13 @@ void pim_do_grant(struct pim_state *state, uint16_t partition_index) {
         for (src = first_in_partition(partition_index);
              src <= last_in_partition(partition_index);
              src++) {
-                uint16_t degree = state->requests_by_src[partition_index].degree[src];
+                uint16_t src_index = PARTITION_IDX(src);
+                uint16_t degree = state->requests_by_src[partition_index].degree[src_index];
                 if (degree == 0)
                         continue; /* no requests for this src */
 
                 uint16_t dst_index = rand() % degree;
-                uint16_t dst = state->requests_by_src[partition_index].neigh[src][dst_index];
+                uint16_t dst = state->requests_by_src[partition_index].neigh[src_index][dst_index];
                 ga_partd_edgelist_add(&state->grants, src, dst);
         }
 }
@@ -53,12 +54,13 @@ void pim_do_accept(struct pim_state *state, uint16_t partition_index) {
         for (dst = first_in_partition(partition_index);
              dst <= last_in_partition(partition_index);
              dst++) {
-                uint16_t degree = state->grants_by_dst[partition_index].degree[dst];
+                uint16_t dst_index = PARTITION_IDX(dst);
+                uint16_t degree = state->grants_by_dst[partition_index].degree[dst_index];
                 if (degree == 0)
                         continue; /* no grants for this dst */
 
                 uint16_t src_index = rand() % degree;
-                uint16_t src = state->grants_by_dst[partition_index].neigh[dst][src_index];
+                uint16_t src = state->grants_by_dst[partition_index].neigh[dst_index][src_index];
                 ga_partd_edgelist_add(&state->accepts, src, dst);
         }
 }
@@ -92,7 +94,7 @@ int main() {
         }
 
         /* add some test edges */
-        struct ga_edge test_edges[] = {{1, 3}, {0, 5}, {1, 5}};
+        struct ga_edge test_edges[] = {{1, 3}, {4, 5}, {1, 5}};
         uint8_t i;
         for (i = 0; i < sizeof(test_edges) / sizeof(struct ga_edge); i++) {
                 uint16_t src = test_edges[i].src;

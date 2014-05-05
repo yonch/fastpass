@@ -184,6 +184,7 @@ int init_admissible_status(struct admissible_status *status,
     	if (rc != 0)
     		return -1;
     }
+    return 0;
 }
 
 /**

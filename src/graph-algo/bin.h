@@ -66,7 +66,8 @@ struct backlog_edge *bin_get(struct bin *bin, uint32_t index) {
     return &bin->edges[index];
 }
 
-static inline bin_num_bytes(uint32_t n_elem) {
+static inline
+uint32_t bin_num_bytes(uint32_t n_elem) {
 	return sizeof(struct bin) + n_elem * sizeof(struct backlog_edge);
 }
 

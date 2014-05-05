@@ -26,7 +26,7 @@
 #include <stdint.h>
 #include <stdio.h>
 
-void main() {
+int main() {
     uint64_t src_endnodes [MAX_NODES / BITMASKS_PER_64_BIT];
     uint64_t dst_endnodes [MAX_NODES / BITMASKS_PER_64_BIT];
     uint64_t batch_total = 0;
@@ -92,5 +92,5 @@ void main() {
     	/* go through pseudo-random demands */
     }
 
-    printf("batch_total %lu\n", batch_total);
+    printf("batch_total %llu\n", batch_total);
 }

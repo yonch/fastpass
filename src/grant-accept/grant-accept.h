@@ -59,4 +59,39 @@ void ga_adj_add_edge_by_dst(struct ga_adj *adj, uint16_t src,
 	adj->neigh[dst_index][degree] = src;
 }
 
+/**
+ * Removes the 'neigh_index'th edge from the node whose index in the partition
+ *   is 'node_index'
+ */
+static inline
+void ga_adj_delete_neigh(struct ga_adj *adj, uint16_t node_index,
+		uint16_t neigh_index)
+{
+	uint16_t last_ind = --adj->degree[node_index];
+
+	/* fill the hole caused by the edge removal by moving the last edge into
+	 * the hole */
+	adj->neigh[node_index][neigh_index] = adj->neigh[node_index][last_ind];
+}
+
+/**
+ * Prints an adjacency list to stdout for debugging
+ */
+static inline
+void ga_print_adj(struct ga_adj *adj, uint16_t src_partition)
+{
+        uint16_t i, j;
+        for (i = 0; i < PARTITION_N_NODES; i++) {
+                if (adj->degree[i] == 0)
+                        continue;
+
+                printf("neighbors of %d: ", i + first_in_partition(src_partition));
+                printf("%d", adj->neigh[i][0]);
+                for (j = 1; j < adj->degree[i]; j++) {
+                        printf(", %d", adj->neigh[i][j]);
+                }
+                printf("\n");
+        }
+}
+
 #endif /* GRANT_ACCEPT_H_ */

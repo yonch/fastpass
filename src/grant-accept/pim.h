@@ -11,14 +11,20 @@
 #include "grant-accept.h"
 #include "edgelist.h"
 
+#define UNALLOCATED 0
+#define ALLOCATED   1
+
 /**
  * A structure for the state of a grant partition
  */
 struct pim_state {
         struct ga_adj requests_by_src[N_PARTITIONS];
-	struct ga_partd_edgelist grants;
-	struct ga_adj grants_by_dst[N_PARTITIONS];
-	struct ga_partd_edgelist accepts;
+        struct ga_partd_edgelist grants;
+        struct ga_adj grants_by_dst[N_PARTITIONS];
+        struct ga_partd_edgelist accepts;
+        uint8_t grant_adj_index[MAX_NODES]; /* per src adj index of grant */
+        uint8_t src_status[MAX_NODES]; /* TODO: use 1 bit per src instead of 8 */
+        uint8_t dst_status[MAX_NODES]; /* TODO: use 1 bit per dst instead of 8 */
 };
 
 /**

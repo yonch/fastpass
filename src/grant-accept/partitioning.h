@@ -14,4 +14,21 @@
 #define PARTITION_IDX(node)		(node % PARTITION_N_NODES)
 #endif
 
+/**
+ * Returns the id of the first node in this partition
+ */
+static inline
+uint16_t first_in_partition(uint16_t partition) {
+        return partition * PARTITION_N_NODES;
+}
+
+/**
+ * Returns the id of the last node in this partition
+ */
+static inline
+uint16_t last_in_partition(uint16_t partition) {
+        return (partition == N_PARTITIONS - 1) ? (MAX_NODES - 1)
+                : (first_in_partition(partition + 1) - 1);
+}
+
 #endif /* PARTITIONING_H_ */

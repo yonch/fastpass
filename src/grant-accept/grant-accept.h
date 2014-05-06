@@ -22,7 +22,7 @@ struct ga_edge {
 /**
  * An adjacency structure for one partition of the graph.
  *   degree: the number of neighbors of each node in the partition
- *   neigh:  which are the neighbors to each node
+ *   neigh:  the neighbors of each node
  */
 struct ga_adj {
 	uint16_t	degree[PARTITION_N_NODES];
@@ -32,25 +32,38 @@ struct ga_adj {
 /**
  * Erases all edges from the adjacency structure
  */
-void inline ga_reset_adj(struct ga_adj *adj) {
+static inline
+void ga_reset_adj(struct ga_adj *adj) {
 	memset(&adj->degree[0], 0, sizeof(adj->degree));
 }
 
 /**
- * Adds neighbor 'src' to the node whose index in the partition is dst_index.
+ * Adds neighbor 'dst' to the src at src_index
  */
-void inline ga_adj_add_edge(struct ga_adj *adj, uint16_t src,
+static inline
+void ga_adj_add_edge_by_src(struct ga_adj *adj, uint16_t src_index,
+		uint16_t dst)
+{
+        uint16_t degree = adj->degree[src_index]++;
+	adj->neigh[src_index][degree] = dst;
+}
+
+/**
+ * Adds neighbor 'src' to the dst at dst_index
+ */
+static inline
+void ga_adj_add_edge_by_dst(struct ga_adj *adj, uint16_t src,
 		uint16_t dst_index)
 {
 	uint16_t degree = adj->degree[dst_index]++;
 	adj->neigh[dst_index][degree] = src;
-
 }
 
 /**
  * Removes the 'neigh_index'th edge from the node whose index in the partition
  *   is 'node_index'
  */
+static inline
 void ga_adj_delete_neigh(struct ga_adj *adj, uint16_t node_index,
 		uint16_t neigh_index)
 {
@@ -62,21 +75,23 @@ void ga_adj_delete_neigh(struct ga_adj *adj, uint16_t node_index,
 }
 
 /**
- * Adds all edges in the list to the adjacency structure, by destination
+ * Prints an adjacency list to stdout for debugging
  */
-void inline ga_edges_dst_to_adj(struct ga_edge *edges, uint32_t n_edges,
-		struct ga_adj *adj)
+static inline
+void ga_print_adj(struct ga_adj *adj, uint16_t src_partition)
 {
-	uint32_t i;
-	for (i = 0; i < n_edges; i++)
-		ga_adj_add_edge(adj, edges[i].src, PARTITION_IDX(edges[i].dst));
+        uint16_t i, j;
+        for (i = 0; i < PARTITION_N_NODES; i++) {
+                if (adj->degree[i] == 0)
+                        continue;
+
+                printf("neighbors of %d: ", i + first_in_partition(src_partition));
+                printf("%d", adj->neigh[i][0]);
+                for (j = 1; j < adj->degree[i]; j++) {
+                        printf(", %d", adj->neigh[i][j]);
+                }
+                printf("\n");
+        }
 }
-
-void ga_add_grant(uint16_t src, uint16_t dst);
-
-void ga_do_grant(int partition_index);
-void ga_do_accept(int partition_index);
-
-
 
 #endif /* GRANT_ACCEPT_H_ */

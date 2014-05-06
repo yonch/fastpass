@@ -26,6 +26,8 @@
 #else
 
 /** VANILLA **/
+#include <string.h>
+
 #define fp_free(ptr)                            free(ptr)
 #define fp_calloc(typestr, num, size)           calloc(num, size)
 #define fp_malloc(typestr, size)		malloc(size)

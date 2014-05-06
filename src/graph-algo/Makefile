@@ -4,8 +4,9 @@ CC = icc
 CCFLAGS = -g
 CCFLAGS += -DNDEBUG
 CCFLAGS += -O3
+CCFLAGS += -march=core2
 #CCFLAGS += -O1
-CCFLAGS += -DNO_DPDK 
+CCFLAGS += -DNO_DPDK -DALGO_N_CORES=1 
 #CCFLAGS += -debug inline-debug-info
 LDFLAGS = -lm
 #LDFLAGS = -debug inline-debug-info

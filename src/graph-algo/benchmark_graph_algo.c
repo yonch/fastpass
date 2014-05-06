@@ -300,7 +300,7 @@ int main(int argc, char **argv)
             struct bin *b;
             while (fp_ring_dequeue(q_bin, (void **)&b) == 0) {
             	if (b != NULL)
-            		fp_mempool_put(core_bin_mempool, b);
+            		fp_mempool_put(bin_mempool, b);
             }
 
             fp_ring_enqueue(q_bin, NULL);

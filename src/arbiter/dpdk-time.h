@@ -2,7 +2,8 @@
 #ifndef CONTROLLER_DPDK_TIME_H_
 #define CONTROLLER_DPDK_TIME_H_
 
-static inline u64 fp_get_time_ns(void)
+static inline __attribute__((always_inline))
+u64 fp_get_time_ns(void)
 {
 	struct timespec tp;
 

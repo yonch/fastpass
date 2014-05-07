@@ -81,7 +81,8 @@ void admission_init_global(struct rte_ring *q_admitted_out)
 	/* init q_bin */
 	for (i = 0; i < 2 * N_ADMISSION_CORES; i++) {
 		rte_snprintf(s, sizeof(s), "q_bin_%d", i);
-		q_bin[i] = rte_ring_create(s, Q_BIN_RING_SIZE, 0, 0);
+		q_bin[i] = rte_ring_create(s, Q_BIN_RING_SIZE, 0,
+									RING_F_SP_ENQ | RING_F_SC_DEQ);
 		if (q_bin[i] == NULL)
 			rte_exit(EXIT_FAILURE,
 					"Cannot init q_bin[%d]: %s\n", i, rte_strerror(rte_errno));
@@ -92,17 +93,6 @@ void admission_init_global(struct rte_ring *q_admitted_out)
 			INTER_RACK_CAPACITY, OUT_OF_BOUNDARY_CAPACITY, NUM_NODES, q_head,
 			q_admitted_out, bin_mempool, admitted_traffic_pool[0],
 			&q_bin[0]);
-
-
-	/* push bins into first q_bin */
-	for (i = 0; i < NUM_BINS; i++) {
-		struct bin *bin = create_bin(LARGE_BIN_SIZE);
-		if (bin == NULL)
-			rte_exit(EXIT_FAILURE, "Cannot create bin %d to initialize q_bin[0]", i);
-
-		if (rte_ring_enqueue(q_bin[0], (void *)bin) != 0)
-			rte_exit(EXIT_FAILURE, "Couldn't enqueue initial bins!\n");
-	}
 
 }
 

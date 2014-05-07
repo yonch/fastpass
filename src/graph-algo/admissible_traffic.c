@@ -324,6 +324,7 @@ void get_admissible_traffic(struct admissible_status *status,
     uint16_t processed_bins = 0;
 	uint32_t i;
     bool queue_in_done = false;
+    bool should_process_new_req = false;
 
     while (fp_mempool_get_bulk(status->admitted_traffic_mempool,
     		(void **)&core->admitted[0], BATCH_SIZE) != 0)
@@ -349,6 +350,10 @@ void get_admissible_traffic(struct admissible_status *status,
     		goto handle_inputs;
 
     	prev_timeslot = now_timeslot;
+
+    	should_process_new_req =
+    			(first_timeslot - now_timeslot > URGENT_NUM_TIMESLOTS_END)
+    		 && (first_timeslot - now_timeslot <= URGENT_NUM_TIMESLOTS_START);
 
 		/* if time is not close enough to process bins, continue */
 		if (likely(time_before64((__u64)now_timeslot, (__u64)(first_timeslot - NUM_BINS))))
@@ -379,11 +384,8 @@ void get_admissible_traffic(struct admissible_status *status,
 
 handle_inputs:
     	/* process new requests if this core is responsible for them */
-    	if (unlikely(   (first_timeslot - now_timeslot > URGENT_NUM_TIMESLOTS_END)
-				     && (first_timeslot - now_timeslot <= URGENT_NUM_TIMESLOTS_START)))
-		{
+    	if (should_process_new_req)
 			process_new_requests(status, core, processed_bins - 1);
-		}
 
     	/* try to dequeue a bin from queue_in */
     	if (likely(   !queue_in_done

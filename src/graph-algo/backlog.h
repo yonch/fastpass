@@ -27,12 +27,12 @@ static void backlog_init(struct backlog *backlog) {
 }
 
 // Internal. Get the index of this flow in the status data structure
-static inline
+static inline __attribute__((always_inline))
 uint32_t _backlog_index(uint16_t src, uint16_t dst) {
     return (src << FP_NODES_SHIFT) + dst;
 }
 
-static inline
+static inline __attribute__((always_inline))
 uint32_t backlog_get(struct backlog *backlog, uint16_t src, uint16_t dst) {
 	uint32_t index = _backlog_index(src, dst);
 	return atomic32_read(&backlog->n[index]);

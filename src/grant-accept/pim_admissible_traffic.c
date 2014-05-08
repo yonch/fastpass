@@ -25,15 +25,12 @@ void add_backlog(struct pim_state *state, uint16_t src, uint16_t dst,
 void get_admissible_traffic(struct pim_state *state)
 {
         /* reset per-timeslot state */
-        uint16_t src_partition;
-        for (src_partition = 0; src_partition < N_PARTITIONS; src_partition++)
-                ga_partd_edgelist_src_reset(&state->accepts, src_partition);
-        memset(&state->src_status, 0, sizeof(state->src_status));
-        memset(&state->dst_status, 0, sizeof(state->dst_status));
+        uint16_t partition;
+        for (partition = 0; partition < N_PARTITIONS; partition++)
+                pim_prepare(state, partition);
 
         /* run multiple iterations of pim and print out accepted edges */
         /* TODO: add multiple cores and synchronization between them */
-        uint16_t partition;
         uint8_t i;
         for (i = 0; i < NUM_ITERATIONS; i++) {
                 for (partition = 0; partition < N_PARTITIONS; partition++)

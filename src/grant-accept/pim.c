@@ -38,6 +38,20 @@ void process_new_requests(struct pim_state *state, uint16_t partition_index) {
 }
 
 /**
+ * Prepare data structures so they are ready to allocate the next timeslot
+ */
+void pim_prepare(struct pim_state *state, uint16_t partition_index) {
+        /* reset accepts */
+        ga_partd_edgelist_src_reset(&state->accepts, partition_index);
+
+        /* reset src and dst status */
+        memset(((uint8_t *) &state->src_status) + partition_index * PARTITION_N_NODES,
+               0, PARTITION_N_NODES);
+        memset(((uint8_t *) &state->dst_status) + partition_index * PARTITION_N_NODES,
+               0, PARTITION_N_NODES);
+}
+
+/**
  * For all source (left-hand) nodes in partition 'partition_index',
  *    selects edges to grant. These are added to 'grants'.
  */

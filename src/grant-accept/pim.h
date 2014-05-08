@@ -33,6 +33,11 @@ struct pim_state {
 };
 
 /**
+ * Prepare data structures so they are ready to allocate the next timeslot
+ */
+void pim_prepare(struct pim_state *state, uint16_t partition_index);
+
+/**
  * For all source (left-hand) nodes in partition 'partition_index',
  *    selects edges to grant. These are added to 'grants'.
  */

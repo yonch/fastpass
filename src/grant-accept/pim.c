@@ -7,13 +7,44 @@
 
 #include "pim.h"
 
+#include <assert.h>
+
 #define MAX_TRIES 10
+
+/**
+ * Move new demands from 'new_demands' to the backlog struct. Also make sure
+ * that they are included in requests_by_src
+ */
+static inline
+void process_new_requests(struct pim_state *state, uint16_t partition_index) {
+        struct bin *new_demands = state->new_demands[partition_index];
+        
+        uint32_t i;
+        for (i = 0; i < bin_size(new_demands); i++) {
+                /* check that this edge belongs to this partition */
+                struct backlog_edge *edge = bin_get(new_demands, i);
+                assert(partition_index == PARTITION_OF(edge->src));
+
+                if (backlog_increase(&state->backlog, edge->src, edge->dst,
+                                     edge->metric, &state->stat) == false)
+                        continue; /* no need to add to requests */
+
+                ga_adj_add_edge_by_src(&state->requests_by_src[partition_index],
+                                       PARTITION_IDX(edge->src), edge->dst);
+        }
+
+        /* mark bin as empty */
+        init_bin(new_demands);
+}
 
 /**
  * For all source (left-hand) nodes in partition 'partition_index',
  *    selects edges to grant. These are added to 'grants'.
  */
 void pim_do_grant(struct pim_state *state, uint16_t partition_index) {
+        /* add new backlogs to requests */
+        process_new_requests(state, partition_index);
+
         /* reset grant edgelist */
         ga_partd_edgelist_src_reset(&state->grants, partition_index);
 
@@ -83,6 +114,9 @@ void pim_do_accept(struct pim_state *state, uint16_t partition_index) {
         }
 }
 
+/**
+ * Process all of the accepts, after a timeslot is done being allocated
+ */
 void pim_process_accepts(struct pim_state *state, uint16_t partition_index) {
         uint16_t dst_partition;
 
@@ -95,11 +129,16 @@ void pim_process_accepts(struct pim_state *state, uint16_t partition_index) {
                 for (i = 0; i < edgelist->n; i++) {
                         struct ga_edge *edge = &edgelist->edge[i];
 
-                        /* print out the edge */
+                        /* print out the edge
+                           TODO: actually do something with these allocations */
                         printf("accepted edge: %d %d\n", edge->src, edge->dst);
                         
-                        /* delete the edge from requests, to prepare for the next timeslot */
-                        /* TODO: check if there is remaining pending demand */
+                        /* decrease the backlog */
+                        int32_t backlog = backlog_decrease(&state->backlog, edge->src, edge->dst);
+                        if (backlog != 0)
+                                continue; /* there is remaining backlog */
+
+                        /* no more backlog, delete the edge from requests */
                         uint16_t grant_adj_index = state->grant_adj_index[edge->src];
                         ga_adj_delete_neigh(&state->requests_by_src[PARTITION_OF(edge->src)],
                                             PARTITION_IDX(edge->src), grant_adj_index);

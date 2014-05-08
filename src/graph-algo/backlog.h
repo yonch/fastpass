@@ -12,6 +12,8 @@
 #include "admissible_algo_log.h"
 #include "../protocol/topology.h"
 
+#include <assert.h>
+
 /**
  * Keeps backlogs between every source and destination
  *    n: the backlog for each pair

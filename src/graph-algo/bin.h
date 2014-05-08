@@ -5,6 +5,8 @@
  *      Author: yonch
  */
 
+#include "platform.h"
+
 #ifndef BIN_H_
 #define BIN_H_
 

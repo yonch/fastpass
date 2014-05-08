@@ -14,12 +14,10 @@ void get_admissible_traffic(struct pim_state *state)
 {
         /* reset per-timeslot state */
         uint16_t src_partition;
-        for (src_partition = 0; src_partition < N_PARTITIONS; src_partition++) {
+        for (src_partition = 0; src_partition < N_PARTITIONS; src_partition++)
                 ga_partd_edgelist_src_reset(&state->accepts, src_partition);
-                memset(&state->src_status, 0, sizeof(state->src_status));
-                memset(&state->dst_status, 0, sizeof(state->dst_status));
-        }
-
+        memset(&state->src_status, 0, sizeof(state->src_status));
+        memset(&state->dst_status, 0, sizeof(state->dst_status));
 
         /* run multiple iterations of pim and print out accepted edges */
         /* TODO: add multiple cores and synchronization between them */
@@ -47,9 +45,6 @@ int main() {
         uint16_t src_partition;
         for (src_partition = 0; src_partition < N_PARTITIONS; src_partition++) {
                 ga_reset_adj(&state.requests_by_src[src_partition]);
-                ga_partd_edgelist_src_reset(&state.accepts, src_partition);
-                memset(&state.src_status, 0, sizeof(state.src_status));
-                memset(&state.dst_status, 0, sizeof(state.dst_status));
         }
 
         /* add some test edges */

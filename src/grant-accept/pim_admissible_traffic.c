@@ -6,12 +6,15 @@
  */
 
 #include "pim.h"
+#include "pim_admissible_traffic.h"
 
 #include <time.h> /* for seeding srand */
 
 #define NUM_ITERATIONS 3
 
-/* Increase the backlog from src to dst */
+/**
+ * Increase the backlog from src to dst
+ */
 void add_backlog(struct pim_state *state, uint16_t src, uint16_t dst,
                  uint32_t amount)
 {
@@ -21,7 +24,9 @@ void add_backlog(struct pim_state *state, uint16_t src, uint16_t dst,
         enqueue_bin(state->new_demands[partition_index], src, dst, amount);
 }
 
-/* Determine admissible traffic for one timeslot */
+/**
+ * Determine admissible traffic for one timeslot
+ */
 void get_admissible_traffic(struct pim_state *state)
 {
         /* reset per-timeslot state */
@@ -42,8 +47,10 @@ void get_admissible_traffic(struct pim_state *state)
                 pim_process_accepts(state, partition);
 }
 
-/* check that the admitted edges are admissible, returns true if admissible,
-   or false otherwise */
+/**
+ * Check that the admitted edges are admissible, returns true if admissible,
+ * or false otherwise
+ */
 bool valid_admitted_traffic(struct pim_state *state)
 {
         uint8_t src_status[MAX_NODES];
@@ -71,7 +78,9 @@ bool valid_admitted_traffic(struct pim_state *state)
         return true;
 }
 
-/* simple test of pim for a few timeslots */
+/**
+ * Simple test of pim for a few timeslots
+ */
 int main() {
         /* initialize rand */
         srand(time(NULL));

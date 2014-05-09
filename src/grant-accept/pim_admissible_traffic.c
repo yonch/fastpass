@@ -17,8 +17,8 @@
 /**
  * Increase the backlog from src to dst
  */
-void add_backlog(struct pim_state *state, uint16_t src, uint16_t dst,
-                 uint32_t amount)
+void pim_add_backlog(struct pim_state *state, uint16_t src, uint16_t dst,
+                     uint32_t amount)
 {
         /* add to state->new_demands for the src partition 
            repurpose the 'metric' field for the amount */
@@ -29,7 +29,7 @@ void add_backlog(struct pim_state *state, uint16_t src, uint16_t dst,
 /**
  * Determine admissible traffic for one timeslot
  */
-void get_admissible_traffic(struct pim_state *state)
+void pim_get_admissible_traffic(struct pim_state *state)
 {
         /* reset per-timeslot state */
         uint16_t partition;
@@ -53,7 +53,7 @@ void get_admissible_traffic(struct pim_state *state)
  * Check that the admitted edges are admissible, returns true if admissible,
  * or false otherwise
  */
-bool valid_admitted_traffic(struct pim_state *state)
+bool pim_is_valid_admitted_traffic(struct pim_state *state)
 {
         uint8_t src_status[MAX_NODES];
         uint8_t dst_status[MAX_NODES];
@@ -106,14 +106,14 @@ int main() {
         for (i = 0; i < sizeof(test_edges) / sizeof(struct ga_edge); i++) {
                 uint16_t src = test_edges[i].src;
                 uint16_t dst = test_edges[i].dst;
-                add_backlog(state, src, dst, 0x2UL);
+                pim_add_backlog(state, src, dst, 0x2UL);
         }
 
         uint8_t NUM_TIMESLOTS = 3;
         for (i = 0; i < NUM_TIMESLOTS; i++) {
-                get_admissible_traffic(state);
+                pim_get_admissible_traffic(state);
 
-                if (!valid_admitted_traffic(state))
+                if (!pim_is_valid_admitted_traffic(state))
                         printf("invalid admitted traffic\n");
         }
 }

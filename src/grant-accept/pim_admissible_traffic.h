@@ -12,19 +12,19 @@
 /**
  * Increase the backlog from src to dst
  */
-void add_backlog(struct pim_state *state, uint16_t src, uint16_t dst,
-                 uint32_t amount);
+void pim_add_backlog(struct pim_state *state, uint16_t src, uint16_t dst,
+                     uint32_t amount);
 
 /**
  * Determine admissible traffic for one timeslot
  */
-void get_admissible_traffic(struct pim_state *state);
+void pim_get_admissible_traffic(struct pim_state *state);
 
 /**
  * Check that the admitted edges are admissible, returns true if admissible,
  * or false otherwise
  */
-bool valid_admitted_traffic(struct pim_state *state);
+bool pim_is_valid_admitted_traffic(struct pim_state *state);
 
 /**
  * Returns an initialized struct pim state, or NULL on error

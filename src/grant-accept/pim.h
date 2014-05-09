@@ -60,8 +60,6 @@ void pim_do_accept(struct pim_state *state, uint16_t partition_index);
  */
 void pim_process_accepts(struct pim_state *state, uint16_t partition_index);
 
-void pim_add_backlog(struct pim_state *state, uint16_t src, uint16_t dst);
-
 /**
  * Initialize all demands to zero
  */

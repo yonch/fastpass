@@ -8,10 +8,8 @@
 #ifndef BATCH_H_
 #define BATCH_H_
 
+#include "algo_config.h"
 #include "../protocol/topology.h"
-
-#define BATCH_SIZE 16  // must be consistent with bitmaps in batch_state
-#define BATCH_SHIFT 4  // 2^BATCH_SHIFT = BATCH_SIZE
 
 #define SUPPORTS_OVERSUBSCRIPTION		0
 

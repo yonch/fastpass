@@ -13,6 +13,8 @@
 #include "../graph-algo/admitted.h"
 #include "../graph-algo/backlog.h"
 #include "../graph-algo/bin.h"
+#include "../graph-algo/fp_ring.h"
+#include "../graph-algo/platform.h"
 
 #define UNALLOCATED 0
 #define ALLOCATED   1
@@ -30,7 +32,8 @@ struct pim_state {
         uint8_t dst_status[MAX_NODES]; /* TODO: use 1 bit per dst instead of 8 */
         struct backlog backlog;
         struct bin *new_demands[N_PARTITIONS]; /* per src partition */
-        struct admitted_traffic *admitted[N_PARTITIONS]; /* per src partition */
+        struct fp_ring *q_admitted_out;
+        struct fp_mempool *admitted_traffic_mempool;
         struct admission_statistics stat;
 };
 
@@ -76,17 +79,18 @@ void pim_reset_state(struct pim_state *state)
  * Initialize pim state
  */
 static inline
-void pim_init_state(struct pim_state *state)
+void pim_init_state(struct pim_state *state, struct fp_ring *q_admitted_out,
+                    struct fp_mempool *admitted_traffic_mempool)
 {
         pim_reset_state(state);
         uint16_t partition;
         for (partition = 0; partition < N_PARTITIONS; partition++) {
-                /* TODO: use mempools instead */
+                /* TODO: use bins instead */
                 state->new_demands[partition] = create_bin(MAX_NODES);
-
-                uint32_t n_bytes = sizeof(struct admitted_traffic);
-                state->admitted[partition] = fp_malloc("admitted_traffic", n_bytes);
         }
+
+        state->q_admitted_out = q_admitted_out;
+        state->admitted_traffic_mempool = admitted_traffic_mempool;
 }
 
 #endif /* PIM_H_ */

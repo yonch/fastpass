@@ -134,8 +134,11 @@ void pim_do_accept(struct pim_state *state, uint16_t partition_index) {
 void pim_process_accepts(struct pim_state *state, uint16_t partition_index) {
         uint16_t dst_partition;
 
-        /* init admitted traffic */
-        struct admitted_traffic *admitted = state->admitted[partition_index];
+        /* get memory for admitted traffic, init it */
+        struct admitted_traffic *admitted;
+        while (fp_mempool_get(state->admitted_traffic_mempool, (void**) &admitted) != 0)
+                printf("failure to allocate admitted memory at partition %d\n",
+                       partition_index);
         init_admitted_traffic(admitted);
 
         /* iterate through all accepted edges */
@@ -161,4 +164,9 @@ void pim_process_accepts(struct pim_state *state, uint16_t partition_index) {
                                             PARTITION_IDX(edge->src), grant_adj_index);
                 }
         }
+
+        /* send out the admitted traffic */
+        while (fp_ring_enqueue(state->q_admitted_out, admitted) != 0)
+                printf("failure to enqueue admitted traffic at partition %d\n",
+                       partition_index);
 }

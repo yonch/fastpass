@@ -11,6 +11,8 @@
 #include <time.h> /* for seeding srand */
 
 #define NUM_ITERATIONS 3
+#define ADMITTED_TRAFFIC_MEMPOOL_SIZE           (51*1000)
+#define ADMITTED_OUT_RING_LOG_SIZE		16
 
 /**
  * Increase the backlog from src to dst
@@ -60,8 +62,10 @@ bool valid_admitted_traffic(struct pim_state *state)
 
         printf("PIM finished. Accepted edges:\n");
         uint16_t partition;
+        struct admitted_traffic *admitted;
         for (partition = 0; partition < N_PARTITIONS; partition++) {
-                struct admitted_traffic *admitted = state->admitted[partition];
+                fp_ring_dequeue(state->q_admitted_out, (void **) &admitted);
+
                 uint16_t j;
                 for (j = 0; j < admitted->size; j++) {
                         struct admitted_edge *edge = get_admitted_edge(admitted, j);
@@ -74,6 +78,8 @@ bool valid_admitted_traffic(struct pim_state *state)
                         src_status[edge->src] = ALLOCATED;
                         dst_status[edge->dst] = ALLOCATED;
                 }
+
+                fp_mempool_put(state->admitted_traffic_mempool, admitted);
         }
         return true;
 }
@@ -85,9 +91,14 @@ int main() {
         /* initialize rand */
         srand(time(NULL));
 
-        /* initialize state to all zeroes */
-        struct pim_state state;
-        pim_init_state(&state);
+        /* initialize state */
+        struct fp_ring *q_admitted_out;
+        struct fp_mempool *admitted_traffic_mempool;
+        q_admitted_out = fp_ring_create(ADMITTED_OUT_RING_LOG_SIZE);
+        admitted_traffic_mempool = fp_mempool_create(ADMITTED_TRAFFIC_MEMPOOL_SIZE,
+                                                     sizeof(struct admitted_traffic));
+        struct pim_state *state = pim_create_state(false, 0, 0, 0, NULL, q_admitted_out,
+                                                   NULL, admitted_traffic_mempool, NULL);
 
         /* add some test edges */
         struct ga_edge test_edges[] = {{1, 3}, {4, 5}, {1, 5}};
@@ -95,14 +106,14 @@ int main() {
         for (i = 0; i < sizeof(test_edges) / sizeof(struct ga_edge); i++) {
                 uint16_t src = test_edges[i].src;
                 uint16_t dst = test_edges[i].dst;
-                add_backlog(&state, src, dst, 0x2UL);
+                add_backlog(state, src, dst, 0x2UL);
         }
 
         uint8_t NUM_TIMESLOTS = 3;
         for (i = 0; i < NUM_TIMESLOTS; i++) {
-                get_admissible_traffic(&state);
+                get_admissible_traffic(state);
 
-                if (!valid_admitted_traffic(&state))
+                if (!valid_admitted_traffic(state))
                         printf("invalid admitted traffic\n");
         }
 }

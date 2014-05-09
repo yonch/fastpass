@@ -8,7 +8,10 @@
 #ifndef ADMITTED_H_
 #define ADMITTED_H_
 
+#include "platform.h"
 #include "../protocol/topology.h"
+
+#include <assert.h>
 
 struct admitted_edge {
     uint16_t src;

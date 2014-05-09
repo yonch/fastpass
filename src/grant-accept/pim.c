@@ -46,9 +46,9 @@ void pim_prepare(struct pim_state *state, uint16_t partition_index) {
 
         /* reset src and dst status */
         memset(((uint8_t *) &state->src_status) + partition_index * PARTITION_N_NODES,
-               0, PARTITION_N_NODES);
+               UNALLOCATED, PARTITION_N_NODES);
         memset(((uint8_t *) &state->dst_status) + partition_index * PARTITION_N_NODES,
-               0, PARTITION_N_NODES);
+               UNALLOCATED, PARTITION_N_NODES);
 }
 
 /**

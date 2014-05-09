@@ -42,6 +42,35 @@ void get_admissible_traffic(struct pim_state *state)
                 pim_process_accepts(state, partition);
 }
 
+/* check that the admitted edges are admissible, returns true if admissible,
+   or false otherwise */
+bool valid_admitted_traffic(struct pim_state *state)
+{
+        uint8_t src_status[MAX_NODES];
+        uint8_t dst_status[MAX_NODES];
+        memset(&src_status, UNALLOCATED, MAX_NODES);
+        memset(&dst_status, UNALLOCATED, MAX_NODES);
+
+        printf("PIM finished. Accepted edges:\n");
+        uint16_t partition;
+        for (partition = 0; partition < N_PARTITIONS; partition++) {
+                struct admitted_traffic *admitted = state->admitted[partition];
+                uint16_t j;
+                for (j = 0; j < admitted->size; j++) {
+                        struct admitted_edge *edge = get_admitted_edge(admitted, j);
+                        printf("accepted edge: %d %d\n", edge->src, edge->dst);
+                        if (src_status[edge->src] == ALLOCATED)
+                                return false;
+                        if (dst_status[edge->dst] == ALLOCATED)
+                                return false;
+
+                        src_status[edge->src] = ALLOCATED;
+                        dst_status[edge->dst] = ALLOCATED;
+                }
+        }
+        return true;
+}
+
 /* simple test of pim for a few timeslots */
 int main() {
         /* initialize rand */
@@ -64,15 +93,7 @@ int main() {
         for (i = 0; i < NUM_TIMESLOTS; i++) {
                 get_admissible_traffic(&state);
 
-                printf("PIM finished. Accepted edges:\n");
-                uint16_t partition;
-                for (partition = 0; partition < N_PARTITIONS; partition++) {
-                        struct admitted_traffic *admitted = state.admitted[partition];
-                        uint16_t j;
-                        for (j = 0; j < admitted->size; j++) {
-                                struct admitted_edge *edge = get_admitted_edge(admitted, j);
-                                printf("accepted edge: %d %d\n", edge->src, edge->dst);
-                        }        
-                }
+                if (!valid_admitted_traffic(&state))
+                        printf("invalid admitted traffic\n");
         }
 }

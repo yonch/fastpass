@@ -38,7 +38,6 @@ void get_admissible_traffic(struct pim_state *state)
                 for (partition = 0; partition < N_PARTITIONS; partition++)
                         pim_do_accept(state, partition);
         }
-        printf("PIM finished. Accepted edges:\n");
         for (partition = 0; partition < N_PARTITIONS; partition++)
                 pim_process_accepts(state, partition);
 }
@@ -62,6 +61,18 @@ int main() {
         }
 
         uint8_t NUM_TIMESLOTS = 3;
-        for (i = 0; i < NUM_TIMESLOTS; i++)
+        for (i = 0; i < NUM_TIMESLOTS; i++) {
                 get_admissible_traffic(&state);
+
+                printf("PIM finished. Accepted edges:\n");
+                uint16_t partition;
+                for (partition = 0; partition < N_PARTITIONS; partition++) {
+                        struct admitted_traffic *admitted = state.admitted[partition];
+                        uint16_t j;
+                        for (j = 0; j < admitted->size; j++) {
+                                struct admitted_edge *edge = get_admitted_edge(admitted, j);
+                                printf("accepted edge: %d %d\n", edge->src, edge->dst);
+                        }        
+                }
+        }
 }

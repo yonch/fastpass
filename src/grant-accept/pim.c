@@ -134,6 +134,10 @@ void pim_do_accept(struct pim_state *state, uint16_t partition_index) {
 void pim_process_accepts(struct pim_state *state, uint16_t partition_index) {
         uint16_t dst_partition;
 
+        /* init admitted traffic */
+        struct admitted_traffic *admitted = state->admitted[partition_index];
+        init_admitted_traffic(admitted);
+
         /* iterate through all accepted edges */
         for (dst_partition = 0; dst_partition < N_PARTITIONS; dst_partition++) {
                 struct ga_edgelist *edgelist;
@@ -143,10 +147,9 @@ void pim_process_accepts(struct pim_state *state, uint16_t partition_index) {
                 for (i = 0; i < edgelist->n; i++) {
                         struct ga_edge *edge = &edgelist->edge[i];
 
-                        /* print out the edge
-                           TODO: actually do something with these allocations */
-                        printf("accepted edge: %d %d\n", edge->src, edge->dst);
-                        
+                        /* add edge to admitted traffic */
+                        insert_admitted_edge(admitted, edge->src, edge->dst);
+
                         /* decrease the backlog */
                         int32_t backlog = backlog_decrease(&state->backlog, edge->src, edge->dst);
                         if (backlog != 0)

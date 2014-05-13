@@ -30,11 +30,8 @@ bool pim_is_valid_admitted_traffic(struct pim_state *state);
  * Returns an initialized struct pim state, or NULL on error
  */
 static inline
-struct pim_state *pim_create_state(bool a, uint16_t b, uint16_t c, uint16_t d,
-                                   struct fp_ring *e, struct fp_ring *q_admitted_out,
-                                   struct fp_mempool *f,
-                                   struct fp_mempool *admitted_traffic_mempool,
-                                   struct fp_ring **g)
+struct pim_state *pim_create_state(struct fp_ring *q_admitted_out,
+                                   struct fp_mempool *admitted_traffic_mempool)
 {
         struct pim_state *state = fp_malloc("pim_state", sizeof(struct pim_state));
         if (state == NULL)

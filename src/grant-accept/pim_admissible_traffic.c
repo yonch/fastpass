@@ -75,7 +75,7 @@ bool pim_is_valid_admitted_traffic(struct pim_state *state)
                         dst_status[edge->dst] = ALLOCATED;
                 }
 
-                fp_mempool_put(state->admitted_traffic_mempool, admitted);
+                fp_ring_enqueue(state->q_admitted_out, (void *) admitted);
         }
         return true;
 }

@@ -43,5 +43,13 @@ int main() {
 
                 if (!pim_is_valid_admitted_traffic(state))
                         printf("invalid admitted traffic\n");
+
+                /* return admitted to mempool */
+                uint16_t p;
+                for (p = 0; p < N_PARTITIONS; p++) {
+                        struct admitted_traffic *admitted;
+                        fp_ring_dequeue(state->q_admitted_out, (void **) &admitted);
+                        fp_mempool_put(state->admitted_traffic_mempool, admitted);
+                }
         }
 }

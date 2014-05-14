@@ -10,22 +10,27 @@ struct timeslot_ops {
 /**
  * Registers the timeslot queuing discipline
  */
-void timeslot_register_qdisc(struct timeslot_ops *ops);
+int timeslot_register_qdisc(struct timeslot_ops *ops);
+
+/**
+ * Unregisters the timeslot queuing discipline
+ */
+void timeslot_unregister_qdisc(void);
 
 /**
  * Schedules a timeslot for flow
  */
-void timeslot_schedule(struct Qdisc *qdisc, u64 src_dst_key, u64 timeslot);
+void timeslot_schedule(struct Qdisc *sch, u64 src_dst_key, u64 timeslot);
 
 /**
  * Admits a timeslot from a flow right now
  */
-void timeslot_admit_now(struct Qdisc *qdisc, u64 src_dst_key);
+void timeslot_admit_now(struct Qdisc *sch, u64 src_dst_key);
 
 /**
  * Garbage-collects information for empty queues.
  */
-void timeslot_garbage_collect(struct Qdisc *qdisc);
+void timeslot_garbage_collect(struct Qdisc *sch);
 
 
 #endif /* SCH_TIMESLOT_H_ */

@@ -11,5 +11,7 @@
 
 #define tslot_alloc_add_backlog		lru_alloc_add_backlog
 
+#define BATCH_SIZE 16  // must be consistent with bitmaps in batch_state
+#define BATCH_SHIFT 4  // 2^BATCH_SHIFT = BATCH_SIZE
 
 #endif /* ALGO_CONFIG_H_ */

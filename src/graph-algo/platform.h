@@ -26,6 +26,7 @@
 #else
 
 /** VANILLA **/
+#include <errno.h>
 #include <string.h>
 
 #define fp_free(ptr)                            free(ptr)

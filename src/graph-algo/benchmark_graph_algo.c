@@ -30,7 +30,7 @@
 const double admissible_fractions [NUM_FRACTIONS_A] =
     {0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9, 0.95, 0.99};
 const uint32_t admissible_sizes [NUM_SIZES_A] =
-    {256, 2048, 1024, 512, /*128, 64, 32, 16*/};
+    {256, /*2048, 1024, 512, 128, 64, 32, 16*/};
 const double path_fractions [NUM_FRACTIONS_P] =
     {0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9, 0.95, 0.99};
 const uint16_t path_capacities [NUM_CAPACITIES_P] =
@@ -48,7 +48,6 @@ enum benchmark_type {
 uint32_t run_experiment(struct request_info *requests, uint32_t start_time, uint32_t end_time,
                         uint32_t num_requests, struct admissible_status *status,
                         struct request_info **next_request,
-                        struct admission_core_state *core,
                         uint32_t *per_batch_times)
 {
     struct admitted_traffic *admitted;
@@ -101,9 +100,8 @@ uint32_t run_experiment(struct request_info *requests, uint32_t start_time, uint
 // Runs the admissible algorithm for many timeslots, saving the admitted traffic for
 // further benchmarking
 void run_admissible(struct request_info *requests, uint32_t start_time, uint32_t end_time,
-                        uint32_t num_requests, struct admissible_status *status,
-                        struct request_info **next_request,
-                        struct admission_core_state *core)
+                    uint32_t num_requests, struct admissible_status *status,
+                    struct request_info **next_request)
 {
     struct admitted_traffic *admitted;
     struct fp_ring *queue_tmp;
@@ -300,7 +298,7 @@ int main(int argc, char **argv)
             struct bin *b;
             while (fp_ring_dequeue(q_bin, (void **)&b) == 0) {
             	if (b != NULL)
-            		fp_mempool_put(bin_mempool, b);
+                        fp_mempool_put(bin_mempool, b);
             }
 
             fp_ring_enqueue(q_bin, NULL);
@@ -318,7 +316,7 @@ int main(int argc, char **argv)
             // requests once we start timing
             struct request_info *next_request;
             run_experiment(requests, 0, warm_up_duration, num_requests,
-                           status, &next_request, &status->cores[0], per_batch_times);
+                           status, &next_request, per_batch_times);
    
             if (benchmark_type == ADMISSIBLE) {
                 // Start timining
@@ -327,8 +325,7 @@ int main(int argc, char **argv)
                 // Run the experiment
                 uint32_t num_admitted = run_experiment(next_request, warm_up_duration, duration,
                                                        num_requests - (next_request - requests),
-                                                       status, &next_request, &status->cores[0],
-                                                       per_batch_times);
+                                                       status, &next_request, per_batch_times);
                 uint64_t end_time = current_time();
 
                 double utilzn = ((double) num_admitted) / ((duration - warm_up_duration) * num_nodes);
@@ -352,7 +349,7 @@ int main(int argc, char **argv)
                 // Run the admissible algorithm to generate admitted traffic
                 run_admissible(next_request, warm_up_duration, duration,
                                                        num_requests - (next_request - requests),
-                                                       status, &next_request, &status->cores[0]);
+                                                       status, &next_request);
 
                 // Start timining
                 uint64_t start_time = current_time();

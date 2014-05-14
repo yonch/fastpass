@@ -8,7 +8,7 @@
 #ifndef PATH_SELECTION_H_
 #define PATH_SELECTION_H_
 
-#include "admissible_structures.h"
+#include "admitted.h"
 
 #define NUM_PATHS 4  // if not 4, NUM_GRAPHS and related code must be modified
 #define PATH_MASK 0x3FFF  // 2^PATH_SHIFT - 1

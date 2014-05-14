@@ -7,15 +7,58 @@
 
 #include "pim.h"
 
-#include <time.h> /* for seeding srand */
+#include <assert.h>
 
 #define MAX_TRIES 10
+
+/**
+ * Move new demands from 'new_demands' to the backlog struct. Also make sure
+ * that they are included in requests_by_src
+ */
+static inline
+void process_new_requests(struct pim_state *state, uint16_t partition_index) {
+        struct bin *new_demands = state->new_demands[partition_index];
+        
+        uint32_t i;
+        for (i = 0; i < bin_size(new_demands); i++) {
+                /* check that this edge belongs to this partition */
+                struct backlog_edge *edge = bin_get(new_demands, i);
+                assert(partition_index == PARTITION_OF(edge->src));
+
+                if (backlog_increase(&state->backlog, edge->src, edge->dst,
+                                     edge->metric, &state->stat) == false)
+                        continue; /* no need to add to requests */
+
+                ga_adj_add_edge_by_src(&state->requests_by_src[partition_index],
+                                       PARTITION_IDX(edge->src), edge->dst);
+        }
+
+        /* mark bin as empty */
+        init_bin(new_demands);
+}
+
+/**
+ * Prepare data structures so they are ready to allocate the next timeslot
+ */
+void pim_prepare(struct pim_state *state, uint16_t partition_index) {
+        /* reset accepts */
+        ga_partd_edgelist_src_reset(&state->accepts, partition_index);
+
+        /* reset src and dst status */
+        memset(((uint8_t *) &state->src_status) + partition_index * PARTITION_N_NODES,
+               UNALLOCATED, PARTITION_N_NODES);
+        memset(((uint8_t *) &state->dst_status) + partition_index * PARTITION_N_NODES,
+               UNALLOCATED, PARTITION_N_NODES);
+}
 
 /**
  * For all source (left-hand) nodes in partition 'partition_index',
  *    selects edges to grant. These are added to 'grants'.
  */
 void pim_do_grant(struct pim_state *state, uint16_t partition_index) {
+        /* add new backlogs to requests */
+        process_new_requests(state, partition_index);
+
         /* reset grant edgelist */
         ga_partd_edgelist_src_reset(&state->grants, partition_index);
 
@@ -85,8 +128,18 @@ void pim_do_accept(struct pim_state *state, uint16_t partition_index) {
         }
 }
 
+/**
+ * Process all of the accepts, after a timeslot is done being allocated
+ */
 void pim_process_accepts(struct pim_state *state, uint16_t partition_index) {
         uint16_t dst_partition;
+
+        /* get memory for admitted traffic, init it */
+        struct admitted_traffic *admitted;
+        while (fp_mempool_get(state->admitted_traffic_mempool, (void**) &admitted) != 0)
+                printf("failure to allocate admitted memory at partition %d\n",
+                       partition_index);
+        init_admitted_traffic(admitted);
 
         /* iterate through all accepted edges */
         for (dst_partition = 0; dst_partition < N_PARTITIONS; dst_partition++) {
@@ -97,53 +150,23 @@ void pim_process_accepts(struct pim_state *state, uint16_t partition_index) {
                 for (i = 0; i < edgelist->n; i++) {
                         struct ga_edge *edge = &edgelist->edge[i];
 
-                        /* print out the edge */
-                        printf("accepted edge: %d %d\n", edge->src, edge->dst);
-                        
-                        /* delete the edge from requests, to prepare for the next timeslot */
-                        /* TODO: check if there is remaining pending demand */
+                        /* add edge to admitted traffic */
+                        insert_admitted_edge(admitted, edge->src, edge->dst);
+
+                        /* decrease the backlog */
+                        int32_t backlog = backlog_decrease(&state->backlog, edge->src, edge->dst);
+                        if (backlog != 0)
+                                continue; /* there is remaining backlog */
+
+                        /* no more backlog, delete the edge from requests */
                         uint16_t grant_adj_index = state->grant_adj_index[edge->src];
                         ga_adj_delete_neigh(&state->requests_by_src[PARTITION_OF(edge->src)],
                                             PARTITION_IDX(edge->src), grant_adj_index);
                 }
         }
-}
 
-/* simple test of pim */
-int main() {
-        /* initialize rand */
-        srand(time(NULL));
-
-        /* initialize state to all zeroes */
-        struct pim_state state;
-        uint16_t src_partition;
-        for (src_partition = 0; src_partition < N_PARTITIONS; src_partition++) {
-                ga_reset_adj(&state.requests_by_src[src_partition]);
-                ga_partd_edgelist_src_reset(&state.accepts, src_partition);
-                memset(&state.src_status, 0, sizeof(state.src_status));
-                memset(&state.dst_status, 0, sizeof(state.dst_status));
-        }
-
-        /* add some test edges */
-        struct ga_edge test_edges[] = {{1, 3}, {4, 5}, {1, 5}};
-        uint8_t i;
-        for (i = 0; i < sizeof(test_edges) / sizeof(struct ga_edge); i++) {
-                uint16_t src = test_edges[i].src;
-                uint16_t dst = test_edges[i].dst;
-                ga_adj_add_edge_by_src(&state.requests_by_src[PARTITION_OF(src)],
-                                       PARTITION_IDX(src), dst);
-        }
-
-        /* run multiple iterations of pim and print out accepted edges */
-        uint8_t NUM_ITERATIONS = 3;
-        uint16_t partition;
-        for (i = 0; i < NUM_ITERATIONS; i++) {
-                for (partition = 0; partition < N_PARTITIONS; partition++)
-                        pim_do_grant(&state, partition);
-                for (partition = 0; partition < N_PARTITIONS; partition++)
-                        pim_do_accept(&state, partition);
-        }
-        printf("PIM finished. Accepted edges:\n");
-        for (partition = 0; partition < N_PARTITIONS; partition++)
-                pim_process_accepts(&state, partition);
+        /* send out the admitted traffic */
+        while (fp_ring_enqueue(state->q_admitted_out, admitted) != 0)
+                printf("failure to enqueue admitted traffic at partition %d\n",
+                       partition_index);
 }

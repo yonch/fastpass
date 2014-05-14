@@ -72,7 +72,7 @@ void reset_admissible_status(struct admissible_status *status, bool oversubscrib
 {
     assert(status != NULL);
 
-    if (status->oversubscribed && !SUPPORTS_OVERSUBSCRIPTION) {
+    if (oversubscribed && !SUPPORTS_OVERSUBSCRIPTION) {
     	printf("ERROR: reset_admissible_status got oversubscribed network, "
     			"but no compile-time support for oversubscription.\n");
     	exit(-1);
@@ -184,6 +184,7 @@ int init_admissible_status(struct admissible_status *status,
     	if (rc != 0)
     		return -1;
     }
+    return 0;
 }
 
 /**

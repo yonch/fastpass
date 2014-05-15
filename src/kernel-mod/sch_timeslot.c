@@ -128,6 +128,7 @@ struct fp_sched_data {
 	struct fp_sched_stat stat;
 };
 
+static struct proc_dir_entry *tsq_proc_entry;
 static struct kmem_cache *timeslot_dst_cachep __read_mostly;
 static struct kmem_cache *timeslot_skb_q_cachep __read_mostly;
 
@@ -417,6 +418,8 @@ static void enqueue_single_skb(struct Qdisc *sch, struct sk_buff *skb)
 	struct timeslot_dst *dst;
 	struct timeslot_skb_q *timeslot_q;
 	s64 cost;
+	bool created_new_timeslot = false;
+	u64 src_dst_key;
 
 	cost = (s64) psched_l2t_ns(&q->data_rate, qdisc_pkt_len(skb));
 
@@ -442,6 +445,8 @@ static void enqueue_single_skb(struct Qdisc *sch, struct sk_buff *skb)
 		list_add_tail(&timeslot_q->list, &dst->skb_qs);
 		dst->credit = q->tslot_len_approx;
 		q->added_tslots++;
+		created_new_timeslot = true;
+		src_dst_key = dst->src_dst_key;
 
 		/* packets bigger than a timeslot cause warning and still get timeslot */
 		if (unlikely(cost > q->tslot_len_approx)) {
@@ -456,6 +461,9 @@ static void enqueue_single_skb(struct Qdisc *sch, struct sk_buff *skb)
 	dst->credit -= cost;
 	skb_q_enqueue(timeslot_q, skb);
 	spin_unlock(&q->hash_tbl_lock);
+
+	if (created_new_timeslot)
+		q->timeslot_ops->add_timeslot(sched_data_to_priv(q), src_dst_key)
 
 	fp_debug("enqueued data packet of len %d to flow 0x%llX, qlen=%d\n",
 			qdisc_pkt_len(skb), dst->src_dst_key, dst->qlen);
@@ -1153,12 +1161,12 @@ nla_put_failure:
 
 static int tsq_proc_show(struct seq_file *seq, void *v)
 {
-	struct fp_sched_data *q = (struct fp_sched_data *)v;
+	struct fp_sched_data *q = (struct fp_sched_data *)seq->private;
 	u64 now_real = fp_get_time_ns();
 	struct fp_sched_stat *scs = &q->stat;
 
 	/* time */
-	seq_printf(seq, "  fp_sched_data *p = %p ", v);
+	seq_printf(seq, "  fp_sched_data *p = %p ", q);
 	seq_printf(seq, ", timestamp 0x%llX ", now_real);
 	seq_printf(seq, ", timeslot 0x%llX", q->current_timeslot);
 
@@ -1250,17 +1258,17 @@ static void tsq_proc_cleanup(struct fp_sched_data *q)
 struct tsq_qdisc_entry *tsq_register_qdisc(struct tsq_ops *ops)
 {
 	int err = -ENOMEM;
-	struct tsq_qdisc_entry *reg;
+	struct tsq_qdisc_entry *entry;
 	struct Qdisc_ops *qops;
 
 	pr_info("%s: initializing\n", __func__);
 
-	reg = kmalloc(sizeof(struct tsq_qdisc_entry), GFP_ATOMIC);
-	if (!reg)
+	entry = kmalloc(sizeof(struct tsq_qdisc_entry), GFP_ATOMIC);
+	if (!entry)
 		goto out;
 
-	reg->ops = ops;
-	qops = &reg->qdisc_ops;
+	entry->ops = ops;
+	qops = &entry->qdisc_ops;
 	memset(qops, 0, sizeof(*qops));
 	memcpy(qops->id, ops->id, sizeof(qops->id));
 	qops->priv_size = QDISC_ALIGN(sizeof(struct fp_sched_data)) + ops->priv_size;
@@ -1279,29 +1287,36 @@ struct tsq_qdisc_entry *tsq_register_qdisc(struct tsq_ops *ops)
 		goto out_destroy_timeslot_reg;
 
 	pr_info("%s: success\n", __func__);
-	return 0;
+	return entry;
 
 out_destroy_timeslot_reg:
-	kfree(reg);
+	kfree(entry);
 out:
 	pr_info("%s: failed, err=%d\n", __func__, err);
 	return NULL;
 }
 
-void tsq_unregister_qdisc(struct tsq_qdisc_entry *reg)
+void tsq_unregister_qdisc(struct tsq_qdisc_entry *entry)
 {
 	pr_info("%s: begin\n", __func__);
-	unregister_qdisc(&reg->qdisc_ops);
+	unregister_qdisc(&entry->qdisc_ops);
+	kfree(entry);
 	pr_info("%s: end\n", __func__);
 }
 
 int tsq_init(void)
 {
+	int err = -ENOSYS;
+	tsq_proc_entry = proc_mkdir("tsq", NULL);
+	if (tsq_proc_entry == NULL)
+		goto out;
+
+	err = -ENOMEM;
 	timeslot_dst_cachep = kmem_cache_create("timeslot_flow_cache",
 					   sizeof(struct timeslot_dst),
 					   0, 0, NULL);
 	if (!timeslot_dst_cachep)
-		goto out;
+		goto out_remove_proc;
 
 	timeslot_skb_q_cachep = kmem_cache_create("timeslot_skb_q_cache",
 					   sizeof(struct timeslot_skb_q),
@@ -1313,9 +1328,11 @@ int tsq_init(void)
 
 out_destroy_dst_cache:
 	kmem_cache_destroy(timeslot_dst_cachep);
+out_remove_proc:
+	proc_remove(tsq_proc_entry);
 out:
-	pr_info("%s: failed, couldn't kmem_cache_create\n", __func__);
-	return -ENOMEM;
+	pr_info("%s: failed, err=%d\n", __func__, err);
+	return err;
 }
 
 void tsq_exit(void)

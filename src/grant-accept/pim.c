@@ -46,6 +46,26 @@ void mark_dst_allocated(struct pim_state *state, uint16_t dst) {
 }
 
 /**
+ * Increase the backlog from src to dst
+ */
+void pim_add_backlog(struct pim_state *state, uint16_t src, uint16_t dst,
+                     uint32_t amount)
+{
+        /* add to state->new_demands for the src partition
+           repurpose the 'metric' field for the amount */
+        uint16_t partition_index = PARTITION_OF(src);
+        enqueue_bin(state->new_demands[partition_index], src, dst, amount);
+}
+
+/**
+ * Flush the backlog to the pim_state
+ */
+void pim_flush_backlog(struct pim_state *state)
+{
+
+}
+
+/**
  * Move new demands from 'new_demands' to the backlog struct. Also make sure
  * that they are included in requests_by_src
  */

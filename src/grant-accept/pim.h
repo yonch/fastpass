@@ -40,6 +40,17 @@ struct pim_state {
 };
 
 /**
+ * Increase the backlog from src to dst
+ */
+void pim_add_backlog(struct pim_state *state, uint16_t src, uint16_t dst,
+                     uint32_t amount);
+
+/**
+ * Flush the backlog to the pim_state
+ */
+void pim_flush_backlog(struct pim_state *state);
+
+/**
  * Prepare data structures so they are ready to allocate the next timeslot
  */
 void pim_prepare(struct pim_state *state, uint16_t partition_index);

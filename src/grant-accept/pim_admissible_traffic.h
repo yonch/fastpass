@@ -10,12 +10,6 @@
 #include "../graph-algo/platform.h"
 
 /**
- * Increase the backlog from src to dst
- */
-void pim_add_backlog(struct pim_state *state, uint16_t src, uint16_t dst,
-                     uint32_t amount);
-
-/**
  * Determine admissible traffic for one timeslot
  */
 void pim_get_admissible_traffic(struct pim_state *state);

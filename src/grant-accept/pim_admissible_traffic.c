@@ -13,18 +13,6 @@
 #define ALLOCATED   1
 
 /**
- * Increase the backlog from src to dst
- */
-void pim_add_backlog(struct pim_state *state, uint16_t src, uint16_t dst,
-                     uint32_t amount)
-{
-        /* add to state->new_demands for the src partition 
-           repurpose the 'metric' field for the amount */
-        uint16_t partition_index = PARTITION_OF(src);
-        enqueue_bin(state->new_demands[partition_index], src, dst, amount);
-}
-
-/**
  * Determine admissible traffic for one timeslot
  */
 void pim_get_admissible_traffic(struct pim_state *state)

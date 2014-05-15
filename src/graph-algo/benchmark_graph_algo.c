@@ -9,12 +9,13 @@
 #include <math.h>
 #include <stdio.h>
 
-#include "rdtsc.h"  // For timing
-#include "admissible_traffic.h"
-#include "admissible_structures.h"
+#include "algo_config.h"
+#include "fp_ring.h"
 #include "generate_requests.h"
+#include "generic_admissible.h"
 #include "path_selection.h"
 #include "platform.h"
+#include "rdtsc.h"  // For timing
 
 #define NUM_FRACTIONS_A 11
 #define NUM_SIZES_A 1
@@ -46,7 +47,7 @@ enum benchmark_type {
 
 // Runs one experiment. Returns the number of packets admitted.
 uint32_t run_experiment(struct request_info *requests, uint32_t start_time, uint32_t end_time,
-                        uint32_t num_requests, struct admissible_status *status,
+                        uint32_t num_requests, struct generic_admissible_state *status,
                         struct request_info **next_request,
                         uint32_t *per_batch_times)
 {
@@ -67,22 +68,22 @@ uint32_t run_experiment(struct request_info *requests, uint32_t start_time, uint
         // Issue all new requests for this batch
         while ((current_request->timeslot >> BATCH_SHIFT) == (b % (65536 >> BATCH_SHIFT)) &&
                current_request < requests + num_requests) {
-            add_backlog(status, current_request->src,
+            generic_add_backlog(status, current_request->src,
                               current_request->dst, current_request->backlog);
             current_request++;
         }
-        flush_backlog(status);
+        generic_flush_backlog(status);
  
         // Get admissible traffic
-        get_admissible_traffic(status, 0, 0, 1, 0);
+        generic_get_admissible_traffic(status, 0, 0, 1, 0);
 
-        for (i = 0; i < BATCH_SIZE; i++) {
+        for (i = 0; i < ADMITTED_PER_BATCH; i++) {
         	/* get admitted traffic */
-        	fp_ring_dequeue(status->q_admitted_out, (void **)&admitted);
+                fp_ring_dequeue(get_q_admitted_out(status), (void **)&admitted);
         	/* update statistics */
         	num_admitted += admitted->size;
         	/* return admitted traffic to core */
-        	fp_mempool_put(status->admitted_traffic_mempool, admitted);
+                fp_mempool_put(get_admitted_traffic_mempool(status), admitted);
         }
 
         // Record per-batch time
@@ -100,7 +101,7 @@ uint32_t run_experiment(struct request_info *requests, uint32_t start_time, uint
 // Runs the admissible algorithm for many timeslots, saving the admitted traffic for
 // further benchmarking
 void run_admissible(struct request_info *requests, uint32_t start_time, uint32_t end_time,
-                    uint32_t num_requests, struct admissible_status *status,
+                    uint32_t num_requests, struct generic_admissible_state *status,
                     struct request_info **next_request)
 {
     struct admitted_traffic *admitted;
@@ -118,14 +119,14 @@ void run_admissible(struct request_info *requests, uint32_t start_time, uint32_t
         // Issue all new requests for this batch
         while ((current_request->timeslot >> BATCH_SHIFT) == (b % (65536 >> BATCH_SHIFT)) &&
                current_request < requests + num_requests) {
-            add_backlog(status, current_request->src,
+            generic_add_backlog(status, current_request->src,
                               current_request->dst, current_request->backlog);
             current_request++;
         }
-        flush_backlog(status);
+        generic_flush_backlog(status);
 
         // Get admissible traffic
-        get_admissible_traffic(status, 0, 0, 1, 0);
+        generic_get_admissible_traffic(status, 0, 0, 1, 0);
     }
 
     *next_request = current_request;
@@ -217,7 +218,7 @@ int main(int argc, char **argv)
     }
 
     // Data structures
-    struct admissible_status *status;
+    struct generic_admissible_state *status;
     struct fp_ring *q_bin;
     struct fp_ring *q_head;
     struct fp_ring *q_admitted_out;
@@ -238,7 +239,7 @@ int main(int argc, char **argv)
 	if (!admitted_traffic_mempool) exit(-1);
 
     /* init global status */
-    status = create_admissible_status(false, 0, 0, 0, q_head, q_admitted_out,
+    status = generic_create_admissible_state(false, 0, 0, 0, q_head, q_admitted_out,
     		bin_mempool, admitted_traffic_mempool,
     		&q_bin);
     if (status == NULL) {
@@ -280,19 +281,19 @@ int main(int argc, char **argv)
             // Initialize data structures
             if (benchmark_type == ADMISSIBLE) {
                 num_nodes = sizes[j];
-                reset_admissible_status(status, false, 0, 0, num_nodes);
+                generic_reset_admissible_state(status, false, 0, 0, num_nodes);
             }
             else if (benchmark_type == PATH_SELECTION_OVERSUBSCRIPTION) {
                 num_nodes = NUM_NODES_P;
                 inter_rack_capacity = capacities[j];
-                reset_admissible_status(status, true, inter_rack_capacity, 0,
-                                        num_nodes);
+                generic_reset_admissible_state(status, true, inter_rack_capacity, 0,
+                                                num_nodes);
                 fraction = fraction * ((double) inter_rack_capacity) / MAX_NODES_PER_RACK;
             } else if (benchmark_type == PATH_SELECTION_RACKS) {
                 num_racks = racks[j];
                 num_nodes = MAX_NODES_PER_RACK * num_racks;
                 inter_rack_capacity = MAX_NODES_PER_RACK;
-                reset_admissible_status(status, false, 0, 0, num_nodes);
+                generic_reset_admissible_state(status, false, 0, 0, num_nodes);
             }
 
             struct bin *b;
@@ -360,7 +361,7 @@ int main(int argc, char **argv)
                     struct admitted_traffic *admitted;
 
                     /* get admitted traffic */
-                    fp_ring_dequeue(status->q_admitted_out, (void **)&admitted);
+                    fp_ring_dequeue(get_q_admitted_out(status), (void **)&admitted);
                     /* update statistics */
                     num_admitted += admitted->size;
 
@@ -377,7 +378,7 @@ int main(int argc, char **argv)
                     per_timeslot_num_admitted[k] = admitted->size;
 
                     /* free back the admitted_traffic */
-                    fp_mempool_put(status->admitted_traffic_mempool, admitted);
+                    fp_mempool_put(get_admitted_traffic_mempool(status), admitted);
                 }
 
                 uint64_t end_time = current_time();

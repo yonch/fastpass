@@ -16,6 +16,9 @@
 
 #else
 
+#include <assert.h>
+#include <stdlib.h>
+
 /* A data-structure to communicate pointers between components */
 struct fp_ring {
 	uint32_t head;

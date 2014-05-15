@@ -8,7 +8,9 @@
 #ifndef GENERATE_REQUESTS_H_
 #define GENERATE_REQUESTS_H_
 
+#include <assert.h>
 #include <math.h>
+#include <stdlib.h>
 
 // Stores info needed to generate a stream of requests on demand
 struct request_generator {

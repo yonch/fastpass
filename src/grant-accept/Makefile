@@ -19,5 +19,5 @@ clean:
 	rm -f pim *.o *~
 
 # Dependency rules for file targets
-pim: pim_admissible_traffic.o pim.o
-	$(CC) $< pim.o -o $@ $(LDFLAGS)
+pim: pim_test.o pim_admissible_traffic.o pim.o
+	$(CC) $< pim_admissible_traffic.o pim.o -o $@ $(LDFLAGS)

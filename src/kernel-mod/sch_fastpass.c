@@ -17,10 +17,7 @@
 #include <linux/in.h>
 #include <linux/errno.h>
 #include <linux/init.h>
-#include <linux/skbuff.h>
 #include <linux/slab.h>
-#include <linux/rbtree.h>
-#include <linux/hash.h>
 #include <linux/prefetch.h>
 #include <linux/time.h>
 #include <linux/bitops.h>
@@ -36,6 +33,7 @@
 #include "compat-3_2.h"
 #endif
 
+#include "sch_timeslot.h"
 #include "fastpass_proto.h"
 #include "fp_statistics.h"
 #include "../protocol/platform.h"
@@ -73,31 +71,13 @@ enum {
 /*
  * Per flow structure, dynamically allocated
  */
-struct fp_flow {
-	u64		src_dst_key;		/* flow identifier */
-
-	struct rb_node	fp_node; 	/* anchor in fp_root[] trees */
-	struct list_head	queue_entry; /* entry into one of the request queues */
-	uint8_t state;
-
-	/* queued buffers: */
-	struct sk_buff	*head;		/* list of skbs for this flow : first skb */
-	struct sk_buff *tail;		/* last skb in the list */
+struct fp_dst {
 	u64		demand_tslots;		/* total needed timeslots */
 	u64		requested_tslots;	/* highest requested timeslots */
 	u64		acked_tslots;		/* highest requested timeslots that was acked*/
 	u64		alloc_tslots;		/* total received allocations */
 	u64		used_tslots;		/* timeslots in which packets moved */
-	int		qlen;				/* number of packets in flow queue */
-
-	s64		credit;				/* time remaining in the last scheduled timeslot */
-
-	u64		last_moved_timeslot; /* timeslot when packets last moved to internal */
-};
-
-struct fp_timeslot_horizon {
-	u64 timeslot;
-	u64 mask;
+	uint8_t state;
 };
 
 /**
@@ -105,10 +85,6 @@ struct fp_timeslot_horizon {
  */
 struct fp_sched_data {
 	/* configuration paramters */
-	u32		flow_plimit;				/* max packets per flow */
-	u8		hash_tbl_log;				/* log number of hash buckets */
-	struct psched_ratecfg data_rate;	/* rate of payload packets */
-	u32		tslot_len_approx;					/* duration of a timeslot, in nanosecs */
 	u32		req_cost;					/* cost, in tokens, of a request */
 	u32		req_bucketlen;				/* the max number of tokens to burst */
 	u32		req_min_gap;				/* min delay between requests (ns) */
@@ -117,22 +93,20 @@ struct fp_sched_data {
 	u32		send_timeout_us;			/* when to resend packets */
 	u32		tslot_mul;					/* mul to calculate timeslot from nsec */
 	u32		tslot_shift;				/* shift to calculate timeslot from nsec */
-	u32		miss_threshold;				/* #timeslots that alloc is considered missed */
-	u32		max_dev_backlog_ns;			/* max ns that allow a tslot to be enqueued to internal */
-	u32		max_preload;				/* how early (#timeslots) can enqueueing be */
+
 	u32		update_timeslot_timer_ns;	/* every how many ns to update queues */
 
 	/* state */
 	struct rb_root	*flow_hash_tbl;		/* table of rb-trees of flows */
 
-	struct fp_flow	internal;			/* for regular queue */
+	struct fp_dst	internal;			/* for regular queue */
 	u64				internal_free_time; /* approx time when internal will be free */
-	struct fp_flow	hi_prio;			/* for high prio traffic */
+	struct fp_dst	hi_prio;			/* for high prio traffic */
 
-	struct fp_flow	enqueue_queue;		/* for data packets to be classified to flows */
+	struct fp_dst	enqueue_queue;		/* for data packets to be classified to flows */
 	spinlock_t		enqueue_lock;		/* protect enqueue_queue */
 
-	struct fp_flow	prequeue;			/* a flow for packets that need to go into internal */
+	struct fp_dst	prequeue;			/* a flow for packets that need to go into internal */
 	spinlock_t		prequeue_lock;
 
 	struct list_head unreq_flows; 		/* flows with unscheduled packets */
@@ -165,7 +139,7 @@ struct fp_sched_data {
 	struct fp_sched_stat stat;
 };
 
-static struct kmem_cache *fp_flow_cachep __read_mostly;
+static struct tsq_qdisc_entry *fastpass_tsq_entry;
 
 static void handle_reset(void *param);
 
@@ -227,7 +201,7 @@ void req_timer_flowqueue_enqueue(struct fp_sched_data* q)
 		fp_debug("set request timer to %llu\n", pacer_next_event(&q->request_pacer));
 }
 
-static inline bool flow_in_flowqueue(struct fp_flow *f)
+static inline bool flow_in_flowqueue(struct fp_dst *f)
 {
 	return (f->state != FLOW_UNQUEUED);
 }
@@ -236,7 +210,7 @@ static inline bool flow_in_flowqueue(struct fp_flow *f)
  * Enqueues flow to the request queue, if it's not already in the retransmit
  *    queue
  */
-static void flowqueue_enqueue_request(struct fp_sched_data *q, struct fp_flow *f)
+static void flowqueue_enqueue_request(struct fp_sched_data *q, struct fp_dst *f)
 {
 	FASTPASS_BUG_ON(f->state == FLOW_REQUEST_QUEUE);
 
@@ -253,7 +227,7 @@ static void flowqueue_enqueue_request(struct fp_sched_data *q, struct fp_flow *f
 /**
  * We no longer have a distinction between enqueuing retransmits and requests
  */
-static void flowqueue_enqueue_retransmit(struct fp_sched_data *q, struct fp_flow *f)
+static void flowqueue_enqueue_retransmit(struct fp_sched_data *q, struct fp_dst *f)
 {
 	if (flow_in_flowqueue(f))
 		return;
@@ -266,14 +240,14 @@ static bool flowqueue_is_empty(struct fp_sched_data* q)
 	return list_empty(&q->unreq_flows);
 }
 
-static struct fp_flow *flowqueue_dequeue(struct fp_sched_data* q)
+static struct fp_dst *flowqueue_dequeue(struct fp_sched_data* q)
 {
-	struct fp_flow *f;
+	struct fp_dst *f;
 
 	FASTPASS_BUG_ON(list_empty(&q->unreq_flows));
 
 	/* get entry */
-	f = list_first_entry(&q->unreq_flows, struct fp_flow, queue_entry);
+	f = list_first_entry(&q->unreq_flows, struct fp_dst, queue_entry);
 
 	/* remove it from queue */
 	list_del(&f->queue_entry);
@@ -285,205 +259,8 @@ static struct fp_flow *flowqueue_dequeue(struct fp_sched_data* q)
 	return f;
 }
 
-static const u8 prio2band[TC_PRIO_MAX + 1] = {
-	1, 2, 2, 2, 1, 2, 0, 0 , 1, 1, 1, 1, 1, 1, 1, 1
-};
 
-/**
- * Looks up the specific key in the flow hash table.
- *   When the flow is not present:
- *     If create_if_missing is true, creates a new flow and returns it.
- *     Otherwise, returns NULL.
- */
-static struct fp_flow *fpq_lookup(struct fp_sched_data *q, u64 src_dst_key,
-		bool create_if_missing)
-{
-	struct rb_node **p, *parent;
-	struct rb_root *root;
-	struct fp_flow *f;
-	u32 skb_hash;
-
-	/* get the key's hash */
-	skb_hash = src_dst_key_hash(src_dst_key);
-
-	root = &q->flow_hash_tbl[skb_hash >> (32 - q->hash_tbl_log)];
-
-	p = &root->rb_node;
-	parent = NULL;
-	while (*p) {
-		parent = *p;
-
-		f = container_of(parent, struct fp_flow, fp_node);
-		if (f->src_dst_key == src_dst_key)
-			return f;
-
-		if (f->src_dst_key > src_dst_key)
-			p = &parent->rb_right;
-		else
-			p = &parent->rb_left;
-	}
-
-	/* did not find existing entry */
-	if (!create_if_missing)
-		return NULL;
-
-	/* allocate a new one */
-	f = kmem_cache_zalloc(fp_flow_cachep, GFP_ATOMIC | __GFP_NOWARN);
-	if (unlikely(!f)) {
-		q->stat.allocation_errors++;
-		return &q->internal;
-	}
-	f->src_dst_key = src_dst_key;
-
-	rb_link_node(&f->fp_node, parent, p);
-	rb_insert_color(&f->fp_node, root);
-	f->state = FLOW_UNQUEUED;
-	f->last_moved_timeslot = 0;
-
-	q->flows++;
-	q->inactive_flows++;
-	return f;
-}
-
-static inline u64 get_mac(struct sk_buff *skb)
-{
-	struct ethhdr *ethh;
-	u64 res;
-
-	ethh = (struct ethhdr *)skb_mac_header(skb);
-	res = ((u64)ntohs(*(__be16 *)&ethh->h_dest[0]) << 32)
-				 | ntohl(*(__be32 *)&ethh->h_dest[2]);
-//	FASTPASS_WARN("got ethernet %02X:%02X:%02X:%02X:%02X:%02X parsed 0x%012llX node_id %u\n",
-//			ethh->h_dest[0],ethh->h_dest[1],ethh->h_dest[2],ethh->h_dest[3],
-//			ethh->h_dest[4],ethh->h_dest[5], res, fp_map_mac_to_id(res));
-	return res;
-}
-
-/* returns the flow for the given packet if it is a hi_prio packet, o/w returns NULL */
-static struct fp_flow *fpq_classify_hi_prio(struct sk_buff *skb, struct fp_sched_data *q)
-{
-	__be16 proto = skb->protocol;
-	int band;
-	struct flow_keys keys;
-
-	/* warning: no starvation prevention... */
-	band = prio2band[skb->priority & TC_PRIO_MAX];
-	if (unlikely(band == 0)) {
-		if (unlikely(skb->sk != q->ctrl_sock->sk))
-			q->stat.non_ctrl_highprio_pkts++;
-		else
-			q->stat.ctrl_pkts++;
-		return &q->hi_prio;
-	}
-
-	// ARP packets should not count as classify errors
-	switch (proto) {
-	case __constant_htons(ETH_P_ARP):
-		q->stat.arp_pkts++;
-		return &q->internal;
-
-	case __constant_htons(ETH_P_1588):
-	case __constant_htons(ETH_P_ALL):
-		/* Special case the PTP broadcasts: MAC 01:1b:19:00:00:00 */
-		if (likely(get_mac(skb) == 0x011b19000000)) {
-			q->stat.ptp_pkts++;
-			return &q->hi_prio;
-		}
-		goto cannot_classify;
-
-	case __constant_htons(ETH_P_IPV6):
-	case __constant_htons(ETH_P_IP):
-		goto ipv4_ipv6;
-
-	default:
-		goto cannot_classify;
-	}
-
-ipv4_ipv6:
-	/* special cases for PTP and NTP over IP */
-	if (!skb_flow_dissect(skb, &keys))
-		goto cannot_classify;
-
-	/* special case for important packets, let through with high priority */
-	if (unlikely(keys.ip_proto == IPPROTO_IGMP)) {
-		/* IGMP is used for PTP multicast membership, allow all of them */
-		q->stat.igmp_pkts++;
-		return &q->internal;
-	}
-
-	if (unlikely(keys.ip_proto == IPPROTO_UDP)) {
-		/* NTP packets */
-		if (unlikely(keys.port16[1] == __constant_htons(123))) {
-			q->stat.ntp_pkts++;
-			return &q->hi_prio;
-		}
-
-		/* PTP packets are port 319,320 */
-		if (((ntohs(keys.port16[1]) - 1) & ~1) == 318) {
-			q->stat.ptp_pkts++;
-			return &q->hi_prio;
-		}
-	} else if (keys.ip_proto == IPPROTO_TCP) {
-		/* SSH packets, so we can access server */
-		if (unlikely(keys.port16[0] == __constant_htons(22)
-				|| keys.port16[1] == __constant_htons(22))) {
-			q->stat.ssh_pkts++;
-			return &q->internal;
-		}
-	}
-
-	return NULL;
-
-cannot_classify:
-	q->stat.classify_errors++;
-	fp_debug("cannot classify packet with protocol %u:\n", skb->protocol);
-	print_hex_dump(KERN_DEBUG, "cannot classify: ", DUMP_PREFIX_OFFSET,
-			16, 1, skb->data, min_t(size_t, skb->len, 64), false);
-
-	return &q->internal;
-}
-
-/* returns the flow for the given packet, allocates a new flow if needed */
-static struct fp_flow *fpq_classify_data(struct sk_buff *skb, struct fp_sched_data *q)
-{
-	u64 src_dst_key;
-	u64 masked_mac;
-
-	/* get MAC address */
-	src_dst_key = get_mac(skb);
-
-	/* get the skb's key (src_dst_key) */
-	masked_mac = src_dst_key & MANUFACTURER_MAC_MASK;
-	if (unlikely((masked_mac == VRRP_SWITCH_MAC_PREFIX)
-			  || (masked_mac == CISCO_SWITCH_MAC_PREFIX)))
-		src_dst_key = OUT_OF_BOUNDARY_NODE_ID;
-	else
-		src_dst_key = fp_map_mac_to_id(src_dst_key);
-
-	q->stat.data_pkts++;
-	return fpq_lookup(q, src_dst_key, true);
-}
-
-/* remove one skb from head of flow queue */
-static struct sk_buff *flow_dequeue_skb(struct Qdisc *sch, struct fp_flow *flow,
-		bool maintain_global)
-{
-	struct sk_buff *skb = flow->head;
-
-	if (skb) {
-		flow->head = skb->next;
-		skb->next = NULL;
-		flow->qlen--;
-
-		if (maintain_global) {
-			sch->q.qlen--;
-			sch->qstats.backlog -= qdisc_pkt_len(skb);
-		}
-	}
-	return skb;
-}
-
-void flow_inc_used(struct fp_sched_data *q, struct fp_flow* f, u64 amount) {
+void flow_inc_used(struct fp_sched_data *q, struct fp_dst* f, u64 amount) {
 	f->used_tslots += amount;
 	q->used_tslots += amount;
 }
@@ -493,7 +270,7 @@ void flow_inc_used(struct fp_sched_data *q, struct fp_flow* f, u64 amount) {
  *   Maintains the necessary invariants, e.g. adds the flow to the unreq_flows
  *   list if necessary
  */
-static void flow_inc_demand(struct fp_sched_data *q, struct fp_flow *f, u64 amount)
+static void flow_inc_demand(struct fp_sched_data *q, struct fp_dst *f, u64 amount)
 {
 	f->demand_tslots += amount;
 	q->demand_tslots += amount;
@@ -503,164 +280,6 @@ static void flow_inc_demand(struct fp_sched_data *q, struct fp_flow *f, u64 amou
 		flowqueue_enqueue_request(q, f);
 }
 
-/* add skb to flow queue. returns false if skb is too large*/
-static void flow_enqueue_skb(struct Qdisc *sch, struct fp_flow *flow,
-		struct sk_buff *skb, bool maintain_global)
-{
-	skb->next = NULL;
-	if (!flow->head) {
-		flow->head = skb;
-		flow->tail = skb;
-	} else {
-		flow->tail->next = skb;
-		flow->tail = skb;
-	}
-
-	if (maintain_global) {
-		sch->q.qlen++;
-		sch->qstats.backlog += qdisc_pkt_len(skb);
-	}
-
-	flow->qlen++;
-}
-
-static struct sk_buff *flow_queue_peek(struct fp_flow *f)
-{
-	return f->head;
-}
-
-static bool flow_has_skbs(struct fp_flow *f)
-{
-	return (f->head == NULL);
-}
-
-/* enqueue packet to the qdisc (part of the qdisc api) */
-static int fpq_enqueue(struct sk_buff *skb, struct Qdisc *sch)
-{
-	struct fp_sched_data *q = qdisc_priv(sch);
-	struct fp_flow *f;
-	s64 cost = (s64) psched_l2t_ns(&q->data_rate, qdisc_pkt_len(skb));
-
-	if (cost > q->tslot_len_approx) {
-		FASTPASS_WARN("got packet that is larger than a timeslot len=%d\n",
-			qdisc_pkt_len(skb));
-		q->stat.pkt_too_big++;
-		return qdisc_drop(skb, sch);
-	}
-
-	f = fpq_classify_hi_prio(skb, q);
-
-	/* high prio flows enqueued directly */
-	if (unlikely(f != NULL)) {
-		flow_enqueue_skb(sch, f, skb, true);
-		fp_debug("enqueued hi-prio packet of len %d to flow 0x%llX, qlen=%d\n",
-				qdisc_pkt_len(skb), f->src_dst_key, f->qlen);
-
-		/* unthrottle qdisc */
-		qdisc_unthrottled(sch);
-		__netif_schedule(qdisc_root(sch));
-
-		return NET_XMIT_SUCCESS;
-	}
-
-	/* this is a data packet */
-
-	/* enforce qdisc packet limit on data packets */
-	if (unlikely(sch->q.qlen >= sch->limit))
-		return qdisc_drop(skb, sch);
-
-	spin_lock(&q->enqueue_lock);
-	flow_enqueue_skb(sch, &q->enqueue_queue, skb, true);
-	spin_unlock(&q->enqueue_lock);
-
-	tasklet_schedule(&q->enqueue_tasklet);
-	return NET_XMIT_SUCCESS;
-}
-
-static void enqueue_tasklet_func(unsigned long int param)
-{
-	struct Qdisc *sch = (struct Qdisc *)param;
-	struct fp_sched_data *q = qdisc_priv(sch);
-	struct fp_flow *flow;
-	struct sk_buff *skb, *next;
-	s64 cost;
-
-
-	spin_lock(&q->enqueue_lock);
-	next = q->enqueue_queue.head;
-	q->enqueue_queue.head = NULL;
-	q->enqueue_queue.qlen = 0;
-	spin_unlock(&q->enqueue_lock);
-
-	while ((skb = next) != NULL) {
-		next = skb->next;
-		skb->next = NULL;
-
-		cost = (s64) psched_l2t_ns(&q->data_rate, qdisc_pkt_len(skb));
-
-		fpproto_maintenance_lock(q->ctrl_sock->sk);
-
-		flow = fpq_classify_data(skb, q);
-
-		/* if credit relates to an old slot, discard it */
-		if (unlikely(flow->demand_tslots == flow->used_tslots))
-			flow->credit = 0;
-
-		/* check if need to request a new slot */
-		if (cost > flow->credit) {
-			flow_inc_demand(q, flow, 1);
-			flow->credit = q->tslot_len_approx;
-		}
-		flow->credit -= cost;
-
-		/* if queue was empty before, decrease inactive flow count */
-		if (flow->qlen == 0)
-			q->inactive_flows--;
-
-		flow_enqueue_skb(sch, flow, skb, false);
-
-		fpproto_maintenance_unlock(q->ctrl_sock->sk);
-	}
-
-	fp_debug("enqueued data packet of len %d to flow 0x%llX, qlen=%d\n",
-			qdisc_pkt_len(skb), flow->src_dst_key, flow->qlen);
-}
-
-/**
- * Move a timeslot's worth of skb's from src flow to dst flow, assuming the
- *    packets follow 'rate' rate.
- */
-static void move_timeslot_from_flow(struct Qdisc *sch, struct psched_ratecfg *rate,
-		struct fp_flow *src, struct fp_flow *dst, u16 path)
-{
-	struct fp_sched_data *q = qdisc_priv(sch);
-	s64 credit = q->tslot_len_approx;
-	struct sk_buff *skb;
-	u32 count = 0;
-
-	/* while enough credit, move packets to q->internal */
-	while (!flow_has_skbs(src)) {
-		u32 skb_len = qdisc_pkt_len(flow_queue_peek(src));
-		u64 skb_ns = psched_l2t_ns(rate, skb_len);
-
-		fp_debug("credit=%llu, pkt_len=%u, cost=%llu\n",
-				credit, skb_len, skb_ns);
-		credit -= (s64) skb_ns;
-		if (credit < 0)
-			break; /* ran out of credit */
-
-		skb = flow_dequeue_skb(sch, src, false);
-		flow_enqueue_skb(sch, dst, skb, false);
-		q->internal_free_time += skb_ns;
-		if (src->qlen == 0)
-			q->inactive_flows++;
-		count++;
-	}
-
-	fp_debug("@%llu moved %u out of %u packets from %llu (0x%04llx) path %d\n",
-			q->current_timeslot, count, src->qlen + count, src->src_dst_key,
-			src->src_dst_key, path);
-}
 
 /**
  * Change the qdisc state from its old time slot to the time slot at time @now.
@@ -674,7 +293,7 @@ static void update_current_timeslot(struct Qdisc *sch, u64 now_real)
 	struct fp_sched_data *q = qdisc_priv(sch);
 	u64 next_nonempty;
 	u64 next_key;
-	struct fp_flow *f;
+	struct fp_dst *f;
 	u64 tslot_advance;
 	u32 moved_timeslots = 0;
 	u64 now_monotonic = fp_monotonic_time_ns();
@@ -822,7 +441,7 @@ static void handle_reset(void *param)
 
 	struct rb_node *cur, *next;
 	struct rb_root *root;
-	struct fp_flow *f;
+	struct fp_dst *f;
 	u32 idx;
 	u32 base_idx = src_dst_key_hash(fp_monotonic_time_ns()) >> (32 - q->hash_tbl_log);
 	u32 mask = (1U << q->hash_tbl_log) - 1;
@@ -848,7 +467,7 @@ static void handle_reset(void *param)
 			cur = next;
 			next = rb_next(cur);
 
-			f = container_of(cur, struct fp_flow, fp_node);
+			f = container_of(cur, struct fp_dst, fp_node);
 
 			/* can we garbage-collect this flow? */
 			if (f->demand_tslots == f->used_tslots) {
@@ -913,7 +532,7 @@ static void handle_alloc(void *param, u32 base_tslot, u16 *dst,
 			wnd_get_mask(&q->alloc_wnd, q->current_timeslot+63));
 
 	for (i = 0; i < n_tslots; i++) {
-		struct fp_flow *f;
+		struct fp_dst *f;
 
 		spec = tslots[i];
 		dst_ind = spec >> 4;
@@ -1026,7 +645,7 @@ static void handle_areq(void *param, u16 *dst_and_count, int n)
 {
 	struct Qdisc *sch = (struct Qdisc *)param;
 	struct fp_sched_data *q = qdisc_priv(sch);
-	struct fp_flow *f;
+	struct fp_dst *f;
 	int i;
 	u16 dst;
 	u16 count_low;
@@ -1088,7 +707,7 @@ static void handle_ack(void *param, struct fpproto_pktdesc *pd)
 	struct Qdisc *sch = (struct Qdisc *)param;
 	struct fp_sched_data *q = qdisc_priv(sch);
 	int i;
-	struct fp_flow *f;
+	struct fp_dst *f;
 	u64 new_acked;
 	u64 delta;
 
@@ -1120,7 +739,7 @@ static void handle_neg_ack(void *param, struct fpproto_pktdesc *pd)
 	struct Qdisc *sch = (struct Qdisc *)param;
 	struct fp_sched_data *q = qdisc_priv(sch);
 	int i;
-	struct fp_flow *f;
+	struct fp_dst *f;
 	u64 req_tslots;
 
 	for (i = 0; i < pd->n_areq; i++) {
@@ -1153,7 +772,7 @@ static void send_request(struct Qdisc *sch)
 	struct fp_sched_data *q = qdisc_priv(sch);
 	u64 now_monotonic = fp_monotonic_time_ns();
 
-	struct fp_flow *f;
+	struct fp_dst *f;
 	struct fp_kernel_pktdesc *kern_pd;
 	struct fpproto_pktdesc *pd;
 	u64 new_requested;
@@ -1226,59 +845,6 @@ alloc_err:
 	trigger_tx(q); /* try again */
 }
 
-/* Extract packet from the queue (part of the qdisc API) */
-static struct sk_buff *fpq_dequeue(struct Qdisc *sch)
-{
-	struct fp_sched_data *q = qdisc_priv(sch);
-	struct sk_buff *skb;
-
-	/* try hi_prio queue first */
-	skb = flow_dequeue_skb(sch, &q->hi_prio, true);
-	if (skb)
-		goto out_got_skb;
-
-	/* any packets already queued? */
-	skb = flow_dequeue_skb(sch, &q->internal, true);
-	if (skb)
-		goto out_got_skb;
-
-	/* queue is empty, can perform maintenance */
-	tasklet_schedule(&q->maintenance_tasklet);
-
-	/* try to get ready skbs from the prequeue */
-	spin_lock(&q->prequeue_lock);
-	if (q->prequeue.head != NULL) {
-		/* have skbs to move */
-		if (q->internal.head == NULL)
-			q->internal.head = q->prequeue.head;
-		else
-			q->internal.tail->next = q->prequeue.head;
-
-		q->internal.tail = q->prequeue.tail;
-		q->internal.qlen += q->prequeue.qlen;
-
-		q->prequeue.head = NULL;
-		q->prequeue.qlen = 0;
-	}
-	spin_unlock(&q->prequeue_lock);
-
-	/* try the internal queue again, might be non-empty after timeslot update*/
-	skb = flow_dequeue_skb(sch, &q->internal, true);
-	if (skb)
-		goto out_got_skb;
-
-	/* no packets in queue, go to sleep */
-	qdisc_throttled(sch);
-	/* will re-read time, to make sure we sleep >0 time */
-	qdisc_watchdog_schedule_ns(&q->watchdog,
-				   fp_monotonic_time_ns() + q->update_timeslot_timer_ns);
-	return NULL;
-
-out_got_skb:
-	qdisc_bstats_update(sch, skb);
-	qdisc_unthrottled(sch);
-	return skb;
-}
 
 static enum hrtimer_restart maintenance_timer_func(struct hrtimer *timer)
 {
@@ -1400,149 +966,6 @@ err_release:
 	return rc;
 }
 
-/* resets the state of the qdisc (part of qdisc API) */
-static void fp_tc_reset(struct Qdisc *sch)
-{
-	struct fp_sched_data *q = qdisc_priv(sch);
-	struct rb_root *root;
-	struct sk_buff *skb;
-	struct rb_node *p;
-	struct fp_flow *f;
-	unsigned int idx;
-
-	while ((skb = flow_dequeue_skb(sch, &q->internal, false)) != NULL)
-		kfree_skb(skb);
-	while ((skb = flow_dequeue_skb(sch, &q->hi_prio, false)) != NULL)
-		kfree_skb(skb);
-
-	spin_lock(&q->enqueue_lock);
-	while ((skb = flow_dequeue_skb(sch, &q->enqueue_queue, false)) != NULL)
-		kfree_skb(skb);
-	spin_unlock(&q->enqueue_lock);
-
-	spin_lock(&q->prequeue_lock);
-	while ((skb = flow_dequeue_skb(sch, &q->prequeue, false)) != NULL)
-		kfree_skb(skb);
-	spin_unlock(&q->prequeue_lock);
-
-	if (!q->flow_hash_tbl)
-		return;
-
-	for (idx = 0; idx < (1U << q->hash_tbl_log); idx++) {
-		root = &q->flow_hash_tbl[idx];
-		while ((p = rb_first(root)) != NULL) {
-			f = container_of(p, struct fp_flow, fp_node);
-			rb_erase(p, root);
-
-			while ((skb = flow_dequeue_skb(sch, f, false)) != NULL)
-				kfree_skb(skb);
-
-			kmem_cache_free(fp_flow_cachep, f);
-		}
-	}
-	INIT_LIST_HEAD(&q->unreq_flows);
-	wnd_reset(&q->alloc_wnd, q->current_timeslot);
-	q->flows		= 0;
-	q->inactive_flows	= 0;
-	q->n_unreq_flows	= 0;
-	q->demand_tslots	= 0;
-	q->requested_tslots	= 0;
-	q->alloc_tslots		= 0;
-	q->internal_free_time = fp_monotonic_time_ns();
-}
-
-/*
- * Re-hashes flow to a hash table with a potentially different size.
- *   Performs garbage collection in the process.
- */
-static void fp_tc_rehash(struct fp_sched_data *q,
-		      struct rb_root *old_array, u32 old_log,
-		      struct rb_root *new_array, u32 new_log)
-{
-	struct rb_node *op, **np, *parent;
-	struct rb_root *oroot, *nroot;
-	struct fp_flow *of, *nf;
-	u32 idx;
-	u32 skb_hash;
-
-	/* for each cell in hash table: */
-	for (idx = 0; idx < (1U << old_log); idx++) {
-		oroot = &old_array[idx];
-		/* while rbtree not empty: */
-		while ((op = rb_first(oroot)) != NULL) {
-			/* erase from old tree */
-			rb_erase(op, oroot);
-			/* find new cell in hash table */
-			of = container_of(op, struct fp_flow, fp_node);
-			skb_hash = src_dst_key_hash(of->src_dst_key);
-			nroot = &new_array[skb_hash >> (32 - new_log)];
-
-			/* insert in tree */
-			np = &nroot->rb_node;
-			parent = NULL;
-			while (*np) {
-				parent = *np;
-
-				nf = container_of(parent, struct fp_flow, fp_node);
-				FASTPASS_BUG_ON(nf->src_dst_key == of->src_dst_key);
-
-				if (nf->src_dst_key > of->src_dst_key)
-					np = &parent->rb_right;
-				else
-					np = &parent->rb_left;
-			}
-
-			rb_link_node(&of->fp_node, parent, np);
-			rb_insert_color(&of->fp_node, nroot);
-		}
-	}
-}
-
-/* Resizes the hash table to a new size, rehashing if necessary */
-static int fp_tc_resize(struct fp_sched_data *q, u32 log)
-{
-	struct rb_root *array;
-	u32 idx;
-
-	if (q->flow_hash_tbl && log == q->hash_tbl_log)
-		return 0;
-
-	array = kmalloc(sizeof(struct rb_root) << log, GFP_ATOMIC);
-	if (!array)
-		return -ENOMEM;
-
-	for (idx = 0; idx < (1U << log); idx++)
-		array[idx] = RB_ROOT;
-
-	if (q->flow_hash_tbl) {
-		fp_tc_rehash(q, q->flow_hash_tbl, q->hash_tbl_log, array, log);
-		kfree(q->flow_hash_tbl);
-	}
-	q->flow_hash_tbl = array;
-	q->hash_tbl_log = log;
-
-	return 0;
-}
-
-/* netlink protocol data */
-static const struct nla_policy fp_policy[TCA_FASTPASS_MAX + 1] = {
-	[TCA_FASTPASS_PLIMIT]			= { .type = NLA_U32 },
-	[TCA_FASTPASS_FLOW_PLIMIT]		= { .type = NLA_U32 },
-	[TCA_FASTPASS_BUCKETS_LOG]		= { .type = NLA_U32 },
-	[TCA_FASTPASS_DATA_RATE]		= { .type = NLA_U32 },
-	[TCA_FASTPASS_TIMESLOT_NSEC]	= { .type = NLA_U32 },
-	[TCA_FASTPASS_REQUEST_COST]		= { .type = NLA_U32 },
-	[TCA_FASTPASS_REQUEST_BUCKET]	= { .type = NLA_U32 },
-	[TCA_FASTPASS_REQUEST_GAP]		= { .type = NLA_U32 },
-	[TCA_FASTPASS_CONTROLLER_IP]	= { .type = NLA_U32 },
-	[TCA_FASTPASS_RST_WIN_USEC]		= { .type = NLA_U32 },
-	[TCA_FASTPASS_TIMESLOT_MUL]		= { .type = NLA_U32 },
-	[TCA_FASTPASS_TIMESLOT_SHIFT]	= { .type = NLA_U32 },
-	[TCA_FASTPASS_MISS_THRESHOLD]	= { .type = NLA_U32 },
-	[TCA_FASTPASS_DEV_BACKLOG_NS]	= { .type = NLA_U32 },
-	[TCA_FASTPASS_MAX_PRELOAD]		= { .type = NLA_U32 },
-	[TCA_FASTPASS_UPDATE_TIMESLOT_TIMER_NS]		= { .type = NLA_U32 },
-};
 
 /* change configuration (part of qdisc API) */
 static int fp_tc_change(struct Qdisc *sch, struct nlattr *opt) {
@@ -1698,38 +1121,6 @@ static int fp_tc_change(struct Qdisc *sch, struct nlattr *opt) {
 	return err;
 }
 
-/* destroy the qdisc (part of qdisc API) */
-static void fp_tc_destroy(struct Qdisc *sch)
-{
-	struct fp_sched_data *q = qdisc_priv(sch);
-	spinlock_t *root_lock = qdisc_root_lock(sch);
-
-	/* Apparently no lock protection here. We lock to prevent races */
-
-	/* Notify lockers that qdisc is being destroyed */
-	fp_debug("marking fastpass qdisc as destroyed\n");
-	spin_lock_bh(root_lock);
-	sch->limit = 0;
-	spin_unlock_bh(root_lock);
-	fp_debug("marked fastpass qdisc as destroyed\n");
-
-	qdisc_watchdog_cancel(&q->watchdog);
-	hrtimer_try_to_cancel(&q->maintenance_timer);
-
-	/* close socket. no new packets should arrive afterwards */
-	fp_debug("closing control socket\n");
-	sock_release(q->ctrl_sock);
-
-	fp_debug("locking qdisc for reset\n");
-	spin_lock_bh(root_lock);
-	fp_tc_reset(sch);
-	fp_debug("done resetting qdisc. freeing flow_hash_tbl\n");
-	kfree(q->flow_hash_tbl);
-	fp_debug("unlocking qdisc\n");
-	spin_unlock_bh(root_lock);
-	fp_debug("done\n");
-}
-
 /* initialize a new qdisc (part of qdisc API) */
 static int fp_tc_init(struct Qdisc *sch, struct nlattr *opt)
 {
@@ -1800,50 +1191,6 @@ static int fp_tc_init(struct Qdisc *sch, struct nlattr *opt)
 	return err;
 }
 
-/* dumps configuration of the qdisc to netlink skb (part of qdisc API) */
-static int fp_tc_dump(struct Qdisc *sch, struct sk_buff *skb)
-{
-	struct fp_sched_data *q = qdisc_priv(sch);
-	struct nlattr *opts;
-
-	opts = nla_nest_start(skb, TCA_OPTIONS);
-	if (opts == NULL)
-		goto nla_put_failure;
-
-	if (nla_put_u32(skb, TCA_FASTPASS_PLIMIT, sch->limit) ||
-	    nla_put_u32(skb, TCA_FASTPASS_FLOW_PLIMIT, q->flow_plimit) ||
-	    nla_put_u32(skb, TCA_FASTPASS_BUCKETS_LOG, q->hash_tbl_log) ||
-	    nla_put_u32(skb, TCA_FASTPASS_DATA_RATE, (u32)(q->data_rate.rate_bps >> 3)) ||
-	    nla_put_u32(skb, TCA_FASTPASS_TIMESLOT_NSEC, q->tslot_len_approx) ||
-	    nla_put_u32(skb, TCA_FASTPASS_REQUEST_COST, q->req_cost) ||
-	    nla_put_u32(skb, TCA_FASTPASS_REQUEST_BUCKET, q->req_bucketlen) ||
-	    nla_put_u32(skb, TCA_FASTPASS_REQUEST_GAP, q->req_min_gap) ||
-	    nla_put_u32(skb, TCA_FASTPASS_CONTROLLER_IP, q->ctrl_addr_netorder) ||
-	    nla_put_u32(skb, TCA_FASTPASS_RST_WIN_USEC, q->reset_window_us) ||
-	    nla_put_u32(skb, TCA_FASTPASS_TIMESLOT_MUL, q->tslot_mul) ||
-	    nla_put_u32(skb, TCA_FASTPASS_TIMESLOT_SHIFT, q->tslot_shift) ||
-		nla_put_u32(skb, TCA_FASTPASS_MISS_THRESHOLD, q->miss_threshold) ||
-		nla_put_u32(skb, TCA_FASTPASS_DEV_BACKLOG_NS, q->max_dev_backlog_ns) ||
-		nla_put_u32(skb, TCA_FASTPASS_MAX_PRELOAD, q->max_preload) ||
-		nla_put_u32(skb, TCA_FASTPASS_UPDATE_TIMESLOT_TIMER_NS, q->update_timeslot_timer_ns))
-		goto nla_put_failure;
-
-	nla_nest_end(skb, opts);
-	return skb->len;
-
-nla_put_failure:
-	return -1;
-}
-
-/* this will statically check if the space in the TC statistics buffer is sufficient */
-struct __fp_check_sizes {
-	char sched_statistics__that_should_fit_in_pkt_sched_dot_h__[
-	      TC_FASTPASS_SCHED_STAT_MAX_BYTES - sizeof(struct fp_sched_stat)];
-	char socket_statistics__that_should_fit_in_pkt_sched_dot_h__[
-	      TC_FASTPASS_SOCKET_STAT_MAX_BYTES - sizeof(struct fp_socket_stat)];
-	char proto_statistics__that_should_fit_in_pkt_sched_dot_h__[
-	      TC_FASTPASS_PROTO_STAT_MAX_BYTES - sizeof(struct fp_proto_stat)];
-};
 
 /*
  * Prints flow status
@@ -1852,7 +1199,7 @@ static void dump_flow_info(struct fp_sched_data *q, bool only_active)
 {
 	struct rb_node *cur, *next;
 	struct rb_root *root;
-	struct fp_flow *f;
+	struct fp_dst *f;
 	u32 idx;
 	u32 num_printed = 0;
 
@@ -1868,7 +1215,7 @@ static void dump_flow_info(struct fp_sched_data *q, bool only_active)
 			cur = next;
 			next = rb_next(cur);
 
-			f = container_of(cur, struct fp_flow, fp_node);
+			f = container_of(cur, struct fp_dst, fp_node);
 
 			if (f->qlen == 0 && only_active)
 				continue;
@@ -1927,20 +1274,119 @@ static int fp_tc_dump_stats(struct Qdisc *sch, struct gnet_dump *d)
 	return gnet_stats_copy_app(d, &st, sizeof(st));
 }
 
-static struct Qdisc_ops fastpass_qdisc_ops __read_mostly = {
+static int fastpass_proc_show(struct seq_file *seq, void *v)
+{
+	struct tsq_sched_data *q = (struct tsq_sched_data *)seq->private;
+	u64 now_real = fp_get_time_ns();
+	struct fp_sched_stat *scs = &q->stat;
+
+	/* time */
+	seq_printf(seq, "  fp_sched_data *p = %p ", q);
+	seq_printf(seq, ", timestamp 0x%llX ", now_real);
+	seq_printf(seq, ", timeslot 0x%llX", q->current_timeslot);
+
+	/* flow statistics */
+	seq_printf(seq, "\n  %u flows (%u inactive)",
+		q->flows, q->inactive_flows);
+	seq_printf(seq, ", %llu gc", scs->gc_flows);
+
+	/* timeslot statistics */
+	seq_printf(seq, "\n  horizon mask 0x%016llx",
+			wnd_get_mask(&q->alloc_wnd, q->current_timeslot+63));
+	seq_printf(seq, ", %llu added timeslots", q->added_tslots);
+	seq_printf(seq, ", %llu used", scs->sucessful_timeslots);
+	seq_printf(seq, " (%llu %llu %llu %llu behind, %llu fast)", scs->late_enqueue4,
+			scs->late_enqueue3, scs->late_enqueue2, scs->late_enqueue1,
+			scs->early_enqueue);
+	seq_printf(seq, ", %llu missed", scs->missed_timeslots);
+	seq_printf(seq, ", %llu high_backlog", scs->backlog_too_high);
+	seq_printf(seq, ", %llu assumed_lost", scs->timeslots_assumed_lost);
+	seq_printf(seq, "  (%llu late", scs->alloc_too_late);
+	seq_printf(seq, ", %llu premature)", scs->alloc_premature);
+
+	/* egress packet statistics */
+	seq_printf(seq, "\n  enqueued %llu ctrl", scs->ctrl_pkts);
+	seq_printf(seq, ", %llu ntp", scs->ntp_pkts);
+	seq_printf(seq, ", %llu ptp", scs->ptp_pkts);
+	seq_printf(seq, ", %llu arp", scs->arp_pkts);
+	seq_printf(seq, ", %llu igmp", scs->igmp_pkts);
+	seq_printf(seq, ", %llu ssh", scs->ssh_pkts);
+	seq_printf(seq, ", %llu data", scs->data_pkts);
+	seq_printf(seq, ", %llu flow_plimit", scs->flows_plimit);
+	seq_printf(seq, ", %llu too big", scs->pkt_too_big);
+
+	/* error statistics */
+	seq_printf(seq, "\n errors:");
+	if (scs->allocation_errors)
+		seq_printf(seq, "\n  %llu allocation errors in dst_lookup", scs->allocation_errors);
+	if (scs->classify_errors)
+		seq_printf(seq, "\n  %llu packets could not be classified", scs->classify_errors);
+	if (scs->flow_not_found_update)
+		seq_printf(seq, "\n  %llu flow could not be found in update_current_tslot!",
+				scs->flow_not_found_update);
+	if (scs->req_alloc_errors)
+		seq_printf(seq, "\n  %llu could not allocate pkt_desc for request", scs->req_alloc_errors);
+
+	/* warnings */
+	seq_printf(seq, "\n warnings:");
+	if (scs->unwanted_alloc)
+		seq_printf(seq, "\n  %llu timeslots allocated beyond the demand of the flow (could happen due to reset / controller timeouts)",
+				scs->unwanted_alloc);
+	if (scs->alloc_premature)
+		seq_printf(seq, "\n  %llu premature allocations (something wrong with time-sync?)\n",
+				scs->alloc_premature);
+	if (scs->clock_move_causes_reset)
+		seq_printf(seq, "\n  %llu large clock moves caused resets",
+				scs->clock_move_causes_reset);
+
+	return 0;
+}
+
+static int fastpass_proc_open(struct inode *inode, struct file *file)
+{
+	return single_open(file, fastpass_proc_show, PDE_DATA(inode));
+}
+
+static const struct file_operations fastpass_proc_fops = {
+	.owner	 = THIS_MODULE,
+	.open	 = fastpass_proc_open,
+	.read	 = seq_read,
+	.llseek	 = seq_lseek,
+	.release = single_release,
+};
+
+static int fastpass_proc_init(struct tsq_sched_data *q, struct tsq_ops *ops)
+{
+	char fname[PROC_FILENAME_MAX_SIZE];
+	snprintf(fname, PROC_FILENAME_MAX_SIZE, "tsq/%s-%p", ops->id, q);
+	q->proc_entry = proc_create_data(fname, S_IRUGO, NULL, &fastpass_proc_fops, q);
+	if (q->proc_entry == NULL)
+		return -1; /* error */
+	return 0; /* success */
+}
+
+static void tsq_proc_cleanup(struct tsq_sched_data *q)
+{
+	proc_remove(q->proc_entry);
+}
+
+static int fpq_new_qdisc(void *priv) {
+	return 0;
+}
+static void fpq_stop_qdisc(void *priv) {
+	return;
+}
+static void fpq_add_timeslot(void *priv, u64 src_dst_key) {
+	tsq_admit_now(priv, src_dst_key);
+}
+
+static struct tsq_ops fastpass_tsq_ops __read_mostly = {
 	.id		=	"fastpass",
 	.priv_size	=	sizeof(struct fp_sched_data),
 
-	.enqueue	=	fpq_enqueue,
-	.dequeue	=	fpq_dequeue,
-	.peek		=	qdisc_peek_dequeued,
-	.init		=	fp_tc_init,
-	.reset		=	fp_tc_reset,
-	.destroy	=	fp_tc_destroy,
-	.change		=	fp_tc_change,
-	.dump		=	fp_tc_dump,
-	.dump_stats	=	fp_tc_dump_stats,
-	.owner		=	THIS_MODULE,
+	.new_qdisc = fpq_new_qdisc,
+	.stop_qdisc = fpq_stop_qdisc,
+	.add_timeslot = fpq_add_timeslot,
 };
 
 static int __init fastpass_module_init(void)
@@ -1949,27 +1395,25 @@ static int __init fastpass_module_init(void)
 
 	pr_info("%s: initializing\n", __func__);
 
-	fp_flow_cachep = kmem_cache_create("fp_flow_cache",
-					   sizeof(struct fp_flow),
-					   0, 0, NULL);
-	if (!fp_flow_cachep)
-		goto out;
-
-	ret = register_qdisc(&fastpass_qdisc_ops);
-	if (ret)
-		goto out_destroy_cache;
-
 	ret = fpproto_register();
 	if (ret)
-		goto out_unregister_qdisc;
+		goto out;
+
+	ret = tsq_init();
+	if (ret != 0)
+		goto out_unregister_fpproto;
+
+	fastpass_tsq_entry = tsq_register_qdisc(&fastpass_tsq_ops);
+	if (fastpass_tsq_entry == NULL)
+		goto out_exit;
+
 
 	pr_info("%s: success\n", __func__);
 	return 0;
-
-out_unregister_qdisc:
-	unregister_qdisc(&fastpass_qdisc_ops);
-out_destroy_cache:
-	kmem_cache_destroy(fp_flow_cachep);
+out_exit:
+	tsq_exit();
+out_unregister_fpproto:
+	fpproto_unregister();
 out:
 	pr_info("%s: failed, ret=%d\n", __func__, ret);
 	return ret;
@@ -1977,9 +1421,9 @@ out:
 
 static void __exit fastpass_module_exit(void)
 {
+	tsq_unregister_qdisc(fastpass_tsq_entry);
+	tsq_exit();
 	fpproto_unregister(); /* TODO: verify this is safe */
-	unregister_qdisc(&fastpass_qdisc_ops);
-	kmem_cache_destroy(fp_flow_cachep);
 }
 
 module_init(fastpass_module_init)

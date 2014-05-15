@@ -9,6 +9,8 @@
 #include "pim_admissible_traffic.h"
 
 #define NUM_ITERATIONS 3
+#define UNALLOCATED 0
+#define ALLOCATED   1
 
 /**
  * Increase the backlog from src to dst

@@ -16,8 +16,10 @@
 #include "../graph-algo/fp_ring.h"
 #include "../graph-algo/platform.h"
 
-#define UNALLOCATED 0
-#define ALLOCATED   1
+/* packing of bitmasks into 8 bit words */
+#define PIM_BITMASKS_PER_8_BIT      8
+#define PIM_BITMASK_WORD(node)      (node >> 3)
+#define PIM_BITMASK_SHIFT(node)     (node & (PIM_BITMASKS_PER_8_BIT - 1))
 
 /**
  * A structure for the state of a grant partition
@@ -28,8 +30,8 @@ struct pim_state {
         struct ga_adj grants_by_dst[N_PARTITIONS]; /* per dst partition */
         struct ga_partd_edgelist accepts;
         uint8_t grant_adj_index[MAX_NODES]; /* per src adj index of grant */
-        uint8_t src_status[MAX_NODES]; /* TODO: use 1 bit per src instead of 8 */
-        uint8_t dst_status[MAX_NODES]; /* TODO: use 1 bit per dst instead of 8 */
+        uint8_t src_endnodes[MAX_NODES / PIM_BITMASKS_PER_8_BIT];
+        uint8_t dst_endnodes[MAX_NODES / PIM_BITMASKS_PER_8_BIT];
         struct backlog backlog;
         struct bin *new_demands[N_PARTITIONS]; /* per src partition */
         struct fp_ring *q_admitted_out;

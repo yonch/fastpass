@@ -12,6 +12,40 @@
 #define MAX_TRIES 10
 
 /**
+ * Return true if the src is already allocated, false otherwise.
+ */
+static inline
+bool src_is_allocated(struct pim_state *state, uint16_t src) {
+        return ((state->src_endnodes[PIM_BITMASK_WORD(src)] >> PIM_BITMASK_SHIFT(src)) &
+                0x1);
+}
+
+/**
+ * Return true if the dst is already allocated, false otherwise.
+ */
+static inline
+bool dst_is_allocated(struct pim_state *state, uint16_t dst) {
+    return ((state->dst_endnodes[PIM_BITMASK_WORD(dst)] >> PIM_BITMASK_SHIFT(dst)) &
+                0x1);
+}
+
+/**
+ * Mark the src as allocated.
+ */
+static inline
+void mark_src_allocated(struct pim_state *state, uint16_t src) {
+        state->src_endnodes[PIM_BITMASK_WORD(src)] |= (0x1 << PIM_BITMASK_SHIFT(src));
+}
+
+/**
+ * Mark the dst as allocated.
+ */
+static inline
+void mark_dst_allocated(struct pim_state *state, uint16_t dst) {
+        state->dst_endnodes[PIM_BITMASK_WORD(dst)] |= (0x1 << PIM_BITMASK_SHIFT(dst));
+}
+
+/**
  * Move new demands from 'new_demands' to the backlog struct. Also make sure
  * that they are included in requests_by_src
  */
@@ -44,11 +78,11 @@ void pim_prepare(struct pim_state *state, uint16_t partition_index) {
         /* reset accepts */
         ga_partd_edgelist_src_reset(&state->accepts, partition_index);
 
-        /* reset src and dst status */
-        memset(((uint8_t *) &state->src_status) + partition_index * PARTITION_N_NODES,
-               UNALLOCATED, PARTITION_N_NODES);
-        memset(((uint8_t *) &state->dst_status) + partition_index * PARTITION_N_NODES,
-               UNALLOCATED, PARTITION_N_NODES);
+        /* reset src and dst endnodes */
+        uint32_t start_word = PIM_BITMASK_WORD(first_in_partition(partition_index));
+        uint32_t words_per_partition = PIM_BITMASK_WORD(PARTITION_N_NODES);
+        memset(((uint8_t *) &state->src_endnodes) + start_word, 0, PARTITION_N_NODES);
+        memset(((uint8_t *) &state->dst_endnodes) + start_word, 0, PARTITION_N_NODES);
 }
 
 /**
@@ -67,7 +101,7 @@ void pim_do_grant(struct pim_state *state, uint16_t partition_index) {
         for (src = first_in_partition(partition_index);
              src <= last_in_partition(partition_index);
              src++) {
-                if (state->src_status[src] == ALLOCATED)
+                if (src_is_allocated(state, src))
                         continue; /* this src has been allocated in this timeslot */
 
                 uint16_t src_index = PARTITION_IDX(src);
@@ -81,9 +115,9 @@ void pim_do_grant(struct pim_state *state, uint16_t partition_index) {
                 do {
                         dst_adj_index = rand() % degree;
                         dst = state->requests_by_src[partition_index].neigh[src_index][dst_adj_index];
-                } while ((state->dst_status[dst] == ALLOCATED) && (--tries > 0));
+                } while (dst_is_allocated(state, dst) && (--tries > 0));
 
-                if (state->dst_status[dst] == ALLOCATED)
+                if (dst_is_allocated(state, dst))
                         continue; /* couldn't find a free dst*/
 
                 /* add the granted edge */
@@ -123,8 +157,8 @@ void pim_do_accept(struct pim_state *state, uint16_t partition_index) {
                 ga_partd_edgelist_add(&state->accepts, src, dst);
 
                 /* mark the src and dst as allocated for this timeslot */
-                state->src_status[src] = ALLOCATED; /* TODO: this write might cause cache contention */
-                state->dst_status[dst] = ALLOCATED;
+                mark_src_allocated(state, src); /* TODO: this write might cause cache contention */
+                mark_dst_allocated(state, dst);
         }
 }
 

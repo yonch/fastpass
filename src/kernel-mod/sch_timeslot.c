@@ -60,7 +60,7 @@ struct timeslot_skb_q {
 /*
  * Per flow structure, dynamically allocated
  */
-struct timeslot_dst {
+struct tsq_dst {
 	u64		src_dst_key;		/* flow identifier */
 	struct rb_node	fp_node; 	/* anchor in fp_root[] trees */
 	struct list_head skb_qs;	/* a queue for each timeslot */
@@ -75,7 +75,7 @@ struct rcu_hash_tbl_cleanup {
 /**
  *
  */
-struct fp_sched_data {
+struct tsq_sched_data {
 	/* configuration paramters */
 	u8		hash_tbl_log;				/* log number of hash buckets */
 	u32		tslot_mul;					/* mul to calculate timeslot from nsec */
@@ -132,14 +132,14 @@ static struct proc_dir_entry *tsq_proc_entry;
 static struct kmem_cache *timeslot_dst_cachep __read_mostly;
 static struct kmem_cache *timeslot_skb_q_cachep __read_mostly;
 
-static int tsq_proc_init(struct fp_sched_data *q, struct tsq_ops *ops);
-static void tsq_proc_cleanup(struct fp_sched_data *q);
+static int tsq_proc_init(struct tsq_sched_data *q, struct tsq_ops *ops);
+static void tsq_proc_cleanup(struct tsq_sched_data *q);
 
-static inline struct fp_sched_data *priv_to_sched_data(void *priv) {
-	return (struct fp_sched_data *)((char *)priv - QDISC_ALIGN(sizeof(struct fp_sched_data)));
+static inline struct tsq_sched_data *priv_to_sched_data(void *priv) {
+	return (struct tsq_sched_data *)((char *)priv - QDISC_ALIGN(sizeof(struct tsq_sched_data)));
 }
-static inline void *sched_data_to_priv(struct fp_sched_data *q) {
-	return (char *)q + QDISC_ALIGN(sizeof(struct fp_sched_data));
+static inline void *sched_data_to_priv(struct tsq_sched_data *q) {
+	return (char *)q + QDISC_ALIGN(sizeof(struct tsq_sched_data));
 }
 
 /* hashes a flow key into a u32, for lookup in the hash tables */
@@ -212,12 +212,12 @@ static void skb_q_append(struct timeslot_skb_q *queue,
  *     If create_if_missing is true, creates a new flow and returns it.
  *     Otherwise, returns NULL.
  */
-static struct timeslot_dst *dst_lookup(struct fp_sched_data *q, u64 src_dst_key,
+static struct tsq_dst *dst_lookup(struct tsq_sched_data *q, u64 src_dst_key,
 		bool create_if_missing)
 {
 	struct rb_node **p, *parent;
 	struct rb_root *root;
-	struct timeslot_dst *dst;
+	struct tsq_dst *dst;
 	u32 skb_hash;
 
 	/* get the key's hash */
@@ -230,7 +230,7 @@ static struct timeslot_dst *dst_lookup(struct fp_sched_data *q, u64 src_dst_key,
 	while (*p) {
 		parent = *p;
 
-		dst = container_of(parent, struct timeslot_dst, fp_node);
+		dst = container_of(parent, struct tsq_dst, fp_node);
 		if (dst->src_dst_key == src_dst_key)
 			return dst;
 
@@ -277,7 +277,7 @@ static inline u64 get_mac(struct sk_buff *skb)
 }
 
 /* returns the flow for the given packet if it is a hi_prio packet, o/w returns NULL */
-static struct timeslot_skb_q *classify_hi_prio(struct sk_buff *skb, struct fp_sched_data *q)
+static struct timeslot_skb_q *classify_hi_prio(struct sk_buff *skb, struct tsq_sched_data *q)
 {
 	__be16 proto = skb->protocol;
 	struct flow_keys keys;
@@ -355,7 +355,7 @@ cannot_classify:
 }
 
 /* returns the flow for the given packet, allocates a new flow if needed */
-static struct timeslot_dst *classify_data(struct sk_buff *skb, struct fp_sched_data *q)
+static struct tsq_dst *classify_data(struct sk_buff *skb, struct tsq_sched_data *q)
 {
 	u64 src_dst_key;
 	u64 masked_mac;
@@ -378,7 +378,7 @@ static struct timeslot_dst *classify_data(struct sk_buff *skb, struct fp_sched_d
 /* enqueue packet to the qdisc (part of the qdisc api) */
 static int tsq_enqueue(struct sk_buff *skb, struct Qdisc *sch)
 {
-	struct fp_sched_data *q = qdisc_priv(sch);
+	struct tsq_sched_data *q = qdisc_priv(sch);
 	struct timeslot_skb_q *skb_q;
 
 	skb_q = classify_hi_prio(skb, q);
@@ -414,8 +414,8 @@ static int tsq_enqueue(struct sk_buff *skb, struct Qdisc *sch)
 
 static void enqueue_single_skb(struct Qdisc *sch, struct sk_buff *skb)
 {
-	struct fp_sched_data *q = qdisc_priv(sch);
-	struct timeslot_dst *dst;
+	struct tsq_sched_data *q = qdisc_priv(sch);
+	struct tsq_dst *dst;
 	struct timeslot_skb_q *timeslot_q;
 	s64 cost;
 	bool created_new_timeslot = false;
@@ -483,7 +483,7 @@ enqueue_to_prequeue:
 static void enqueue_tasklet_func(unsigned long int param)
 {
 	struct Qdisc *sch = (struct Qdisc *)param;
-	struct fp_sched_data *q = qdisc_priv(sch);
+	struct tsq_sched_data *q = qdisc_priv(sch);
 	struct sk_buff *skb, *next;
 
 
@@ -509,10 +509,10 @@ static void enqueue_tasklet_func(unsigned long int param)
  */
 static void update_current_timeslot(struct Qdisc *sch, u64 now_real)
 {
-	struct fp_sched_data *q = qdisc_priv(sch);
+	struct tsq_sched_data *q = qdisc_priv(sch);
 	u64 next_nonempty;
 	u64 next_key;
-	struct timeslot_dst *f;
+	struct tsq_dst *f;
 	u64 tslot_advance;
 	u32 moved_timeslots = 0;
 	u64 now_monotonic = fp_monotonic_time_ns();
@@ -652,8 +652,8 @@ done:
 
 void tsq_admit_now(void *priv, u64 src_dst_key)
 {
-	struct fp_sched_data *q = priv_to_sched_data(priv);
-	struct timeslot_dst *dst;
+	struct tsq_sched_data *q = priv_to_sched_data(priv);
+	struct tsq_dst *dst;
 	struct timeslot_skb_q *timeslot_q;
 
 	/* find the mentioned destination */
@@ -701,7 +701,7 @@ void tsq_admit_now(void *priv, u64 src_dst_key)
 /* Extract packet from the queue (part of the qdisc API) */
 static struct sk_buff *tsq_dequeue(struct Qdisc *sch)
 {
-	struct fp_sched_data *q = qdisc_priv(sch);
+	struct tsq_sched_data *q = qdisc_priv(sch);
 	struct sk_buff *skb;
 
 	/* try hi_prio queue first */
@@ -741,11 +741,11 @@ out_got_skb:
 /* resets the state of the qdisc (part of qdisc API) */
 static void tsq_tc_reset(struct Qdisc *sch)
 {
-	struct fp_sched_data *q = qdisc_priv(sch);
+	struct tsq_sched_data *q = qdisc_priv(sch);
 	struct rb_root *root;
 	struct sk_buff *skb;
 	struct rb_node *p;
-	struct timeslot_dst *dst;
+	struct tsq_dst *dst;
 	struct timeslot_skb_q *timeslot_q, *next_q;
 	unsigned int idx;
 
@@ -768,7 +768,7 @@ static void tsq_tc_reset(struct Qdisc *sch)
 	for (idx = 0; idx < (1U << q->hash_tbl_log); idx++) {
 		root = &q->dst_hash_tbl[idx];
 		while ((p = rb_first(root)) != NULL) {
-			dst = container_of(p, struct timeslot_dst, fp_node);
+			dst = container_of(p, struct tsq_dst, fp_node);
 			rb_erase(p, root);
 
 			list_for_each_entry_safe(timeslot_q, next_q, &dst->skb_qs, list) {
@@ -794,13 +794,13 @@ static void tsq_tc_reset(struct Qdisc *sch)
  * Re-hashes flow to a hash table with a potentially different size.
  *   Performs garbage collection in the process.
  */
-static void rehash_dst_table(struct fp_sched_data *q,
+static void rehash_dst_table(struct tsq_sched_data *q,
 		      struct rb_root *old_array, u32 old_log,
 		      struct rb_root *new_array, u32 new_log)
 {
 	struct rb_node *op, **np, *parent;
 	struct rb_root *oroot, *nroot;
-	struct timeslot_dst *of, *nf;
+	struct tsq_dst *of, *nf;
 	u32 idx;
 	u32 skb_hash;
 
@@ -813,7 +813,7 @@ static void rehash_dst_table(struct fp_sched_data *q,
 			/* erase from old tree */
 			rb_erase(op, oroot);
 			/* find new cell in hash table */
-			of = container_of(op, struct timeslot_dst, fp_node);
+			of = container_of(op, struct tsq_dst, fp_node);
 			skb_hash = src_dst_key_hash(of->src_dst_key);
 			nroot = &new_array[skb_hash >> (32 - new_log)];
 
@@ -823,7 +823,7 @@ static void rehash_dst_table(struct fp_sched_data *q,
 			while (*np) {
 				parent = *np;
 
-				nf = container_of(parent, struct timeslot_dst, fp_node);
+				nf = container_of(parent, struct tsq_dst, fp_node);
 				FASTPASS_BUG_ON(nf->src_dst_key == of->src_dst_key);
 
 				if (nf->src_dst_key > of->src_dst_key)
@@ -840,7 +840,7 @@ static void rehash_dst_table(struct fp_sched_data *q,
 }
 
 /* Resizes the hash table to a new size, rehashing if necessary */
-static int tsq_tc_resize(struct fp_sched_data *q, u32 log)
+static int tsq_tc_resize(struct tsq_sched_data *q, u32 log)
 {
 	struct rb_root *array;
 	u32 idx;
@@ -870,11 +870,11 @@ static int tsq_tc_resize(struct fp_sched_data *q, u32 log)
  */
 void tsq_garbage_collect(void *priv)
 {
-	struct fp_sched_data *q = priv_to_sched_data(priv);
+	struct tsq_sched_data *q = priv_to_sched_data(priv);
 
 	struct rb_node *cur, *next;
 	struct rb_root *root;
-	struct timeslot_dst *dst;
+	struct tsq_dst *dst;
 	u32 idx;
 	u32 base_idx = src_dst_key_hash(fp_monotonic_time_ns()) >> (32 - q->hash_tbl_log);
 	u32 mask = (1U << q->hash_tbl_log) - 1;
@@ -890,7 +890,7 @@ void tsq_garbage_collect(void *priv)
 			cur = next;
 			next = rb_next(cur);
 
-			dst = container_of(cur, struct timeslot_dst, fp_node);
+			dst = container_of(cur, struct tsq_dst, fp_node);
 
 			/* can we garbage-collect this flow? */
 			if (list_empty(&dst->skb_qs)) {
@@ -924,7 +924,7 @@ static const struct nla_policy tsq_policy[TCA_FASTPASS_MAX + 1] = {
 
 /* change configuration (part of qdisc API) */
 static int tsq_tc_change(struct Qdisc *sch, struct nlattr *opt) {
-	struct fp_sched_data *q = qdisc_priv(sch);
+	struct tsq_sched_data *q = qdisc_priv(sch);
 	struct nlattr *tb[TCA_FASTPASS_MAX + 1];
 	int err = 0;
 	u32 fp_log;
@@ -1033,7 +1033,7 @@ static void tsq_rcu_free(struct rcu_head *head)
 /* destroy the qdisc (part of qdisc API) */
 static void tsq_tc_destroy(struct Qdisc *sch)
 {
-	struct fp_sched_data *q = qdisc_priv(sch);
+	struct tsq_sched_data *q = qdisc_priv(sch);
 
 	q->timeslot_ops->stop_qdisc(sched_data_to_priv(q));
 
@@ -1051,7 +1051,7 @@ static void tsq_tc_destroy(struct Qdisc *sch)
 /* initialize a new qdisc (part of qdisc API) */
 static int tsq_tc_init(struct Qdisc *sch, struct nlattr *opt)
 {
-	struct fp_sched_data *q = qdisc_priv(sch);
+	struct tsq_sched_data *q = qdisc_priv(sch);
 	struct tsq_qdisc_entry *reg = container_of(sch->ops, struct tsq_qdisc_entry, qdisc_ops);
 	u64 now_real = fp_get_time_ns();
 	u64 now_monotonic = fp_monotonic_time_ns();
@@ -1133,7 +1133,7 @@ out:
 /* dumps configuration of the qdisc to netlink skb (part of qdisc API) */
 static int tsq_tc_dump(struct Qdisc *sch, struct sk_buff *skb)
 {
-	struct fp_sched_data *q = qdisc_priv(sch);
+	struct tsq_sched_data *q = qdisc_priv(sch);
 	struct nlattr *opts;
 
 	opts = nla_nest_start(skb, TCA_OPTIONS);
@@ -1161,7 +1161,7 @@ nla_put_failure:
 
 static int tsq_proc_show(struct seq_file *seq, void *v)
 {
-	struct fp_sched_data *q = (struct fp_sched_data *)seq->private;
+	struct tsq_sched_data *q = (struct tsq_sched_data *)seq->private;
 	u64 now_real = fp_get_time_ns();
 	struct fp_sched_stat *scs = &q->stat;
 
@@ -1240,7 +1240,7 @@ static const struct file_operations tsq_proc_fops = {
 	.release = single_release,
 };
 
-static int tsq_proc_init(struct fp_sched_data *q, struct tsq_ops *ops)
+static int tsq_proc_init(struct tsq_sched_data *q, struct tsq_ops *ops)
 {
 	char fname[PROC_FILENAME_MAX_SIZE];
 	snprintf(fname, PROC_FILENAME_MAX_SIZE, "tsq/%s-%p", ops->id, q);
@@ -1250,7 +1250,7 @@ static int tsq_proc_init(struct fp_sched_data *q, struct tsq_ops *ops)
 	return 0; /* success */
 }
 
-static void tsq_proc_cleanup(struct fp_sched_data *q)
+static void tsq_proc_cleanup(struct tsq_sched_data *q)
 {
 	proc_remove(q->proc_entry);
 }
@@ -1271,7 +1271,7 @@ struct tsq_qdisc_entry *tsq_register_qdisc(struct tsq_ops *ops)
 	qops = &entry->qdisc_ops;
 	memset(qops, 0, sizeof(*qops));
 	memcpy(qops->id, ops->id, sizeof(qops->id));
-	qops->priv_size = QDISC_ALIGN(sizeof(struct fp_sched_data)) + ops->priv_size;
+	qops->priv_size = QDISC_ALIGN(sizeof(struct tsq_sched_data)) + ops->priv_size;
 	qops->enqueue	=	tsq_enqueue,
 	qops->dequeue	=	tsq_dequeue,
 	qops->peek		=	qdisc_peek_dequeued,
@@ -1313,7 +1313,7 @@ int tsq_init(void)
 
 	err = -ENOMEM;
 	timeslot_dst_cachep = kmem_cache_create("timeslot_flow_cache",
-					   sizeof(struct timeslot_dst),
+					   sizeof(struct tsq_dst),
 					   0, 0, NULL);
 	if (!timeslot_dst_cachep)
 		goto out_remove_proc;
@@ -1338,6 +1338,7 @@ out:
 void tsq_exit(void)
 {
 	pr_info("%s: begin\n", __func__);
+	proc_remove(tsq_proc_entry);
 	kmem_cache_destroy(timeslot_skb_q_cachep);
 	kmem_cache_destroy(timeslot_dst_cachep);
 	pr_info("%s: end\n", __func__);

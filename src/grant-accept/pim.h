@@ -16,6 +16,8 @@
 #include "../graph-algo/fp_ring.h"
 #include "../graph-algo/platform.h"
 
+#define SMALL_BIN_SIZE (10*MAX_NODES / N_PARTITIONS)
+
 /* packing of bitmasks into 8 bit words */
 #define PIM_BITMASKS_PER_8_BIT      8
 #define PIM_BITMASK_WORD(node)      (node >> 3)

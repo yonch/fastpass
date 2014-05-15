@@ -46,23 +46,40 @@ void mark_dst_allocated(struct pim_state *state, uint16_t dst) {
 }
 
 /**
+ * Flushes bin to state and allocates a new bin
+ */
+void _flush_backlog_now(struct pim_state *state, uint16_t partition_index)
+{
+
+}
+
+/**
+ * Flush the backlog to state
+ */
+void pim_flush_backlog(struct pim_state *state)
+{
+
+}
+
+/**
  * Increase the backlog from src to dst
  */
 void pim_add_backlog(struct pim_state *state, uint16_t src, uint16_t dst,
                      uint32_t amount)
 {
+        if (backlog_increase(&state->backlog, src, dst, amount,
+                             &state->stat) == false)
+                return; /* no need to enqueue */
+
         /* add to state->new_demands for the src partition
-           repurpose the 'metric' field for the amount */
+         * leave the 'metric' unused */
         uint16_t partition_index = PARTITION_OF(src);
-        enqueue_bin(state->new_demands[partition_index], src, dst, amount);
-}
+        enqueue_bin(state->new_demands[partition_index], src, dst, 0);
 
-/**
- * Flush the backlog to the pim_state
- */
-void pim_flush_backlog(struct pim_state *state)
-{
-
+        if (bin_size(state->new_demands[partition_index]) == SMALL_BIN_SIZE) {
+                adm_log_backlog_flush_bin_full(&state->stat);
+                _flush_backlog_now(state, partition_index);
+        }
 }
 
 /**
@@ -75,14 +92,8 @@ void process_new_requests(struct pim_state *state, uint16_t partition_index) {
         
         uint32_t i;
         for (i = 0; i < bin_size(new_demands); i++) {
-                /* check that this edge belongs to this partition */
+                /* add the edge to requests for this partition */
                 struct backlog_edge *edge = bin_get(new_demands, i);
-                assert(partition_index == PARTITION_OF(edge->src));
-
-                if (backlog_increase(&state->backlog, edge->src, edge->dst,
-                                     edge->metric, &state->stat) == false)
-                        continue; /* no need to add to requests */
-
                 ga_adj_add_edge_by_src(&state->requests_by_src[partition_index],
                                        PARTITION_IDX(edge->src), edge->dst);
         }

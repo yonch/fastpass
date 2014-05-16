@@ -16,6 +16,7 @@
 #include "../graph-algo/fp_ring.h"
 #include "../graph-algo/platform.h"
 
+#define NUM_ITERATIONS 3
 #define SMALL_BIN_SIZE (10*MAX_NODES / N_PARTITIONS)
 
 /* packing of bitmasks into 8 bit words */

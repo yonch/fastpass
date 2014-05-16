@@ -8,7 +8,6 @@
 #include "pim.h"
 #include "pim_admissible_traffic.h"
 
-#define NUM_ITERATIONS 3
 #define UNALLOCATED 0
 #define ALLOCATED   1
 

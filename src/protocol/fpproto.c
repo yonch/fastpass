@@ -892,7 +892,7 @@ void fpproto_dump_stats(struct fpproto_conn *conn, struct fp_proto_stat *stat)
 }
 
 void fpproto_init_conn(struct fpproto_conn *conn, struct fpproto_ops *ops,
-		void *ops_param, u64 rst_win_ns, u64 send_timeout_us)
+		void *ops_param, u64 rst_win_ns, u64 send_timeout)
 {
 	/* choose reset time */
 	do_proto_reset(conn, fp_get_time_ns(), false);
@@ -907,7 +907,7 @@ void fpproto_init_conn(struct fpproto_conn *conn, struct fpproto_ops *ops,
 
 	/* timeouts */
 	conn->rst_win_ns = rst_win_ns;
-	conn->send_timeout = send_timeout_us;
+	conn->send_timeout = send_timeout;
 }
 
 void fpproto_destroy_conn(struct fpproto_conn *conn)

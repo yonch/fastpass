@@ -2,6 +2,7 @@
 #include "path_sel_core.h"
 
 #include <rte_timer.h>
+#include "../graph-algo/fp_ring.h"
 #include "../graph-algo/path_selection.h"
 #include "control.h"
 

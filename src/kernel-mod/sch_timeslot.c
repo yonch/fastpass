@@ -1116,7 +1116,8 @@ static int tsq_tc_init(struct Qdisc *sch, struct nlattr *opt)
 		goto out_free_cleanup;
 
 	q->timeslot_ops = reg->ops;
-	err = reg->ops->new_qdisc(sched_data_to_priv(q));
+	err = reg->ops->new_qdisc(sched_data_to_priv(q), q->tslot_mul,
+			q->tslot_shift);
 	if (err)
 		goto out_free_hash_tbl;
 

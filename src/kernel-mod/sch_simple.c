@@ -19,7 +19,7 @@
 
 static struct tsq_qdisc_entry *simple_tsq_entry;
 
-static int simple_new_qdisc(void *priv) {
+static int simple_new_qdisc(void *priv, u32 tslot_mul, u32 tslot_shift) {
 	return 0;
 }
 static void simple_stop_qdisc(void *priv) {

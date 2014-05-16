@@ -7,7 +7,7 @@
 struct tsq_ops {
 	char			id[IFNAMSIZ];
 	int			priv_size;
-	int			(* new_qdisc)(void *priv);
+	int			(* new_qdisc)(void *priv, u32 tslot_mul, u32 tslot_shift);
 	void		(* stop_qdisc)(void *priv);
 	void		(* add_timeslot)(void *priv, u64 src_dst_key);
 };

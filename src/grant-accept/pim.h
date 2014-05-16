@@ -36,7 +36,9 @@ struct pim_state {
         uint8_t dst_endnodes[MAX_NODES / PIM_BITMASKS_PER_8_BIT];
         struct backlog backlog;
         struct bin *new_demands[N_PARTITIONS]; /* per src partition */
+        struct fp_ring *q_new_demands[N_PARTITIONS]; /* per src partition */
         struct fp_ring *q_admitted_out;
+        struct fp_mempool *bin_mempool;
         struct fp_mempool *admitted_traffic_mempool;
         struct admission_statistics stat;
 };
@@ -92,18 +94,23 @@ void pim_reset_state(struct pim_state *state)
  * Initialize pim state
  */
 static inline
-void pim_init_state(struct pim_state *state, struct fp_ring *q_admitted_out,
+void pim_init_state(struct pim_state *state, struct fp_ring **q_new_demands,
+                    struct fp_ring *q_admitted_out,
+                    struct fp_mempool *bin_mempool,
                     struct fp_mempool *admitted_traffic_mempool)
 {
         pim_reset_state(state);
-        uint16_t partition;
-        for (partition = 0; partition < N_PARTITIONS; partition++) {
-                /* TODO: use bins instead */
-                state->new_demands[partition] = create_bin(MAX_NODES);
-        }
 
         state->q_admitted_out = q_admitted_out;
+        state->bin_mempool = bin_mempool;
         state->admitted_traffic_mempool = admitted_traffic_mempool;
+
+        uint16_t partition;
+        for (partition = 0; partition < N_PARTITIONS; partition++) {
+                fp_mempool_get(bin_mempool, (void**) &state->new_demands[partition]);
+                init_bin(state->new_demands[partition]);
+                state->q_new_demands[partition] = q_new_demands[partition];
+        }
 }
 
 #endif /* PIM_H_ */

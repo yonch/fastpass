@@ -224,6 +224,7 @@ int main(int argc, char **argv)
     struct fp_ring *q_admitted_out;
     struct fp_mempool *bin_mempool;
     struct fp_mempool *admitted_traffic_mempool;
+    struct fp_ring *q_new_demands[NUM_BIN_RINGS];
 
     /* init queues */
     q_bin = fp_ring_create(2 * NUM_BINS_SHIFT);
@@ -232,16 +233,20 @@ int main(int argc, char **argv)
     bin_mempool = fp_mempool_create(BIN_MEMPOOL_SIZE, bin_num_bytes(SMALL_BIN_SIZE));
     admitted_traffic_mempool = fp_mempool_create(ADMITTED_TRAFFIC_MEMPOOL_SIZE,
     		sizeof(struct admitted_traffic));
+    for (i = 0; i < NUM_BIN_RINGS; i++) {
+            q_new_demands[i] = fp_ring_create(BIN_RING_SHIFT);
+            if (!q_new_demands[i]) exit(-1);
+    }
     if (!q_bin) exit(-1);
     if (!q_head) exit(-1);
     if (!q_admitted_out) exit(-1);
-	if (!bin_mempool) exit(-1);
-	if (!admitted_traffic_mempool) exit(-1);
+    if (!bin_mempool) exit(-1);
+    if (!admitted_traffic_mempool) exit(-1);
 
     /* init global status */
     status = generic_create_admissible_state(false, 0, 0, 0, q_head, q_admitted_out,
-    		bin_mempool, admitted_traffic_mempool,
-    		&q_bin);
+                                             bin_mempool, admitted_traffic_mempool,
+                                             &q_bin, &q_new_demands[0]);
     if (status == NULL) {
         printf("Error initializing admissible_status!\n");
         exit(-1);

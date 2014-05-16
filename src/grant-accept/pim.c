@@ -10,6 +10,7 @@
 #include <assert.h>
 
 #define MAX_TRIES 10
+#define RING_DEQUEUE_BURST_SIZE		256
 
 /**
  * Return true if the src is already allocated, false otherwise.
@@ -46,27 +47,39 @@ void mark_dst_allocated(struct pim_state *state, uint16_t dst) {
 }
 
 /**
- * Flushes bin to state and allocates a new bin
+ * Flushes the bin for a specific partition to state and allocates a new bin
  */
-void _flush_backlog_now(struct pim_state *state, uint16_t partition_index)
-{
+void _flush_backlog_now(struct pim_state *state, uint16_t partition_index) {
+        /* enqueue state->new_demands[partition_index] */
+        while (fp_ring_enqueue(state->q_new_demands[partition_index],
+                               state->new_demands[partition_index]) == -ENOBUFS); /* TODO: log this */
 
+        /* get a fresh bin for state->new_demands[partition_index] */
+        while (fp_mempool_get(state->bin_mempool,
+                              (void**) &state->new_demands[partition_index]) == -ENOENT)
+                adm_log_new_demands_bin_alloc_failed(&state->stat);
+
+        init_bin(state->new_demands[partition_index]);
 }
 
 /**
- * Flush the backlog to state
+ * Flush the backlog to state, for all partitions
  */
-void pim_flush_backlog(struct pim_state *state)
-{
-
+void pim_flush_backlog(struct pim_state *state) {
+        uint16_t partition;
+        for (partition = 0; partition < N_PARTITIONS; partition++) {
+                if (is_empty_bin(state->new_demands[partition]))
+                    continue;
+                _flush_backlog_now(state, partition);
+        }
+        adm_log_forced_backlog_flush(&state->stat);
 }
 
 /**
  * Increase the backlog from src to dst
  */
 void pim_add_backlog(struct pim_state *state, uint16_t src, uint16_t dst,
-                     uint32_t amount)
-{
+                     uint32_t amount) {
         if (backlog_increase(&state->backlog, src, dst, amount,
                              &state->stat) == false)
                 return; /* no need to enqueue */
@@ -83,23 +96,39 @@ void pim_add_backlog(struct pim_state *state, uint16_t src, uint16_t dst,
 }
 
 /**
- * Move new demands from 'new_demands' to the backlog struct. Also make sure
- * that they are included in requests_by_src
+ * Move a bin worth of demands from 'q_new_demands' to requests_by_src
  */
 static inline
-void process_new_requests(struct pim_state *state, uint16_t partition_index) {
-        struct bin *new_demands = state->new_demands[partition_index];
-        
+void process_incoming_bin(struct pim_state *state, uint16_t partition_index,
+                          struct bin *bin) {
         uint32_t i;
-        for (i = 0; i < bin_size(new_demands); i++) {
+        for (i = 0; i < bin_size(bin); i++) {
                 /* add the edge to requests for this partition */
-                struct backlog_edge *edge = bin_get(new_demands, i);
+                struct backlog_edge *edge = bin_get(bin, i);
                 ga_adj_add_edge_by_src(&state->requests_by_src[partition_index],
                                        PARTITION_IDX(edge->src), edge->dst);
         }
+}
 
-        /* mark bin as empty */
-        init_bin(new_demands);
+/**
+ * Move new demands from 'q_new_demands' to requests_by_src
+ */
+static inline
+void process_new_requests(struct pim_state *state, uint16_t partition_index) {
+        struct bin *bins[RING_DEQUEUE_BURST_SIZE];
+        int n, i;
+        uint32_t num_entries = 0;
+        uint32_t num_bins = 0;
+
+        n = fp_ring_dequeue_burst(state->q_new_demands[partition_index],
+                                  (void **) &bins[0], RING_DEQUEUE_BURST_SIZE);
+        for (i = 0; i < n; i++) {
+                num_entries += bin_size(bins[i]);
+                num_bins++;
+
+                process_incoming_bin(state, partition_index, bins[i]);
+                fp_mempool_put(state->bin_mempool, bins[i]);
+        }
 }
 
 /**

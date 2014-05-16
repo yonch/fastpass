@@ -58,8 +58,6 @@
 
 #define CLOCK_MOVE_RESET_THRESHOLD_TSLOTS	64
 
-#define FASTPASS_SCH_RETRANS_TIMEOUT_NS		(200000)
-
 #define FASTPASS_CTRL_SOCK_WMEM				(64*1024*1024)
 
 #define SHOULD_DUMP_FLOW_INFO				0
@@ -67,6 +65,43 @@ enum {
 	FLOW_UNQUEUED,
 	FLOW_REQUEST_QUEUE,
 };
+
+/* module parameters */
+static u32 req_cost = (2 << 20);
+module_param(req_cost, uint, 0444);
+MODULE_PARM_DESC(req_cost, "Cost of sending a request in ns, for request pacing");
+EXPORT_SYMBOL_GPL(req_cost);
+
+static u32 req_bucketlen = (4 * req_cost);
+module_param(req_bucketlen, uint, 0444);
+MODULE_PARM_DESC(req_bucketlen, "Max bucket size in ns, for request pacing");
+EXPORT_SYMBOL_GPL(req_bucketlen);
+
+static u32 req_min_gap = 1000;
+module_param(req_min_gap, uint, 0444);
+MODULE_PARM_DESC(req_min_gap, "ns to wait from when data arrives to sending request");
+EXPORT_SYMBOL_GPL(req_min_gap);
+
+static char *ctrl_addr = NULL;
+module_param(ctrl_addr, charp, 0444);
+MODULE_PARM_DESC(ctrl_addr, "IPv4 address of the controller");
+EXPORT_SYMBOL_GPL(ctrl_addr);
+static __be32 ctrl_addr_netorder;
+
+static u32 reset_window_us = 2e6; /* 2 seconds */
+module_param(reset_window_us, uint, 0444);
+MODULE_PARM_DESC(reset_window_us, "the maximum time discrepancy (in us) to consider a reset valid");
+EXPORT_SYMBOL_GPL(reset_window_us);
+
+static u32 retrans_timeout_ns = 200000;
+module_param(retrans_timeout_ns, uint, 0444);
+MODULE_PARM_DESC(retrans_timeout_ns, "how long to wait for an ACK before retransmitting request");
+EXPORT_SYMBOL_GPL(retrans_timeout_ns);
+
+static u32 update_timer_ns = 2048;
+module_param(update_timer_ns, uint, 0444);
+MODULE_PARM_DESC(update_timer_ns, "how often to perform periodic tasks");
+EXPORT_SYMBOL_GPL(update_timer_ns);
 
 /*
  * Per flow structure, dynamically allocated
@@ -85,31 +120,13 @@ struct fp_dst {
  */
 struct fp_sched_data {
 	/* configuration paramters */
-	u32		req_cost;					/* cost, in tokens, of a request */
-	u32		req_bucketlen;				/* the max number of tokens to burst */
-	u32		req_min_gap;				/* min delay between requests (ns) */
-	__be32	ctrl_addr_netorder;			/* IP of the controller, network byte order */
-	u32		reset_window_us;			/* time window of acceptable resets */
-	u32		send_timeout_us;			/* when to resend packets */
 	u32		tslot_mul;					/* mul to calculate timeslot from nsec */
 	u32		tslot_shift;				/* shift to calculate timeslot from nsec */
 
-	u32		update_timeslot_timer_ns;	/* every how many ns to update queues */
-
 	/* state */
-	struct rb_root	*flow_hash_tbl;		/* table of rb-trees of flows */
-
-	struct fp_dst	internal;			/* for regular queue */
-	u64				internal_free_time; /* approx time when internal will be free */
-	struct fp_dst	hi_prio;			/* for high prio traffic */
-
-	struct fp_dst	enqueue_queue;		/* for data packets to be classified to flows */
-	spinlock_t		enqueue_lock;		/* protect enqueue_queue */
-
-	struct fp_dst	prequeue;			/* a flow for packets that need to go into internal */
-	spinlock_t		prequeue_lock;
-
-	struct list_head unreq_flows; 		/* flows with unscheduled packets */
+	u16 unreq_flows[MAX_NODES]; 		/* flows with unscheduled packets */
+	u32 unreq_dsts_head;
+	u32 unreq_dsts_tail;
 
 	struct fp_window alloc_wnd;
 	u64		current_timeslot;
@@ -140,6 +157,7 @@ struct fp_sched_data {
 };
 
 static struct tsq_qdisc_entry *fastpass_tsq_entry;
+static struct proc_dir_entry *fastpass_proc_entry;
 
 static void handle_reset(void *param);
 
@@ -147,12 +165,6 @@ static inline struct fpproto_conn *fpproto_conn(struct fp_sched_data *q)
 {
 	struct fastpass_sock *fp = (struct fastpass_sock *)q->ctrl_sock->sk;
 	return &fp->conn;
-}
-
-/* hashes a flow key into a u32, for lookup in the hash tables */
-static inline u32 src_dst_key_hash(u64 src_dst_key) {
-	return jhash_2words((__be32)(src_dst_key >> 32),
-						 (__be32)src_dst_key, 0);
 }
 
 /**
@@ -167,26 +179,20 @@ static inline bool trigger_tx(struct fp_sched_data* q)
 
 void trigger_tx_voidp(void *param)
 {
-	struct Qdisc *sch = (struct Qdisc *)param;
-	struct fp_sched_data *q = qdisc_priv(sch);
+	struct fp_sched_data *q = (struct fp_sched_data *)param;
 	trigger_tx(q);
 }
 
 static int cancel_retrans_timer(void *param)
 {
-	struct Qdisc *sch = (struct Qdisc *)param;
-	struct fp_sched_data *q = qdisc_priv(sch);
-
+	struct fp_sched_data *q = (struct fp_sched_data *)param;
 	q->retrans_time = ~0ULL;
-
 	return 0;
 }
 
 static void set_retrans_timer(void *param, u64 when)
 {
-	struct Qdisc *sch = (struct Qdisc *)param;
-	struct fp_sched_data *q = qdisc_priv(sch);
-
+	struct fp_sched_data *q = (struct fp_sched_data *)param;
 	q->retrans_time = when;
 }
 
@@ -436,8 +442,7 @@ done:
  */
 static void handle_reset(void *param)
 {
-	struct Qdisc *sch = (struct Qdisc *)param;
-	struct fp_sched_data *q = qdisc_priv(sch);
+	struct fp_sched_data *q = (struct fp_sched_data *)param;
 
 	struct rb_node *cur, *next;
 	struct rb_root *root;
@@ -508,8 +513,7 @@ static void handle_reset(void *param)
 static void handle_alloc(void *param, u32 base_tslot, u16 *dst,
 		int n_dst, u8 *tslots, int n_tslots)
 {
-	struct Qdisc *sch = (struct Qdisc *)param;
-	struct fp_sched_data *q = qdisc_priv(sch);
+	struct fp_sched_data *q = (struct fp_sched_data *)param;
 	int i;
 	u8 spec;
 	int dst_ind;
@@ -643,8 +647,7 @@ static void handle_alloc(void *param, u32 base_tslot, u16 *dst,
 
 static void handle_areq(void *param, u16 *dst_and_count, int n)
 {
-	struct Qdisc *sch = (struct Qdisc *)param;
-	struct fp_sched_data *q = qdisc_priv(sch);
+	struct fp_sched_data *q = (struct fp_sched_data *)param;
 	struct fp_dst *f;
 	int i;
 	u16 dst;
@@ -704,8 +707,7 @@ static void handle_areq(void *param, u16 *dst_and_count, int n)
 
 static void handle_ack(void *param, struct fpproto_pktdesc *pd)
 {
-	struct Qdisc *sch = (struct Qdisc *)param;
-	struct fp_sched_data *q = qdisc_priv(sch);
+	struct fp_sched_data *q = (struct fp_sched_data *)param;
 	int i;
 	struct fp_dst *f;
 	u64 new_acked;
@@ -736,8 +738,7 @@ static void handle_ack(void *param, struct fpproto_pktdesc *pd)
 
 static void handle_neg_ack(void *param, struct fpproto_pktdesc *pd)
 {
-	struct Qdisc *sch = (struct Qdisc *)param;
-	struct fp_sched_data *q = qdisc_priv(sch);
+	struct fp_sched_data *q = (struct fp_sched_data *)param;
 	int i;
 	struct fp_dst *f;
 	u64 req_tslots;
@@ -854,7 +855,7 @@ static enum hrtimer_restart maintenance_timer_func(struct hrtimer *timer)
 	/* schedule tasklet to write request */
 	tasklet_schedule(&q->maintenance_tasklet);
 
-	hrtimer_forward_now(timer, ns_to_ktime(q->update_timeslot_timer_ns));
+	hrtimer_forward_now(timer, ns_to_ktime(update_timer_ns));
 	return HRTIMER_RESTART;
 }
 
@@ -902,9 +903,8 @@ struct fpproto_ops fastpass_sch_proto_ops = {
 };
 
 /* reconnects the control socket to the controller */
-static int reconnect_ctrl_socket(struct Qdisc *sch)
+static int reconnect_ctrl_socket(struct fp_sched_data *q)
 {
-	struct fp_sched_data *q = qdisc_priv(sch);
 	struct sock *sk;
 	int opt;
 	int rc;
@@ -942,15 +942,15 @@ static int reconnect_ctrl_socket(struct Qdisc *sch)
 	FASTPASS_BUG_ON(sk->sk_allocation != GFP_ATOMIC);
 
 	/* give socket a reference to this qdisc for watchdog */
-	fpproto_set_qdisc(sk, sch);
+	fpproto_set_qdisc(sk, q);
 
 	/* initialize the fastpass protocol */
 	fpproto_init_conn(fpproto_conn(q), &fastpass_sch_proto_ops, (void *)sch,
-			(u64)q->reset_window_us * NSEC_PER_USEC,
-			q->send_timeout_us);
+			(u64)reset_window_us * NSEC_PER_USEC,
+			send_timeout_us);
 
 	/* connect */
-	sock_addr.sin_addr.s_addr = q->ctrl_addr_netorder;
+	sock_addr.sin_addr.s_addr = ctrl_addr_netorder;
 	rc = kernel_connect(q->ctrl_sock, (struct sockaddr *)&sock_addr,
 			sizeof(sock_addr), 0);
 	if (rc != 0)
@@ -960,7 +960,7 @@ static int reconnect_ctrl_socket(struct Qdisc *sch)
 
 err_release:
 	FASTPASS_WARN("Error %d trying to connect to addr 0x%X (in netorder)\n",
-			rc, q->ctrl_addr_netorder);
+			rc, ctrl_addr_netorder);
 	sock_release(q->ctrl_sock);
 	q->ctrl_sock = NULL;
 	return rc;
@@ -1038,31 +1038,6 @@ static int fp_tc_change(struct Qdisc *sch, struct nlattr *opt) {
 		changed_tslot_len = true;
 	}
 
-	if (tb[TCA_FASTPASS_REQUEST_COST]) {
-		q->req_cost = nla_get_u32(tb[TCA_FASTPASS_REQUEST_COST]);
-		changed_pacer = true;
-	}
-
-	if (tb[TCA_FASTPASS_REQUEST_BUCKET]) {
-		q->req_bucketlen = nla_get_u32(tb[TCA_FASTPASS_REQUEST_BUCKET]);
-		changed_pacer = true;
-	}
-
-	if (tb[TCA_FASTPASS_REQUEST_GAP]) {
-		q->req_min_gap = nla_get_u32(tb[TCA_FASTPASS_REQUEST_GAP]);
-		changed_pacer = true;
-	}
-
-	if (tb[TCA_FASTPASS_CONTROLLER_IP]) {
-		q->ctrl_addr_netorder = nla_get_u32(tb[TCA_FASTPASS_CONTROLLER_IP]);
-		should_reconnect = true;
-	}
-
-	if (tb[TCA_FASTPASS_RST_WIN_USEC]) {
-		q->reset_window_us = nla_get_u32(tb[TCA_FASTPASS_RST_WIN_USEC]);
-		should_reconnect = true;
-	}
-
 	if (tb[TCA_FASTPASS_MISS_THRESHOLD]) {
 		q->miss_threshold = nla_get_u32(tb[TCA_FASTPASS_MISS_THRESHOLD]);
 	}
@@ -1075,27 +1050,13 @@ static int fp_tc_change(struct Qdisc *sch, struct nlattr *opt) {
 		q->max_preload = nla_get_u32(tb[TCA_FASTPASS_MAX_PRELOAD]);
 	}
 
-	if (tb[TCA_FASTPASS_UPDATE_TIMESLOT_TIMER_NS]) {
-		q->update_timeslot_timer_ns = nla_get_u32(tb[TCA_FASTPASS_UPDATE_TIMESLOT_TIMER_NS]);
-	}
-
 	/* TODO: when changing send_timeout, also change inside ctrl socket */
 
 	if (!err && (should_reconnect || !q->ctrl_sock))
-		err = reconnect_ctrl_socket(sch);
+		err = reconnect_ctrl_socket(q);
 
 	if (!err)
 		err = fp_tc_resize(q, fp_log);
-
-	if (!err && changed_pacer) {
-		bool was_trigerred = pacer_is_triggered(&q->request_pacer);
-		u64 now_monotonic = fp_monotonic_time_ns();
-		pacer_init_full(&q->request_pacer, now_monotonic, q->req_cost,
-				q->req_bucketlen, q->req_min_gap);
-
-		if (was_trigerred)
-			pacer_trigger(&q->request_pacer, now_monotonic);
-	}
 
 	if (!err && changed_tslot_len) {
 		u64 now_real = fp_get_time_ns();
@@ -1121,73 +1082,45 @@ static int fp_tc_change(struct Qdisc *sch, struct nlattr *opt) {
 	return err;
 }
 
-/* initialize a new qdisc (part of qdisc API) */
-static int fp_tc_init(struct Qdisc *sch, struct nlattr *opt)
+static int fpq_new_qdisc(void *priv, u32 tslot_mul, u32 tslot_shift)
 {
-	struct fp_sched_data *q = qdisc_priv(sch);
+	struct fp_sched_data *q = (struct fp_sched_data *)param;
+
 	u64 now_real = fp_get_time_ns();
 	u64 now_monotonic = fp_monotonic_time_ns();
-	struct tc_ratespec data_rate_spec ={
-#if LINUX_VERSION_CODE != KERNEL_VERSION(3,2,45)
-			.linklayer = TC_LINKLAYER_ETHERNET,
-#endif
-			.rate = 1e9/8,
-			.overhead = 24};
 	int err;
 
-	sch->limit			= 10000;
-	q->flow_plimit		= 100;
-	q->hash_tbl_log		= ilog2(1024);
-	psched_ratecfg_precompute(&q->data_rate, &data_rate_spec);
-	q->req_cost			= 2 << 20;
-	q->req_bucketlen	= 4 * q->req_cost;
-	q->req_min_gap		= 1000;
-	q->ctrl_addr_netorder = htonl(0x7F000001); /* need sensible default? */
-	q->reset_window_us	= 2e6; /* 2 seconds */
-	q->send_timeout_us	= FASTPASS_SCH_RETRANS_TIMEOUT_NS;
-	q->flow_hash_tbl	= NULL;
-	INIT_LIST_HEAD(&q->unreq_flows);
-	q->internal.src_dst_key = 0xD066F00DDEADBEEF;
-	q->hi_prio.src_dst_key = 0xABCDEEEEEEEEDCBA;
-	q->internal_free_time = now_monotonic;
-	q->tslot_mul		= 1;
-	q->tslot_shift		= 20;
-	q->miss_threshold	= 5;
-	q->max_dev_backlog_ns = (2 << 20);
-	q->max_preload		= 5;
-	q->update_timeslot_timer_ns = 2048;
+	q->unreq_dsts_head = q->unreq_dsts_tail = 0;
+	q->tslot_mul		= tslot_mul;
+	q->tslot_shift		= tslot_shift;
 
 
 	/* calculate timeslot from beginning of Epoch */
-	q->tslot_len_approx		= (1 << q->tslot_shift);
-	do_div(q->tslot_len_approx, q->tslot_mul);
 	q->current_timeslot = (now_real * q->tslot_mul) >> q->tslot_shift;
 	wnd_reset(&q->alloc_wnd, q->current_timeslot);
 
 	q->ctrl_sock		= NULL;
 
-	pacer_init_full(&q->request_pacer, now_monotonic, q->req_cost,
-			q->req_bucketlen, q->req_min_gap);
-	qdisc_watchdog_init(&q->watchdog, sch);
+	pacer_init_full(&q->request_pacer, now_monotonic, req_cost,
+			req_bucketlen, req_min_gap);
 
 	/* initialize retransmission timer */
 	q->retrans_time = ~0ULL;
 
 	tasklet_init(&q->maintenance_tasklet, &maintenance_tasklet_func, (unsigned long int)sch);
-	tasklet_init(&q->enqueue_tasklet, &enqueue_tasklet_func, (unsigned long int)sch);
 
-	if (opt) {
-		err = fp_tc_change(sch, opt);
-	} else {
-		err = reconnect_ctrl_socket(sch);
-		if (!err)
-			err = fp_tc_resize(q, q->hash_tbl_log);
-	}
+	err = reconnect_ctrl_socket(q);
+	if (err != 0)
+		goto out;
 
 	hrtimer_init(&q->maintenance_timer, CLOCK_MONOTONIC, HRTIMER_MODE_REL);
 	q->maintenance_timer.function = maintenance_timer_func;
-	hrtimer_start(&q->maintenance_timer, ns_to_ktime(q->update_timeslot_timer_ns),
+	hrtimer_start(&q->maintenance_timer, ns_to_ktime(update_timer_ns),
 			HRTIMER_MODE_REL);
+	return err;
+
+out:
+	pr_info("%s: error creating new qdisc err=%d\n", err);
 	return err;
 }
 
@@ -1276,7 +1209,7 @@ static int fp_tc_dump_stats(struct Qdisc *sch, struct gnet_dump *d)
 
 static int fastpass_proc_show(struct seq_file *seq, void *v)
 {
-	struct tsq_sched_data *q = (struct tsq_sched_data *)seq->private;
+	struct fpq_sched_data *q = (struct fpq_sched_data *)seq->private;
 	u64 now_real = fp_get_time_ns();
 	struct fp_sched_stat *scs = &q->stat;
 
@@ -1355,24 +1288,21 @@ static const struct file_operations fastpass_proc_fops = {
 	.release = single_release,
 };
 
-static int fastpass_proc_init(struct tsq_sched_data *q, struct tsq_ops *ops)
+static int fastpass_proc_init(struct fpq_sched_data *fpq, struct tsq_ops *ops)
 {
 	char fname[PROC_FILENAME_MAX_SIZE];
-	snprintf(fname, PROC_FILENAME_MAX_SIZE, "tsq/%s-%p", ops->id, q);
-	q->proc_entry = proc_create_data(fname, S_IRUGO, NULL, &fastpass_proc_fops, q);
-	if (q->proc_entry == NULL)
+	snprintf(fname, PROC_FILENAME_MAX_SIZE, "fastpass/%s-%p", ops->id, fpq);
+	fpq->proc_entry = proc_create_data(fname, S_IRUGO, NULL, &fastpass_proc_fops, fpq);
+	if (fpq->proc_entry == NULL)
 		return -1; /* error */
 	return 0; /* success */
 }
 
-static void tsq_proc_cleanup(struct tsq_sched_data *q)
+static void fastpass_proc_cleanup(struct fpq_sched_data *q)
 {
 	proc_remove(q->proc_entry);
 }
 
-static int fpq_new_qdisc(void *priv) {
-	return 0;
-}
 static void fpq_stop_qdisc(void *priv) {
 	return;
 }
@@ -1391,13 +1321,17 @@ static struct tsq_ops fastpass_tsq_ops __read_mostly = {
 
 static int __init fastpass_module_init(void)
 {
-	int ret = -ENOMEM;
+	int ret = -ENOSYS;
 
 	pr_info("%s: initializing\n", __func__);
 
+	fastpass_proc_entry = proc_mkdir("fastpass", NULL);
+	if (fastpass_proc_entry == NULL)
+		goto out;
+
 	ret = fpproto_register();
 	if (ret)
-		goto out;
+		goto out_remove_proc;
 
 	ret = tsq_init();
 	if (ret != 0)
@@ -1408,12 +1342,15 @@ static int __init fastpass_module_init(void)
 		goto out_exit;
 
 
+
 	pr_info("%s: success\n", __func__);
 	return 0;
 out_exit:
 	tsq_exit();
 out_unregister_fpproto:
 	fpproto_unregister();
+out_remove_proc:
+	proc_remove(fastpass_proc_entry);
 out:
 	pr_info("%s: failed, ret=%d\n", __func__, ret);
 	return ret;
@@ -1421,6 +1358,7 @@ out:
 
 static void __exit fastpass_module_exit(void)
 {
+	proc_remove(fastpass_proc_entry);
 	tsq_unregister_qdisc(fastpass_tsq_entry);
 	tsq_exit();
 	fpproto_unregister(); /* TODO: verify this is safe */

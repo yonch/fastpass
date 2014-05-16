@@ -72,6 +72,38 @@ struct rcu_hash_tbl_cleanup {
 	struct rcu_head rcu_head;
 };
 
+/* Scheduler statistics */
+struct tsq_sched_stat {
+	u64		gc_flows;
+	/* enqueue-related */
+	u64		ctrl_pkts;
+	u64 	ntp_pkts;
+	u64 	ptp_pkts;
+	u64		arp_pkts;
+	u64		igmp_pkts;
+	u64		ssh_pkts;
+	u64		data_pkts;
+	u64		classify_errors;
+	u64		above_plimit;
+	u64		allocation_errors;
+	u64		pkt_too_big;
+	/* dequeue-related */
+	u64		added_tslots;
+	u64		used_timeslots;
+	u64		missed_timeslots;
+	u64		flow_not_found_update;
+	u64		early_enqueue;
+	u64		late_enqueue1;
+	u64		late_enqueue2;
+	u64		late_enqueue3;
+	u64		late_enqueue4;
+	u64		backlog_too_high;
+	u64		clock_move_causes_reset;
+	/* alloc-related */
+	u64		unwanted_alloc;
+	u64		dst_not_found_admit_now;
+};
+
 /**
  *
  */
@@ -121,11 +153,9 @@ struct tsq_sched_data {
 	/* counters */
 	u32		flows;
 	u32		inactive_flows;  /* protected by fpproto_maintenance_lock */
-	u64		added_tslots;		/* total needed timeslots */
-	u64		used_tslots;
 
 	/* statistics */
-	struct fp_sched_stat stat;
+	struct tsq_sched_stat stat;
 };
 
 static struct proc_dir_entry *tsq_proc_entry;
@@ -399,8 +429,10 @@ static int tsq_enqueue(struct sk_buff *skb, struct Qdisc *sch)
 	/* this is a data packet */
 
 	/* enforce qdisc packet limit on data packets */
-	if (unlikely(sch->q.qlen >= sch->limit))
+	if (unlikely(sch->q.qlen >= sch->limit)) {
+		q->stat.above_plimit++;
 		return qdisc_drop(skb, sch);
+	}
 
 	spin_lock(&q->enqueue_lock);
 	skb_q_enqueue(&q->enqueue_skb_q, skb);
@@ -444,7 +476,7 @@ static void enqueue_single_skb(struct Qdisc *sch, struct sk_buff *skb)
 		skb_q_init(timeslot_q);
 		list_add_tail(&timeslot_q->list, &dst->skb_qs);
 		dst->credit = q->tslot_len_approx;
-		q->added_tslots++;
+		q->stat.added_tslots++;
 		created_new_timeslot = true;
 		src_dst_key = dst->src_dst_key;
 
@@ -591,7 +623,7 @@ begin:
 
 	/* statistics */
 	moved_timeslots++;
-	q->stat.sucessful_timeslots++;
+	q->stat.used_timeslots++;
 	if (next_nonempty > q->current_timeslot) {
 		q->stat.early_enqueue++;
 	} else {
@@ -661,7 +693,7 @@ void tsq_admit_now(void *priv, u64 src_dst_key)
 	dst = dst_lookup(q, src_dst_key, false);
 	if (unlikely(dst == NULL)) {
 		FASTPASS_WARN("couldn't find flow 0x%llX from alloc.\n", src_dst_key);
-		q->stat.alloc_flow_not_found++;
+		q->stat.dst_not_found_admit_now++;
 		return;
 	}
 
@@ -682,7 +714,7 @@ void tsq_admit_now(void *priv, u64 src_dst_key)
 		dst->credit = 0;
 		q->inactive_flows++;
 	}
-	q->used_tslots++;
+	q->stat.used_timeslots++;
 	spin_unlock(&q->hash_tbl_lock);
 
 	/* put in prequeue */
@@ -785,8 +817,6 @@ static void tsq_tc_reset(struct Qdisc *sch)
 	wnd_reset(&q->alloc_wnd, q->current_timeslot);
 	q->flows			= 0;
 	q->inactive_flows	= 0;
-	q->added_tslots		= 0;
-	q->used_tslots		= 0;
 	q->next_zero_queue_time = fp_monotonic_time_ns();
 }
 
@@ -1090,8 +1120,6 @@ static int tsq_tc_init(struct Qdisc *sch, struct nlattr *opt)
 
 	q->flows			= 0;
 	q->inactive_flows	= 0;
-	q->added_tslots		= 0;
-	q->used_tslots		= 0;
 
 	qdisc_watchdog_init(&q->watchdog, sch);
 	q->qdisc = sch;
@@ -1164,7 +1192,7 @@ static int tsq_proc_show(struct seq_file *seq, void *v)
 {
 	struct tsq_sched_data *q = (struct tsq_sched_data *)seq->private;
 	u64 now_real = fp_get_time_ns();
-	struct fp_sched_stat *scs = &q->stat;
+	struct tsq_sched_stat *scs = &q->stat;
 
 	/* time */
 	seq_printf(seq, "  fp_sched_data *p = %p ", q);
@@ -1179,16 +1207,13 @@ static int tsq_proc_show(struct seq_file *seq, void *v)
 	/* timeslot statistics */
 	seq_printf(seq, "\n  horizon mask 0x%016llx",
 			wnd_get_mask(&q->alloc_wnd, q->current_timeslot+63));
-	seq_printf(seq, ", %llu added timeslots", q->added_tslots);
-	seq_printf(seq, ", %llu used", scs->sucessful_timeslots);
+	seq_printf(seq, ", %llu added timeslots", scs->added_tslots);
+	seq_printf(seq, ", %llu used", scs->used_timeslots);
 	seq_printf(seq, " (%llu %llu %llu %llu behind, %llu fast)", scs->late_enqueue4,
 			scs->late_enqueue3, scs->late_enqueue2, scs->late_enqueue1,
 			scs->early_enqueue);
 	seq_printf(seq, ", %llu missed", scs->missed_timeslots);
 	seq_printf(seq, ", %llu high_backlog", scs->backlog_too_high);
-	seq_printf(seq, ", %llu assumed_lost", scs->timeslots_assumed_lost);
-	seq_printf(seq, "  (%llu late", scs->alloc_too_late);
-	seq_printf(seq, ", %llu premature)", scs->alloc_premature);
 
 	/* egress packet statistics */
 	seq_printf(seq, "\n  enqueued %llu ctrl", scs->ctrl_pkts);
@@ -1198,7 +1223,7 @@ static int tsq_proc_show(struct seq_file *seq, void *v)
 	seq_printf(seq, ", %llu igmp", scs->igmp_pkts);
 	seq_printf(seq, ", %llu ssh", scs->ssh_pkts);
 	seq_printf(seq, ", %llu data", scs->data_pkts);
-	seq_printf(seq, ", %llu flow_plimit", scs->flows_plimit);
+	seq_printf(seq, ", %llu above_plimit", scs->above_plimit);
 	seq_printf(seq, ", %llu too big", scs->pkt_too_big);
 
 	/* error statistics */
@@ -1210,17 +1235,15 @@ static int tsq_proc_show(struct seq_file *seq, void *v)
 	if (scs->flow_not_found_update)
 		seq_printf(seq, "\n  %llu flow could not be found in update_current_tslot!",
 				scs->flow_not_found_update);
-	if (scs->req_alloc_errors)
-		seq_printf(seq, "\n  %llu could not allocate pkt_desc for request", scs->req_alloc_errors);
+	if (scs->dst_not_found_admit_now)
+		seq_printf(seq, "\n  %llu flow could not be found in timeslot_admit_now",
+				scs->dst_not_found_admit_now);
 
 	/* warnings */
 	seq_printf(seq, "\n warnings:");
 	if (scs->unwanted_alloc)
 		seq_printf(seq, "\n  %llu timeslots allocated beyond the demand of the flow (could happen due to reset / controller timeouts)",
 				scs->unwanted_alloc);
-	if (scs->alloc_premature)
-		seq_printf(seq, "\n  %llu premature allocations (something wrong with time-sync?)\n",
-				scs->alloc_premature);
 	if (scs->clock_move_causes_reset)
 		seq_printf(seq, "\n  %llu large clock moves caused resets",
 				scs->clock_move_causes_reset);

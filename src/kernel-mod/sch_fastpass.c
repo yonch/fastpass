@@ -71,7 +71,7 @@ module_param(req_cost, uint, 0444);
 MODULE_PARM_DESC(req_cost, "Cost of sending a request in ns, for request pacing");
 EXPORT_SYMBOL_GPL(req_cost);
 
-static u32 req_bucketlen = (4 * req_cost);
+static u32 req_bucketlen = 4 * (2 << 20); /* 4 * req_cost */
 module_param(req_bucketlen, uint, 0444);
 MODULE_PARM_DESC(req_bucketlen, "Max bucket size in ns, for request pacing");
 EXPORT_SYMBOL_GPL(req_bucketlen);
@@ -225,22 +225,22 @@ static void set_retrans_timer(void *param, u64 when)
 	hrtimer_start(&q->retrans_timer, ns_to_ktime(when), HRTIMER_MODE_ABS);
 }
 
-static inline bool dst_is_unreq(struct fp_sched_data *q, u32 dst_ind)
+static inline bool dst_is_unreq(struct fp_dst *dst)
 {
-	return (q->dsts[dst_ind].state != FLOW_UNQUEUED);
+	return (dst->state != FLOW_UNQUEUED);
 }
 
 /**
  * Enqueues flow to the request queue, if it's not already in the retransmit
  *    queue
  */
-static void unreq_dsts_enqueue(struct fp_sched_data *q, u32 dst_ind)
+static void unreq_dsts_enqueue(struct fp_sched_data *q, u32 dst_id)
 {
-	FASTPASS_BUG_ON(q->dsts[dst_ind].state == FLOW_REQUEST_QUEUE);
+	FASTPASS_BUG_ON(q->dsts[dst_id].state == FLOW_REQUEST_QUEUE);
 
 	/* enqueue */
-	q->unreq_flows[q->unreq_dsts_tail++] = dst_ind;
-	q->dsts[dst_ind].state = FLOW_REQUEST_QUEUE;
+	q->unreq_flows[q->unreq_dsts_tail++] = dst_id;
+	q->dsts[dst_id].state = FLOW_REQUEST_QUEUE;
 
 	/* update request timer if necessary */
 	if (trigger_tx(q))
@@ -249,7 +249,7 @@ static void unreq_dsts_enqueue(struct fp_sched_data *q, u32 dst_ind)
 
 static bool unreq_dsts_is_empty(struct fp_sched_data* q)
 {
-	return q->unreq_dsts_head = q->unreq_dsts_tail;
+	return q->unreq_dsts_head == q->unreq_dsts_tail;
 }
 
 static u32 unreq_dsts_dequeue(struct fp_sched_data* q)
@@ -280,14 +280,15 @@ void flow_inc_used(struct fp_sched_data *q, struct fp_dst* f, u64 amount) {
  *   Maintains the necessary invariants, e.g. adds the flow to the unreq_flows
  *   list if necessary
  */
-static void flow_inc_demand(struct fp_sched_data *q, struct fp_dst *f, u64 amount)
+static void flow_inc_demand(struct fp_sched_data *q, u32 dst_id, u64 amount)
 {
-	f->demand_tslots += amount;
+	struct fp_dst *dst = &q->dsts[dst_id];
+	dst->demand_tslots += amount;
 	q->demand_tslots += amount;
 
-	if (!dst_is_unreq(f))
+	if (!dst_is_unreq(dst))
 		/* flow not on scheduling queue yet, enqueue */
-		unreq_dsts_enqueue(q, f);
+		unreq_dsts_enqueue(q, dst_id);
 }
 
 /**
@@ -300,7 +301,7 @@ static void handle_reset(void *param)
 
 	struct fp_dst *dst;
 	u32 idx;
-	u32 dst_ind;
+	u32 dst_id;
 	u32 mask = MAX_NODES - 1;
 	u32 base_idx = src_dst_key_hash(fp_monotonic_time_ns()) & mask;
 
@@ -318,8 +319,8 @@ static void handle_reset(void *param)
 		/* we start from a pseudo-random index 'base_idx' to have less
 		 * discrimination towards the lower idx in unreq_dsts_enqueue, however
 		 * this is not a perfectly fair scheme */
-		dst_ind = (idx + base_idx) & mask;
-		dst = &q->dsts[dst_ind];
+		dst_id = (idx + base_idx) & mask;
+		dst = &q->dsts[dst_id];
 
 		/* if flow was empty anyway, nothing more to do */
 		if (likely(dst->demand_tslots == dst->used_tslots))
@@ -335,11 +336,11 @@ static void handle_reset(void *param)
 		q->demand_tslots += dst->demand_tslots;
 
 		fp_debug("rebased flow 0x%04llX, new demand %llu timeslots\n",
-				dst_ind, dst->demand_tslots);
+				dst_id, dst->demand_tslots);
 
 		/* add flow to request queue if it's not already there */
 		if (dst->state == FLOW_UNQUEUED)
-			unreq_dsts_enqueue(q, dst_ind);
+			unreq_dsts_enqueue(q, dst_id);
 	}
 }
 
@@ -512,7 +513,7 @@ static void handle_areq(void *param, u16 *dst_and_count, int n)
 			q->stat.timeslots_assumed_lost += n_lost;
 
 			flow_inc_used(q, dst, n_lost);
-			flow_inc_demand(q, dst, n_lost);
+			flow_inc_demand(q, dst_id, n_lost);
 		}
 	}
 }
@@ -539,7 +540,7 @@ static void handle_ack(void *param, struct fpproto_pktdesc *pd)
 					delta, dst->src_dst_key, new_acked);
 
 			/* the demand-limiting window might be in effect, re-enqueue flow */
-			if (unlikely((!dst_is_unreq(dst_id))
+			if (unlikely((!dst_is_unreq(dst))
 					&& (dst->requested_tslots != dst->demand_tslots)))
 				unreq_dsts_enqueue(q, dst_id);
 		}
@@ -566,7 +567,7 @@ static void handle_neg_ack(void *param, struct fpproto_pktdesc *pd)
 		}
 
 		/* add to retransmit queue */
-		if (!dst_is_unreq(q, dst_id))
+		if (!dst_is_unreq(dst))
 			unreq_dsts_enqueue(q, dst_id);
 
 		fp_debug("nack for request of %llu for flow 0x%04llX (%llu acked), added to retransmit queue\n",
@@ -810,7 +811,7 @@ static void dump_flow_info(struct seq_file *seq, struct fp_sched_data *q,
 		bool only_active)
 {
 	struct fp_dst *dst;
-	u32 dst_ind;
+	u32 dst_id;
 	struct fp_dst *dst;
 	u32 mask = MAX_NODES - 1;
 	u32 base_idx = src_dst_key_hash(fp_monotonic_time_ns()) & mask;
@@ -818,15 +819,15 @@ static void dump_flow_info(struct seq_file *seq, struct fp_sched_data *q,
 
 	printk(KERN_DEBUG "fastpass flows (only_active=%d):\n", only_active);
 
-	for (idx = 0; dst_ind < MAX_NODES; dst_ind++) {
-		dst = &q->dsts[dst_ind];
+	for (dst_id = 0; dst_id < MAX_NODES; dst_id++) {
+		dst = &q->dsts[dst_id];
 
 		if (dst->demand_tslots == dst->used_tslots && only_active)
 			continue;
 
 		num_printed++;
 		printk(KERN_DEBUG "flow 0x%04llX demand %llu requested %llu acked %llu alloc %llu used %llu state %d\n",
-				dst_ind, dst->demand_tslots, dst->requested_tslots,
+				dst_id, dst->demand_tslots, dst->requested_tslots,
 				dst->acked_tslots, dst->alloc_tslots, dst->used_tslots,
 				dst->state);
 	}
@@ -1068,11 +1069,11 @@ static void fpq_stop_qdisc(void *priv) {
 	fastpass_proc_cleanup(q);
 }
 
-static void fpq_add_timeslot(void *priv, u64 src_dst_key)
+static void fpq_add_timeslot(void *priv, u64 dst_id)
 {
 	struct fp_sched_data *q = (struct fp_sched_data *)priv;
 	spin_lock_irq(&q->conn_lock);
-	flow_inc_demand(priv, src_dst_key, 1);
+	flow_inc_demand(priv, dst_id, 1);
 	spin_unlock_irq(&q->conn_lock);
 }
 

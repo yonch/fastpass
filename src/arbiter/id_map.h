@@ -7,7 +7,7 @@
 
 #include "ccan/hash/hash.h"
 #include "ccan/htable/htable.h"
-#include "../graph-algo/admissible_structures.h"
+#include "../protocol/topology.h"
 
 #include <inttypes.h>
 

@@ -16,7 +16,6 @@
 #include "admission_log.h"
 #include "../protocol/fpproto.h"
 #include "../protocol/platform.h"
-#include "../graph-algo/admissible_structures.h"
 #include "../protocol/stat_print.h"
 
 #define MAX_FILENAME_LEN 256

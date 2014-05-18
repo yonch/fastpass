@@ -828,7 +828,7 @@ int fpproto_encode_packet(struct fpproto_pktdesc *pd, u8 *pkt, u32 max_len,
 		memcpy(curp, pd->tslot_desc, pd->alloc_tslot);
 		curp += pd->alloc_tslot;
 	}
-	(void) i; (void) areq; (void)conn; (void)max_len; /* TODO, fix this better */
+	(void) i; (void) areq; (void)max_len; /* TODO, fix this better */
 #endif
 
 	/* Must encode the A-REQ *after* allocations for correct endnode handling */

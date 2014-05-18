@@ -1195,7 +1195,7 @@ static int tsq_proc_show(struct seq_file *seq, void *v)
 	struct tsq_sched_stat *scs = &q->stat;
 
 	/* time */
-	seq_printf(seq, "  fp_sched_data *p = %p ", q);
+	seq_printf(seq, "  tsq_sched_data *p = %p ", q);
 	seq_printf(seq, ", timestamp 0x%llX ", now_real);
 	seq_printf(seq, ", timeslot 0x%llX", q->current_timeslot);
 

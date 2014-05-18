@@ -33,7 +33,7 @@
 #define BIN_MASK_SIZE		((NUM_BINS + BATCH_SIZE + 63) / 64)
 
 // Data structures associated with one allocation core
-struct admission_core_state {
+struct seq_admission_core_state {
 	struct bin *new_request_bins[NUM_BINS + BATCH_SIZE]; // pool of backlog bins for incoming requests
 	uint64_t non_empty_bins[BIN_MASK_SIZE];
 	uint64_t allowed_bins[BIN_MASK_SIZE];
@@ -46,7 +46,7 @@ struct admission_core_state {
 
 // Tracks status for admissible traffic (last send time and demand for all flows, etc.)
 // over the lifetime of a controller
-struct admissible_status {
+struct seq_admissible_status {
     bool oversubscribed;
     uint16_t out_of_boundary_capacity;
     uint16_t inter_rack_capacity;  // Only valid if oversubscribed is true
@@ -59,16 +59,16 @@ struct admissible_status {
     struct fp_mempool *bin_mempool;
     struct fp_mempool *core_bin_mempool;
     struct fp_mempool *admitted_traffic_mempool;
-    struct admission_core_state cores[ALGO_N_CORES];
+    struct seq_admission_core_state cores[ALGO_N_CORES];
     struct fp_ring *q_bin[ALGO_N_CORES];
     struct admission_statistics stat;
 };
 
 // Initialize all timeslots and demands to zero
 static inline
-void reset_admissible_status(struct admissible_status *status, bool oversubscribed,
-                             uint16_t inter_rack_capacity, uint16_t out_of_boundary_capacity,
-                             uint16_t num_nodes)
+void seq_reset_admissible_status(struct seq_admissible_status *status, bool oversubscribed,
+                                 uint16_t inter_rack_capacity, uint16_t out_of_boundary_capacity,
+                                 uint16_t num_nodes)
 {
     assert(status != NULL);
 
@@ -99,8 +99,8 @@ uint32_t get_status_index(uint16_t src, uint16_t dst) {
 // Initializes data structures associated with one allocation core for
 // a new batch of processing
 static inline
-void alloc_core_reset(struct admission_core_state *core,
-                          struct admissible_status *status) {
+void alloc_core_reset(struct seq_admission_core_state *core,
+                      struct seq_admissible_status *status) {
     assert(core != NULL);
 
     uint16_t i;
@@ -124,11 +124,11 @@ void alloc_core_reset(struct admission_core_state *core,
  * Returns: 0 if successful, -1 on error.
  * @note: doesn't clean up memory on error - may leak!
  */
-static inline int alloc_core_init(struct admissible_status *status,
-		uint32_t core_index, uint64_t timeslot)
+static inline int alloc_core_init(struct seq_admissible_status *status,
+                                  uint32_t core_index, uint64_t timeslot)
 {
 	int j;
-	struct admission_core_state* core = &status->cores[core_index];
+	struct seq_admission_core_state* core = &status->cores[core_index];
 
 	for (j = 0; j < NUM_BINS + BATCH_SIZE; j++) {
 		core->new_request_bins[j] = create_bin(LARGE_BIN_SIZE);
@@ -154,20 +154,20 @@ static inline int alloc_core_init(struct admissible_status *status,
  * Initializes an already-allocated struct admissible_status.
  */
 static inline
-int init_admissible_status(struct admissible_status *status,
-                            bool oversubscribed, uint16_t inter_rack_capacity,
-                            uint16_t out_of_boundary_capacity, uint16_t num_nodes,
-                            struct fp_ring *q_head, struct fp_ring *q_admitted_out,
-                            struct fp_mempool *bin_mempool,
-                            struct fp_mempool *admitted_traffic_mempool,
-                            struct fp_ring **q_bin)
+int seq_init_admissible_status(struct seq_admissible_status *status,
+                               bool oversubscribed, uint16_t inter_rack_capacity,
+                               uint16_t out_of_boundary_capacity, uint16_t num_nodes,
+                               struct fp_ring *q_head, struct fp_ring *q_admitted_out,
+                               struct fp_mempool *bin_mempool,
+                               struct fp_mempool *admitted_traffic_mempool,
+                               struct fp_ring **q_bin)
 {
     assert(status != NULL);
     uint32_t i;
     int rc;
 
-    reset_admissible_status(status, oversubscribed, inter_rack_capacity,
-                            out_of_boundary_capacity, num_nodes);
+    seq_reset_admissible_status(status, oversubscribed, inter_rack_capacity,
+                                out_of_boundary_capacity, num_nodes);
 
     status->q_head = q_head;
     status->q_admitted_out = q_admitted_out;
@@ -191,26 +191,24 @@ int init_admissible_status(struct admissible_status *status,
  * Returns an initialized struct admissible_status, or NULL on error.
  */
 static inline
-struct admissible_status *create_admissible_status(bool oversubscribed,
-                                                   uint16_t inter_rack_capacity,
-                                                   uint16_t out_of_boundary_capacity,
-                                                   uint16_t num_nodes,
-                                                   struct fp_ring *q_head,
-                                                   struct fp_ring *q_admitted_out,
-                                                   struct fp_mempool *head_bin_mempool,
-                                                   struct fp_mempool *admitted_traffic_mempool,
-                                                   struct fp_ring **q_bin)
+struct seq_admissible_status *
+seq_create_admissible_status(bool oversubscribed, uint16_t inter_rack_capacity,
+                             uint16_t out_of_boundary_capacity, uint16_t num_nodes,
+                             struct fp_ring *q_head, struct fp_ring *q_admitted_out,
+                             struct fp_mempool *head_bin_mempool,
+                             struct fp_mempool *admitted_traffic_mempool,
+                             struct fp_ring **q_bin)
 {
-    struct admissible_status *status =
-    		fp_malloc("admissible_status", sizeof(struct admissible_status));
+    struct seq_admissible_status *status =
+            fp_malloc("seq_admissible_status", sizeof(struct seq_admissible_status));
 
     if (status == NULL)
     	return NULL;
 
-    init_admissible_status(status, oversubscribed, inter_rack_capacity,
-                           out_of_boundary_capacity, num_nodes, q_head,
-                           q_admitted_out, head_bin_mempool,
-                           admitted_traffic_mempool, q_bin);
+    seq_init_admissible_status(status, oversubscribed, inter_rack_capacity,
+                               out_of_boundary_capacity, num_nodes, q_head,
+                               q_admitted_out, head_bin_mempool,
+                               admitted_traffic_mempool, q_bin);
 
     return status;
 }

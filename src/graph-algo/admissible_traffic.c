@@ -23,7 +23,7 @@
  * Flushes bin to queue, and allocates a new bin
  */
 static inline __attribute__((always_inline))
-void core_flush_q_out(struct admission_core_state *core,
+void core_flush_q_out(struct seq_admission_core_state *core,
 		struct fp_ring *queue, struct fp_mempool *bin_mempool)
 {
 	/* enqueue status->new_backlogs */
@@ -38,7 +38,7 @@ void core_flush_q_out(struct admission_core_state *core,
 }
 
 static inline __attribute__((always_inline))
-void core_enqueue_to_q_out(struct admission_core_state *core,
+void core_enqueue_to_q_out(struct seq_admission_core_state *core,
 		struct fp_ring *queue_out, struct fp_mempool *bin_mempool,
 		uint16_t src, uint16_t dst, uint32_t metric)
 {
@@ -52,7 +52,7 @@ void core_enqueue_to_q_out(struct admission_core_state *core,
 }
 
 static inline __attribute__((always_inline))
-void core_enqueue_to_q_out_edge(struct admission_core_state *core,
+void core_enqueue_to_q_out_edge(struct seq_admission_core_state *core,
 		struct fp_ring *queue_out, struct fp_mempool *bin_mempool,
 		struct backlog_edge *edge)
 {
@@ -69,7 +69,7 @@ void core_enqueue_to_q_out_edge(struct admission_core_state *core,
  * Flushes bin to queue, and allocates a new bin
  */
 static inline __attribute__((always_inline))
-void _flush_backlog_now(struct admissible_status *status)
+void _flush_backlog_now(struct seq_admissible_status *status)
 {
 	/* enqueue status->new_demands */
 	while(fp_ring_enqueue(status->q_head, status->new_demands) == -ENOBUFS)
@@ -84,14 +84,14 @@ void _flush_backlog_now(struct admissible_status *status)
 }
 
 
-void flush_backlog(struct admissible_status *status) {
+void seq_flush_backlog(struct seq_admissible_status *status) {
 	if (unlikely(is_empty_bin(status->new_demands)))
 		return;
 	adm_log_forced_backlog_flush(&status->stat);
 	_flush_backlog_now(status);
 }
 
-void add_backlog(struct admissible_status *status,
+void seq_add_backlog(struct seq_admissible_status *status,
 		uint16_t src, uint16_t dst, uint32_t amount)
 {
 	if (backlog_increase(&status->backlog, src, dst, amount,
@@ -110,14 +110,14 @@ void add_backlog(struct admissible_status *status,
 }
 
 static inline __attribute__((always_inline))
-void set_bin_non_empty(struct admission_core_state *core, uint16_t bin_index)
+void set_bin_non_empty(struct seq_admission_core_state *core, uint16_t bin_index)
 {
 	asm("bts %1,%0" : "+m" (*(uint64_t *)&core->non_empty_bins[0]) : "r" (bin_index));
 }
 
 static inline __attribute__((always_inline))
-void incoming_bin_to_core(struct admissible_status *status,
-		struct admission_core_state *core, struct bin *bin)
+void incoming_bin_to_core(struct seq_admissible_status *status,
+		struct seq_admission_core_state *core, struct bin *bin)
 {
 	uint32_t n = bin_size(bin);
 	uint32_t i;
@@ -133,8 +133,8 @@ void incoming_bin_to_core(struct admissible_status *status,
 }
 
 static inline __attribute__((always_inline))
-void move_bin_to_q_out(struct admissible_status *status,
-		struct admission_core_state *core, struct fp_ring *queue_out,
+void move_bin_to_q_out(struct seq_admissible_status *status,
+		struct seq_admission_core_state *core, struct fp_ring *queue_out,
         struct fp_mempool *bin_mp_out, struct bin *bin)
 {
 	uint32_t n = bin_size(bin);
@@ -144,8 +144,8 @@ void move_bin_to_q_out(struct admissible_status *status,
 }
 
 static inline __attribute__((always_inline))
-void move_core_to_q_out(struct admissible_status *status,
-		struct admission_core_state *core, struct fp_ring *queue_out,
+void move_core_to_q_out(struct seq_admissible_status *status,
+		struct seq_admission_core_state *core, struct fp_ring *queue_out,
         struct fp_mempool *bin_mp_out)
 {
 	uint32_t bin_mask_ind;
@@ -173,8 +173,8 @@ void move_core_to_q_out(struct admissible_status *status,
  */
 static inline __attribute__((always_inline))
 bool try_allocation(uint16_t src, uint16_t dst, uint32_t metric,
-		struct admission_core_state *core,
-		struct admissible_status *status)
+		struct seq_admission_core_state *core,
+		struct seq_admissible_status *status)
 {
 	int32_t backlog;
     assert(core != NULL);
@@ -214,8 +214,8 @@ bool try_allocation(uint16_t src, uint16_t dst, uint32_t metric,
 }
 
 static inline __attribute__((always_inline))
-void try_allocation_bin(struct admission_core_state *core, uint64_t bin_index,
-                    struct fp_ring *queue_out, struct admissible_status *status,
+void try_allocation_bin(struct seq_admission_core_state *core, uint64_t bin_index,
+                    struct fp_ring *queue_out, struct seq_admissible_status *status,
                     struct fp_mempool *bin_mp_out)
 {
 	bool rc;
@@ -238,8 +238,8 @@ void try_allocation_bin(struct admission_core_state *core, uint64_t bin_index,
 }
 
 static inline __attribute__((always_inline))
-void try_allocation_core(struct admission_core_state *core,
-                    struct fp_ring *queue_out, struct admissible_status *status,
+void try_allocation_core(struct seq_admission_core_state *core,
+                    struct fp_ring *queue_out, struct seq_admissible_status *status,
                     struct fp_mempool *bin_mp_out)
 {
 	uint32_t bin_mask_ind;
@@ -269,8 +269,8 @@ void try_allocation_core(struct admission_core_state *core,
 
 // Sets the last send time for new requests based on the contents of status
 // and sorts them
-static inline void process_new_requests(struct admissible_status *status,
-                          struct admission_core_state *core,
+static inline void process_new_requests(struct seq_admissible_status *status,
+                          struct seq_admission_core_state *core,
                           uint16_t current_bin)
 {
     assert(status != NULL);
@@ -296,14 +296,13 @@ static inline void process_new_requests(struct admissible_status *status,
 // Determine admissible traffic for one timeslot from queue_in
 // Puts unallocated traffic in queue_out
 // Allocate BATCH_SIZE timeslots at once
-void get_admissible_traffic(struct admissible_status *status,
-								uint32_t core_index,
-								uint64_t first_timeslot, uint32_t tslot_mul,
-								uint32_t tslot_shift)
+void seq_get_admissible_traffic(struct seq_admissible_status *status,
+				uint32_t core_index, uint64_t first_timeslot,
+                                uint32_t tslot_mul, uint32_t tslot_shift)
 {
     assert(status != NULL);
 
-    struct admission_core_state *core = &status->cores[core_index];
+    struct seq_admission_core_state *core = &status->cores[core_index];
 
     struct fp_ring *queue_in = status->q_bin[core_index];
     struct fp_ring *queue_out = status->q_bin[(core_index + 1) % ALGO_N_CORES];
@@ -432,7 +431,7 @@ wrap_up:
 }
 
 // Reset state of all flows for which src is the sender
-void reset_sender(struct admissible_status *status, uint16_t src) {
+void seq_reset_sender(struct seq_admissible_status *status, uint16_t src) {
     assert(status != NULL);
 
     // Do not change last send timeslots

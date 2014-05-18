@@ -14,21 +14,20 @@
 #include <inttypes.h>
 
 // Increase the backlog from src to dst
-void add_backlog(struct admissible_status *status,
-                       uint16_t src, uint16_t dst,
-                       uint32_t amount);
+void seq_add_backlog(struct seq_admissible_status *status,
+                     uint16_t src, uint16_t dst,
+                     uint32_t amount);
 
 // Flushes the backlog into admissible_status
-void flush_backlog(struct admissible_status *status);
+void seq_flush_backlog(struct seq_admissible_status *status);
 
 // Determine admissible traffic for one timeslot from queue_in
-void get_admissible_traffic(struct admissible_status *status,
-								uint32_t core_index,
-								uint64_t first_timeslot, uint32_t tslot_mul,
-								uint32_t tslot_shift);
+void seq_get_admissible_traffic(struct seq_admissible_status *status,
+				uint32_t core_index, uint64_t first_timeslot,
+                                uint32_t tslot_mul, uint32_t tslot_shift);
 
 // Reset state of all flows for which src is the sender
-void reset_sender(struct admissible_status *status, uint16_t src);
+void seq_reset_sender(struct seq_admissible_status *status, uint16_t src);
 
 /**
  * Returns the bin index a flow last allocated at timeslot @last_allocated
@@ -72,7 +71,7 @@ uint16_t bin_index_from_timeslot(uint32_t last_allocated,
 static inline __attribute__((always_inline))
 uint32_t new_metric_after_alloc(uint16_t src, uint16_t dst, uint32_t old_metric,
 		uint16_t batch_timeslot,
-		struct admission_core_state *core, struct admissible_status *status)
+		struct seq_admission_core_state *core, struct seq_admissible_status *status)
 {
 	return core->current_timeslot + batch_timeslot;
 }
@@ -80,7 +79,7 @@ uint32_t new_metric_after_alloc(uint16_t src, uint16_t dst, uint32_t old_metric,
 static inline __attribute__((always_inline))
 uint32_t bin_after_alloc(uint16_t src, uint16_t dst, uint32_t metric,
 		uint16_t batch_timeslot,
-		struct admission_core_state *core, struct admissible_status *status)
+		struct seq_admission_core_state *core, struct seq_admissible_status *status)
 {
 	return NUM_BINS + batch_timeslot;
 }

@@ -153,6 +153,10 @@ struct fp_sched_data {
 	struct socket	*ctrl_sock;			/* socket to the controller */
 	struct qdisc_watchdog watchdog;
 
+	bool					is_destroyed;
+	struct fpproto_conn		conn;
+	spinlock_t 				conn_lock;
+
 	/* counters */
 	u32		flows;
 	u32		inactive_flows;  /* protected by fpproto_maintenance_lock */
@@ -169,12 +173,6 @@ struct fp_sched_data {
 
 static struct tsq_qdisc_entry *fastpass_tsq_entry;
 static struct proc_dir_entry *fastpass_proc_entry;
-
-static inline struct fpproto_conn *fpproto_conn(struct fp_sched_data *q)
-{
-	struct fastpass_sock *fp = (struct fastpass_sock *)q->ctrl_sock->sk;
-	return &fp->conn;
-}
 
 /**
  *  computes the time when next request should go out
@@ -482,7 +480,7 @@ static void handle_areq(void *param, u16 *dst_and_count, int n)
 						dst_id, count, dst->requested_tslots);
 				q->stat.alloc_report_larger_than_requested++;
 				/* This corrupts the status; will force a reset */
-				fpproto_force_reset(fpproto_conn(q));
+				fpproto_force_reset(&q->conn);
 				handle_reset((void *)q); /* manually call callback since fpproto won't call it */
 				return;
 			}
@@ -572,7 +570,7 @@ static void send_request(struct fp_sched_data *q)
 			n_unreq_dsts(q), q->demand_tslots - q->requested_tslots, now_monotonic,
 			pacer_next_event(&q->request_pacer),
 			(s64 )now_monotonic - (s64 )pacer_next_event(&q->request_pacer),
-			fpproto_conn(q)->next_seqno);
+			q->conn.next_seqno);
 	if(unreq_dsts_is_empty(q)) {
 		q->stat.request_with_empty_flowqueue++;
 		fp_debug("was called with no flows pending (could be due to bad packets?)\n");
@@ -582,14 +580,18 @@ static void send_request(struct fp_sched_data *q)
 	/* update request credits */
 	pacer_reset(&q->request_pacer);
 
+	spin_lock_irq(&q->conn_lock);
+	if (unlikely(q->is_destroyed == true))
+		goto out_conn_destroyed;
+	/* nack the tail of the outwnd if it has not been nacked or acked */
+	fpproto_prepare_to_send(&q->conn);
+	spin_unlock_irq(&q->conn_lock);
+
 	/* allocate packet descriptor */
 	kern_pd = fpproto_pktdesc_alloc();
 	if (!kern_pd)
 		goto alloc_err;
 	pd = &kern_pd->pktdesc;
-
-	/* nack the tail of the outwnd if it has not been nacked or acked */
-	fpproto_prepare_to_send(fpproto_conn(q));
 
 	pd->n_areq = 0;
 
@@ -619,7 +621,13 @@ static void send_request(struct fp_sched_data *q)
 	fp_debug("end: unreq_flows=%u, unreq_tslots=%llu\n",
 			n_unreq_dsts(q), q->demand_tslots - q->requested_tslots);
 
-	fpproto_commit_packet(fpproto_conn(q), pd, now_monotonic);
+	/* commit packet. need to prepare again in case state changed */
+	spin_lock_irq(&q->conn_lock);
+	if (unlikely(q->is_destroyed == true))
+		goto out_conn_destroyed;
+	fpproto_prepare_to_send(&q->conn);
+	fpproto_commit_packet(&q->conn, pd, now_monotonic);
+	spin_unlock_irq(&q->conn_lock);
 
 	/* let fpproto send the pktdesc */
 	fpproto_send_pktdesc(q->ctrl_sock->sk, kern_pd);
@@ -629,6 +637,11 @@ static void send_request(struct fp_sched_data *q)
 		/* have more requests to send */
 		trigger_tx(q);
 
+	return;
+
+out_conn_destroyed:
+	free_kernel_pktdesc_no_refcount(kern_pd);
+	spin_unlock_irq(&q->conn_lock);
 	return;
 
 alloc_err:
@@ -666,9 +679,7 @@ static void maintenance_tasklet_func(unsigned long int param)
 	/* now is also a good opportunity to send a request, if allowed */
 	if (pacer_is_triggered(&q->request_pacer) &&
 		time_after_eq64(now_monotonic, pacer_next_event(&q->request_pacer))) {
-		fpproto_maintenance_lock(q->ctrl_sock->sk);
 		send_request(q);
-		fpproto_maintenance_unlock(q->ctrl_sock->sk);
 	}
 
 }
@@ -680,9 +691,10 @@ static void retrans_tasklet_func(unsigned long int param)
 	struct socket *ctrl_sock;
 	rcu_read_lock_bh();
 
-	fpproto_maintenance_lock(q->ctrl_sock->sk);
-	fpproto_handle_timeout(fpproto_conn(q), now_monotonic);
-	fpproto_maintenance_unlock(q->ctrl_sock->sk);
+	spin_lock_irq(&q->conn_lock);
+	if (likely(q->is_destroyed == false))
+		fpproto_handle_timeout(&q->conn, now_monotonic);
+	spin_unlock_irq(&q->conn_lock);
 }
 
 static enum hrtimer_restart retrans_timer_func(struct hrtimer *timer)
@@ -691,6 +703,16 @@ static enum hrtimer_restart retrans_timer_func(struct hrtimer *timer)
 			container_of(timer, struct fp_sched_data, retrans_timer);
 	tasklet_schedule(&q->retrans_tasklet);
 	return HRTIMER_NORESTART;
+}
+
+void ctrl_rcv_handler(void *priv, u8 *pkt, u32 len, __be32 saddr, __be32 daddr)
+{
+	struct fp_sched_data *q = (struct fp_sched_data *)priv;
+
+	spin_lock_irq(&q->conn_lock);
+	if (likely(q->is_destroyed == false))
+		fpproto_handle_rx_packet(&q->conn, pkt, len, saddr, daddr);
+	spin_unlock_irq(&q->conn_lock);
 }
 
 struct fpproto_ops fastpass_sch_proto_ops = {
@@ -705,7 +727,7 @@ struct fpproto_ops fastpass_sch_proto_ops = {
 };
 
 /* reconnects the control socket to the controller */
-static int reconnect_ctrl_socket(struct fp_sched_data *q)
+static int connect_ctrl_socket(struct fp_sched_data *q)
 {
 	struct sock *sk;
 	int opt;
@@ -715,11 +737,7 @@ static int reconnect_ctrl_socket(struct fp_sched_data *q)
 			.sin_port = FASTPASS_DEFAULT_PORT_NETORDER
 	};
 
-	/* if socket exists, close it */
-	if (q->ctrl_sock) {
-		sock_release(q->ctrl_sock);
-		q->ctrl_sock = NULL;
-	}
+	FASTPASS_BUG_ON(q->ctrl_sock != NULL);
 
 	/* create socket */
 	rc = __sock_create(dev_net(qdisc_dev(sch)), AF_INET, SOCK_DGRAM,
@@ -744,11 +762,8 @@ static int reconnect_ctrl_socket(struct fp_sched_data *q)
 	FASTPASS_BUG_ON(sk->sk_allocation != GFP_ATOMIC);
 
 	/* give socket a reference to this qdisc for watchdog */
-	fpproto_set_qdisc(sk, q);
-
-	/* initialize the fastpass protocol */
-	fpproto_init_conn(fpproto_conn(q), &fastpass_sch_proto_ops, (void *)q,
-			(u64)reset_window_us * NSEC_PER_USEC, retrans_timeout_ns);
+	((struct fastpass_sock *)sk)->rcv_handler = ctrl_rcv_handler;
+	fpproto_set_priv(sk, q);
 
 	/* connect */
 	sock_addr.sin_addr.s_addr = ctrl_addr_netorder;
@@ -779,19 +794,24 @@ static int fpq_new_qdisc(void *priv, u32 tslot_mul, u32 tslot_shift)
 	q->tslot_mul		= tslot_mul;
 	q->tslot_shift		= tslot_shift;
 
-
 	/* calculate timeslot from beginning of Epoch */
 	q->current_timeslot = (now_real * q->tslot_mul) >> q->tslot_shift;
 	wnd_reset(&q->alloc_wnd, q->current_timeslot);
 
-	q->ctrl_sock		= NULL;
-
 	pacer_init_full(&q->request_pacer, now_monotonic, req_cost,
 			req_bucketlen, req_min_gap);
 
-	err = reconnect_ctrl_socket(q);
+	/* initialize the fastpass protocol (before initializing socket) */
+	q->is_destroyed = false;
+	spin_lock_init(&q->conn_lock);
+	fpproto_init_conn(&q->conn, &fastpass_sch_proto_ops, (void *)q,
+			(u64)reset_window_us * NSEC_PER_USEC, retrans_timeout_ns);
+
+	/* connect socket */
+	q->ctrl_sock		= NULL;
+	err = connect_ctrl_socket(q);
 	if (err != 0)
-		goto out;
+		goto out_destroy_conn;
 
 	tasklet_init(&q->maintenance_tasklet, &maintenance_tasklet_func, (unsigned long int)q);
 
@@ -807,7 +827,8 @@ static int fpq_new_qdisc(void *priv, u32 tslot_mul, u32 tslot_shift)
 
 	return err;
 
-out:
+out_destroy_conn:
+	fpproto_destroy_conn(&q->conn);
 	pr_info("%s: error creating new qdisc err=%d\n", err);
 	return err;
 }
@@ -875,9 +896,8 @@ static int fp_tc_dump_stats(struct Qdisc *sch, struct gnet_dump *d)
 	/* gather socket statistics */
 	if (q->ctrl_sock) {
 		struct fastpass_sock *fp = (struct fastpass_sock *)q->ctrl_sock->sk;
-		struct fpproto_conn *conn = fpproto_conn(q);
 		memcpy(&st.socket_stats[0], &fp->stat, sizeof(fp->stat));
-		fpproto_dump_stats(conn, (struct fp_proto_stat *)&st.proto_stats);
+		fpproto_dump_stats(&q->conn, (struct fp_proto_stat *)&st.proto_stats);
 	}
 
 	if (SHOULD_DUMP_FLOW_INFO)
@@ -973,11 +993,37 @@ static void fastpass_proc_cleanup(struct fpq_sched_data *q)
 static void fpq_stop_qdisc(void *priv) {
 	struct fp_sched_data *q = (struct fp_sched_data *)priv;
 
-	hrtimer_try_to_cancel(&q->maintenance_timer);
+	/**
+	 * To get clean destruction we assume at this point that no more calls
+	 *    to fpq_add_timeslot are made at this point
+	 */
 
-	/* close socket. no new packets should arrive afterwards */
+	/* there is no race with others setting the maintenance timer, cancel it */
+	hrtimer_cancel(&q->maintenance_timer);
+	tasklet_kill(&q->maintenance_tasklet);
+
+	/* send_request is not going to run anymore, can close the control socket */
 	fp_debug("closing control socket\n");
 	sock_release(q->ctrl_sock);
+	q->ctrl_sock = NULL;
+
+	spin_lock(&q->conn_lock);
+	q->is_destroyed = true;
+	spin_unlock(&q->conn_lock);
+
+	/**
+	 * At this point:
+	 * 1. control packets stop arriving (ctrl_rcv_handler)
+	 * 2. no new control packets are committed (send_request)
+	 * 3. no retransmission timers are handled (retrans_tasklet_func)
+	 * So none of the fpproto_conn API is called after this point.
+	 */
+
+	fpproto_destroy_conn(&q->conn);
+
+	/* no race with other code setting the timer, so we can cancel retrans_timer */
+	hrtimer_cancel(&q->retrans_timer);
+	tasklet_kill(&q->retrans_tasklet);
 }
 
 static void fpq_add_timeslot(void *priv, u64 src_dst_key)

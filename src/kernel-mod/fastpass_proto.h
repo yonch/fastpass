@@ -33,14 +33,8 @@ struct fastpass_sock {
 	/* inet_sock has to be the first member */
 	struct inet_sock 		inet;
 	__u32 					mss_cache;
-	struct Qdisc			*qdisc;
-	struct fpproto_conn conn;
-
-	struct list_head		pktdesc_tx_queue;
-	struct tasklet_struct	tx_tasklet;
-	spinlock_t				pktdesc_lock;
-
-	spinlock_t				conn_lock;
+	void					*sch_fastpass_priv;
+	void (*rcv_handler)(void *priv, u8 *pkt, u32 len, __be32 saddr, __be32 daddr);
 
 	struct fp_socket_stat stat;
 };
@@ -55,10 +49,7 @@ struct fp_kernel_pktdesc {
 extern int __init fpproto_register(void);
 void __exit fpproto_unregister(void);
 
-void fpproto_maintenance_lock(struct sock *sk);
-void fpproto_maintenance_unlock(struct sock *sk);
-
-void fpproto_set_qdisc(struct sock *sk, struct Qdisc *new_qdisc);
+void fpproto_set_priv(struct sock *sk, struct Qdisc *new_qdisc);
 
 void fpproto_send_pktdesc(struct sock *sk, struct fp_kernel_pktdesc *kern_pd);
 

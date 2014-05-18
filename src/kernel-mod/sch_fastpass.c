@@ -559,6 +559,7 @@ static void send_request(struct fp_sched_data *q)
 	struct fp_kernel_pktdesc *kern_pd;
 	struct fpproto_pktdesc *pd;
 	u64 new_requested;
+	bool should_trigger;
 
 	fp_debug("start: unreq_flows=%u, unreq_tslots=%llu, now_mono=%llu, scheduled=%llu, diff=%lld, next_seq=%08llX\n",
 			n_unreq_dsts(q), q->demand_tslots - q->requested_tslots, now_monotonic,
@@ -615,13 +616,16 @@ static void send_request(struct fp_sched_data *q)
 			n_unreq_dsts(q), q->demand_tslots - q->requested_tslots);
 
 	fpproto_commit_packet(&q->conn, pd, now_monotonic);
+
+	should_trigger = (q->demand_tslots != q->alloc_tslots);
+
 	spin_unlock_irq(&q->conn_lock);
 
 	/* let fpproto send the pktdesc */
 	fpproto_send_pktdesc(q->ctrl_sock->sk, kern_pd);
 
 	/* set timer for next request, if a request would be required */
-	if (q->demand_tslots != q->alloc_tslots)
+	if (should_trigger)
 		/* have more requests to send */
 		trigger_tx(q);
 

@@ -1,5 +1,5 @@
 
-#include "admission_core.h"
+#include "seq_admission_core.h"
 
 #include <rte_mempool.h>
 #include <rte_errno.h>
@@ -10,10 +10,8 @@
 #include "main.h"
 #include "admission_log.h"
 #include "../protocol/platform.h"
-#include "../graph-algo/admissible_traffic.h"
+#include "../graph-algo/admissible.h"
 #include "../graph-algo/algo_config.h"
-
-struct admissible_status g_admissible_status;
 
 struct rte_mempool* admitted_traffic_pool[NB_SOCKETS];
 
@@ -89,10 +87,10 @@ void admission_init_global(struct rte_ring *q_admitted_out)
 	}
 
 	/* init admissible_status */
-	init_admissible_status(&g_admissible_status, OVERSUBSCRIBED,
-			INTER_RACK_CAPACITY, OUT_OF_BOUNDARY_CAPACITY, NUM_NODES, q_head,
-			q_admitted_out, bin_mempool, admitted_traffic_pool[0],
-			&q_bin[0]);
+	seq_init_admissible_status(&g_seq_admissible_status, OVERSUBSCRIBED,
+				   INTER_RACK_CAPACITY, OUT_OF_BOUNDARY_CAPACITY,
+				   NUM_NODES, q_head, q_admitted_out, bin_mempool,
+				   admitted_traffic_pool[0], &q_bin[0]);
 
 }
 
@@ -111,7 +109,7 @@ int exec_admission_core(void *void_cmd_p)
 	struct admission_core_cmd *cmd = (struct admission_core_cmd *)void_cmd_p;
 	uint32_t core_ind = cmd->admission_core_index;
 	uint64_t logical_timeslot = cmd->start_timeslot;
-	struct admission_core_state *core = &g_admissible_status.cores[core_ind];
+	struct seq_admission_core_state *core = &g_seq_admissible_status.cores[core_ind];
 	/* int traffic_pool_socketid = rte_lcore_to_socket_id(rte_lcore_id()); */
 	int traffic_pool_socketid = 0;
 	int rc;
@@ -137,9 +135,9 @@ int exec_admission_core(void *void_cmd_p)
 		/* perform allocation */
 		admission_log_allocation_begin(logical_timeslot,
 				start_time_first_timeslot);
-		get_admissible_traffic(&g_admissible_status, core_ind,
-				logical_timeslot - PREALLOC_DURATION_TIMESLOTS,
-				TIMESLOT_MUL, TIMESLOT_SHIFT);
+		seq_get_admissible_traffic(&g_seq_admissible_status, core_ind,
+					   logical_timeslot - PREALLOC_DURATION_TIMESLOTS,
+					   TIMESLOT_MUL, TIMESLOT_SHIFT);
 		admission_log_allocation_end();
 
 		logical_timeslot += BATCH_SIZE * N_ADMISSION_CORES;

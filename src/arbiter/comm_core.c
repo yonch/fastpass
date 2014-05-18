@@ -17,8 +17,7 @@
 #include "arp.h"
 #include "../protocol/fpproto.h"
 #include "../protocol/pacer.h"
-#include "../graph-algo/admissible_structures.h"
-#include "../graph-algo/admissible_traffic.h"
+#include "../graph-algo/admissible.h"
 #include "dpdk-platform.h"
 #include "bigmap.h"
 #include "admission_core.h"
@@ -286,7 +285,7 @@ static void handle_areq(void *param, u16 *dst_and_count, int n)
 		demand_diff = (s32)demand - (s32)orig_demand;
 		if (demand_diff > 0) {
 			comm_log_demand_increased(node_id, dst, orig_demand, demand, demand_diff);
-			add_backlog(&g_admissible_status, node_id, dst, demand_diff);
+			add_backlog(g_admissible_status(), node_id, dst, demand_diff);
 			en->demands[dst] = demand;
 			num_increases++;
 		} else {
@@ -304,7 +303,7 @@ static void handle_reset(void *param)
 
 	comm_log_handle_reset(node_id, en->conn.in_sync);
 
-	reset_sender(&g_admissible_status, node_id);
+	reset_sender(g_admissible_status(), node_id);
 	memset(&en->demands[0], 0, MAX_NODES * sizeof(uint32_t));
 	memset(en->alloc_to_dst, 0, sizeof(en->alloc_to_dst));
 	memset(en->acked_allocs, 0, sizeof(en->acked_allocs));
@@ -1002,7 +1001,7 @@ void exec_comm_core(struct comm_core_cmd * cmd)
 
 		/* RX, retrans timers, and new traffic might push traffic into the
 		 * q_head buffer; flush it now. */
-		flush_backlog(&g_admissible_status);
+		flush_backlog(g_admissible_status());
 
 		/* process tx timers */
 		fp_timer_get_expired(&core->tx_timers, now, &lst);

@@ -16,7 +16,6 @@
 #include "admission_log.h"
 #include "../protocol/fpproto.h"
 #include "../protocol/platform.h"
-#include "../graph-algo/admissible_structures.h"
 #include "../protocol/stat_print.h"
 
 #define MAX_FILENAME_LEN 256
@@ -111,7 +110,7 @@ void print_comm_log(uint16_t lcore_id)
 struct admission_statistics saved_admission_statistics;
 
 void print_global_admission_log() {
-	struct admission_statistics *st = &g_admissible_status.stat;
+	struct admission_statistics *st = g_admission_stats();
 	struct admission_statistics *sv = &saved_admission_statistics;
 	int i;
 
@@ -141,7 +140,7 @@ struct admission_core_statistics saved_admission_core_statistics[N_ADMISSION_COR
 void print_admission_core_log(uint16_t lcore, uint16_t adm_core_index) {
 	int i;
 	struct admission_log *al = &admission_core_logs[lcore];
-	struct admission_core_statistics *st = &g_admissible_status.cores[adm_core_index].stat;
+	struct admission_core_statistics *st = g_admission_core_stats(adm_core_index);
 	struct admission_core_statistics *sv = &saved_admission_core_statistics[adm_core_index];
 
 #define D(X) (st->X - sv->X)
@@ -207,11 +206,11 @@ int exec_log_core(void *void_cmd_p)
 	/* copy baseline statistics */
 	memcpy(&saved_comm_log, &comm_core_logs[enabled_lcore[FIRST_COMM_CORE]],
 			sizeof(saved_comm_log));
-	memcpy(&saved_admission_statistics, &g_admissible_status.stat,
+	memcpy(&saved_admission_statistics, g_admission_stats(),
 			sizeof(saved_admission_statistics));
 	for (i = 0; i < N_ADMISSION_CORES; i++)
 		memcpy(&saved_admission_core_statistics[i],
-				&g_admissible_status.cores[i].stat,
+		       g_admission_core_stats(i),
 				sizeof(saved_admission_core_statistics[i]));
 
 	while (1) {
@@ -237,7 +236,7 @@ int exec_log_core(void *void_cmd_p)
 			conn_log.backlog = 0;
 			for (j = 0; j < MAX_NODES; j++)
 				conn_log.backlog +=
-						backlog_get(&g_admissible_status.backlog, i, j);
+					backlog_get(g_admission_backlog(), i, j);
 
 			if (fwrite(&conn_log, sizeof(conn_log), 1, fp) != 1)
 				LOGGING_ERR("couldn't write conn info of node %d to file\n", i);

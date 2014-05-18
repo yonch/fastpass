@@ -11,8 +11,7 @@
 #include <ccan/list/list.h>
 #include "control.h"
 #include "main.h"
-#include "../graph-algo/admissible_structures.h"
-#include "../graph-algo/admissible_traffic.h"
+#include "../graph-algo/admissible.h"
 #include "../graph-algo/generate_requests.h"
 #include "admission_core.h"
 #include "../protocol/stat_print.h"
@@ -77,10 +76,10 @@ static void add_initial_requests(struct comm_core_state *core,
 	uint32_t i;
 	for (src = 0; src < num_srcs; src++)
 		for (i = 0; i < num_dsts_per_src; i++)
-			add_backlog(&g_admissible_status,
+			add_backlog(g_admissible_status(),
 					src, (src + 1 + i) % num_srcs , flow_size);
 
-	flush_backlog(&g_admissible_status);
+	flush_backlog(g_admissible_status());
 }
 
 void exec_stress_test_core(struct stress_test_core_cmd * cmd,
@@ -138,7 +137,7 @@ void exec_stress_test_core(struct stress_test_core_cmd * cmd,
 				break;
 
 			/* enqueue the request */
-			add_backlog(&g_admissible_status,
+			add_backlog(g_admissible_status(),
 					next_request.src, next_request.dst, cmd->demand_tslots);
 			comm_log_demand_increased(next_request.src, next_request.dst, 0,
 					cmd->demand_tslots, cmd->demand_tslots);
@@ -155,7 +154,7 @@ void exec_stress_test_core(struct stress_test_core_cmd * cmd,
 		process_allocated_traffic(core, cmd->q_allocated);
 
 		/* flush q_head's buffer into q_head */
-		flush_backlog(&g_admissible_status);
+		flush_backlog(g_admissible_status());
 
 		/* wait until at least loop_minimum_iteration_time has passed from
 		 * beginning of loop */

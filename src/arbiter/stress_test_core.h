@@ -4,7 +4,7 @@
 
 #include <stdint.h>
 #include <rte_ip.h>
-#include "../graph-algo/admissible_structures.h"
+#include "../graph-algo/admissible.h"
 
 #define MAX_ENQUEUES_PER_LOOP		1024
 #define MAX_ADMITTED_PER_LOOP		(4*BATCH_SIZE)

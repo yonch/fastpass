@@ -6,7 +6,7 @@
 #include <rte_ip.h>
 #include "../protocol/fpproto.h"
 #include "../protocol/stat_print.h"
-#include "../graph-algo/admissible_structures.h"
+#include "../protocol/topology.h"
 #include "fp_timer.h"
 #include "main.h"
 #include "watchdog.h"

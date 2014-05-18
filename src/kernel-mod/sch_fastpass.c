@@ -35,7 +35,6 @@
 
 #include "sch_timeslot.h"
 #include "fastpass_proto.h"
-#include "fp_statistics.h"
 #include "../protocol/platform.h"
 #include "../protocol/pacer.h"
 #include "../protocol/window.h"
@@ -123,6 +122,28 @@ struct fp_dst {
 	u64		alloc_tslots;		/* total received allocations */
 	u64		used_tslots;		/* timeslots in which packets moved */
 	uint8_t state;
+};
+
+struct fp_sched_stat {
+	/* dequeue-related */
+	__u64		admitted_timeslots;
+	__u64		early_enqueue;
+	__u64		late_enqueue1;
+	__u64		late_enqueue2;
+	__u64		late_enqueue3;
+	__u64		late_enqueue4;
+
+	/* request-related */
+	__u64		req_alloc_errors;
+	__u64		request_with_empty_flowqueue;
+	__u64		queued_flow_already_acked;
+	/* alloc-related */
+	__u64		alloc_too_late;
+	__u64		alloc_premature;
+	__u64		unwanted_alloc;
+	/* alloc report-related */
+	__u64		alloc_report_larger_than_requested;
+	__u64		timeslots_assumed_lost;
 };
 
 /**
@@ -413,7 +434,7 @@ static void handle_alloc(void *param, u32 base_tslot, u16 *dst_ids,
 
 			f->alloc_tslots++;
 			q->alloc_tslots++;
-			q->stat.sucessful_timeslots++;
+			q->stat.admitted_timeslots++;
 			if (full_tslot > current_timeslot) {
 				q->stat.early_enqueue++;
 			} else {
@@ -683,7 +704,6 @@ static void maintenance_tasklet_func(unsigned long int param)
 
 	if (should_send)
 		send_request(q);
-
 }
 
 static void retrans_tasklet_func(unsigned long int param)
@@ -691,7 +711,6 @@ static void retrans_tasklet_func(unsigned long int param)
 	struct fp_sched_data *q = (struct fp_sched_data *)param;
 	u64 now_monotonic = fp_monotonic_time_ns();
 	struct socket *ctrl_sock;
-	rcu_read_lock_bh();
 
 	spin_lock_irq(&q->conn_lock);
 	if (likely(q->is_destroyed == false))
@@ -857,7 +876,7 @@ static int fp_tc_dump_stats(struct Qdisc *sch, struct gnet_dump *d)
 
 static int fastpass_proc_show(struct seq_file *seq, void *v)
 {
-	struct fpq_sched_data *q = (struct fpq_sched_data *)seq->private;
+	struct fp_sched_data *q = (struct fp_sched_data *)seq->private;
 	u64 now_real = fp_get_time_ns();
 	struct fp_sched_stat *scs = &q->stat;
 
@@ -869,39 +888,54 @@ static int fastpass_proc_show(struct seq_file *seq, void *v)
 	/* timeslot statistics */
 	seq_printf(seq, "\n  horizon mask 0x%016llx",
 			wnd_get_mask(&q->alloc_wnd, q->current_timeslot+63));
-	seq_printf(seq, ", %llu added timeslots", q->added_tslots);
-	seq_printf(seq, ", %llu used", scs->sucessful_timeslots);
 	seq_printf(seq, " (%llu %llu %llu %llu behind, %llu fast)", scs->late_enqueue4,
 			scs->late_enqueue3, scs->late_enqueue2, scs->late_enqueue1,
 			scs->early_enqueue);
-	seq_printf(seq, ", %llu missed", scs->missed_timeslots);
 	seq_printf(seq, ", %llu assumed_lost", scs->timeslots_assumed_lost);
 	seq_printf(seq, "  (%llu late", scs->alloc_too_late);
 	seq_printf(seq, ", %llu premature)", scs->alloc_premature);
 
+	/* total since reset */
+	seq_printf(seq, "\n  since reset: ");
+	seq_printf(seq, " demand %llu", q->demand_tslots);
+	seq_printf(seq, ", requested %llu", q->requested_tslots);
+	seq_printf(seq, " (%llu yet unrequested)", q->demand_tslots - q->requested_tslots);
+	seq_printf(seq, ", acked %llu", q->acked_tslots);
+	seq_printf(seq, ", allocs %llu", q->alloc_tslots);
+	seq_printf(seq, ", used %llu", q->used_tslots);
+	seq_printf(seq, ", admitted %llu", scs->admitted_timeslots);
+
+	seq_printf(seq, "\n  %llu requests w/no a-req", scs->request_with_empty_flowqueue);
+
+	/* protocol state */
+	fpproto_print_stats(sps, seq);
+	/* socket state */
+	fpproto_print_socket_stats(q->ctrl_sock->sk, seq);
+
 	/* error statistics */
 	seq_printf(seq, "\n errors:");
-	if (scs->allocation_errors)
-		seq_printf(seq, "\n  %llu allocation errors in dst_lookup", scs->allocation_errors);
-	if (scs->classify_errors)
-		seq_printf(seq, "\n  %llu packets could not be classified", scs->classify_errors);
-	if (scs->flow_not_found_update)
-		seq_printf(seq, "\n  %llu flow could not be found in update_current_tslot!",
-				scs->flow_not_found_update);
 	if (scs->req_alloc_errors)
 		seq_printf(seq, "\n  %llu could not allocate pkt_desc for request", scs->req_alloc_errors);
+	if (scs->alloc_report_larger_than_requested)
+		seq_printf(seq, "\n  %llu alloc report larger than requested_timeslots (causes a reset)",
+				scs->alloc_report_larger_than_requested);
+
+	fpproto_print_errors(sps, seq);
+	fpproto_print_socket_errors(q->ctrl_sock->sk, seq);
 
 	/* warnings */
 	seq_printf(seq, "\n warnings:");
+	if (scs->queued_flow_already_acked)
+		seq_printf(seq, "\n  %llu acked flows in flowqueue (possible ack just after timeout)",
+				scs->queued_flow_already_acked);
 	if (scs->unwanted_alloc)
 		seq_printf(seq, "\n  %llu timeslots allocated beyond the demand of the flow (could happen due to reset / controller timeouts)",
 				scs->unwanted_alloc);
 	if (scs->alloc_premature)
 		seq_printf(seq, "\n  %llu premature allocations (something wrong with time-sync?)\n",
 				scs->alloc_premature);
-	if (scs->clock_move_causes_reset)
-		seq_printf(seq, "\n  %llu large clock moves caused resets",
-				scs->clock_move_causes_reset);
+
+	fpproto_print_warnings(sps);
 
 	/* flow info */
 	if (proc_dump_dst)

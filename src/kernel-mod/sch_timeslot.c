@@ -39,7 +39,6 @@
 
 #include "sch_timeslot.h"
 #include "fastpass_proto.h"
-#include "fp_statistics.h"
 #include "../protocol/platform.h"
 #include "../protocol/pacer.h"
 #include "../protocol/window.h"

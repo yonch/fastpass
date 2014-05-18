@@ -57,7 +57,7 @@ struct fp_kernel_pktdesc {
 extern int __init fpproto_register(void);
 void __exit fpproto_unregister(void);
 
-void fpproto_set_priv(struct sock *sk, struct Qdisc *new_qdisc);
+void fpproto_set_priv(struct sock *sk, void *priv);
 
 void fpproto_send_pktdesc(struct sock *sk, struct fp_kernel_pktdesc *kern_pd);
 

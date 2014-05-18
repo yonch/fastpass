@@ -3,7 +3,7 @@
 #define STAT_PRINT_H_
 
 #include "fpproto.h"
-#include <stdio.h>
+#include "platform/generic.h"
 
 #define CONN_LOG_STRUCT_VERSION		3
 
@@ -22,23 +22,9 @@ struct conn_log_struct {
 static inline void fpproto_print_stats(struct fp_proto_stat* sps, void *file);
 static inline void fpproto_print_errors(struct fp_proto_stat* sps, void *file);
 static inline void fpproto_print_warnings(struct fp_proto_stat* sps, void *file);
-static inline void fpproto_print_log_struct(struct conn_log_struct *conn_log, void *file);
-
-static inline int __fpproto_print_assert_version(struct fp_proto_stat* sps)
-{
-	if (sps->version != FASTPASS_PROTOCOL_STATS_VERSION) {
-		printf("  unknown protocol statistics version number %d, expected %d\n",
-			sps->version, FASTPASS_PROTOCOL_STATS_VERSION);
-		return -1;
-	}
-	return 0;
-}
 
 static inline void fpproto_print_stats(struct fp_proto_stat* sps, void *file)
 {
-	if (__fpproto_print_assert_version(sps) != 0)
-		return;
-
 	/* protocol state */
 	fp_fprintf(file, "\n  protocol in_sync=%d", sps->in_sync);
 	fp_fprintf(file, "\n  last reset 0x%llX", sps->last_reset_time);
@@ -76,9 +62,6 @@ static inline void fpproto_print_stats(struct fp_proto_stat* sps, void *file)
 
 void fpproto_print_errors(struct fp_proto_stat* sps, void *file)
 {
-	if (__fpproto_print_assert_version(sps) != 0)
-		return;
-
 	if (sps->rx_too_short)
 		fp_fprintf(file, "\n  %llu rx control packets too short", sps->rx_too_short);
 
@@ -105,9 +88,6 @@ void fpproto_print_errors(struct fp_proto_stat* sps, void *file)
 
 static inline void fpproto_print_warnings(struct fp_proto_stat* sps, void *file)
 {
-	if (__fpproto_print_assert_version(sps) != 0)
-		return;
-
 	if (sps->too_early_ack)
 		fp_fprintf(file, "\n  %llu acks were so late the seq was before the window",
 				sps->too_early_ack);
@@ -128,29 +108,5 @@ static inline void fpproto_print_warnings(struct fp_proto_stat* sps, void *file)
 	if (sps->seqno_before_inwnd)
 		fp_fprintf(file, "\n  %llu major reordering events", sps->seqno_before_inwnd);
 }
-
-static inline void fpproto_print_log_struct(struct conn_log_struct *conn_log, void *file)
-{
-	if (conn_log->version != CONN_LOG_STRUCT_VERSION) {
-		fp_fprintf(file, "-- unknown conn_log version number %d, expected %d\n",
-				conn_log->version, CONN_LOG_STRUCT_VERSION);
-		return;
-	}
-
-	fp_fprintf(file, "\n--\n");
-	fp_fprintf(file, "node %d timestamp %lu next_retrans %ld(cycles) next_tx %ld(cycles) pacer %ld(cycles)\n",
-			conn_log->node_id, conn_log->timestamp, conn_log->next_retrans_gap,
-			conn_log->next_tx_gap, conn_log->pacer_gap);
-	fp_fprintf(file, "demand %lu backlog %u\n", conn_log->demands, conn_log->backlog);
-	fpproto_print_stats(&conn_log->stat, file);
-	/* errors */
-	fp_fprintf(file, "\n errors:");
-	fpproto_print_errors(&conn_log->stat, file);
-	/* warnings */
-	fp_fprintf(file, "\n warnings:");
-	fpproto_print_warnings(&conn_log->stat, file);
-	fp_fprintf(file, "\n");
-}
-
 
 #endif /* STAT_PRINT_H_ */

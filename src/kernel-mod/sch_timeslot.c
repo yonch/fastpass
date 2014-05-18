@@ -46,8 +46,6 @@
 
 #define CLOCK_MOVE_RESET_THRESHOLD_TSLOTS	64
 
-#define SHOULD_DUMP_FLOW_INFO				0
-
 #define PROC_FILENAME_MAX_SIZE				64
 
 struct timeslot_skb_q {

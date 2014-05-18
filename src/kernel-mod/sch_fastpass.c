@@ -39,6 +39,7 @@
 #include "../protocol/pacer.h"
 #include "../protocol/window.h"
 #include "../protocol/topology.h"
+#include "../protocol/stat_print.h"
 
 /*
  * FastPass client qdisc
@@ -55,11 +56,10 @@
 #define FASTPASS_HORIZON					64
 #define FASTPASS_REQUEST_WINDOW_SIZE 		(1 << 13)
 
-#define CLOCK_MOVE_RESET_THRESHOLD_TSLOTS	64
-
 #define FASTPASS_CTRL_SOCK_WMEM				(64*1024*1024)
 
-#define SHOULD_DUMP_FLOW_INFO				0
+#define PROC_FILENAME_MAX_SIZE				64
+
 enum {
 	FLOW_UNQUEUED,
 	FLOW_REQUEST_QUEUE,
@@ -182,6 +182,8 @@ struct fp_sched_data {
 	bool					is_destroyed;
 	struct fpproto_conn		conn;
 	spinlock_t 				conn_lock;
+
+	struct proc_dir_entry *proc_entry;
 
 	/* counters */
 	u64		demand_tslots;		/* total needed timeslots */
@@ -789,7 +791,7 @@ static int connect_ctrl_socket(struct fp_sched_data *q, struct net *qdisc_net)
 
 	/* give socket a reference to this qdisc for watchdog */
 	((struct fastpass_sock *)sk)->rcv_handler = ctrl_rcv_handler;
-	fpproto_set_priv(sk, q);
+	fpproto_set_priv(sk, (void *)q);
 
 	/* connect */
 	sock_addr.sin_addr.s_addr = ctrl_addr_netorder;
@@ -816,9 +818,6 @@ static void dump_flow_info(struct seq_file *seq, struct fp_sched_data *q,
 {
 	struct fp_dst *dst;
 	u32 dst_id;
-	struct fp_dst *dst;
-	u32 mask = MAX_NODES - 1;
-	u32 base_idx = src_dst_key_hash(fp_monotonic_time_ns()) & mask;
 	u32 num_printed = 0;
 
 	printk(KERN_DEBUG "fastpass flows (only_active=%d):\n", only_active);
@@ -830,53 +829,13 @@ static void dump_flow_info(struct seq_file *seq, struct fp_sched_data *q,
 			continue;
 
 		num_printed++;
-		printk(KERN_DEBUG "flow 0x%04llX demand %llu requested %llu acked %llu alloc %llu used %llu state %d\n",
+		printk(KERN_DEBUG "flow 0x%04X demand %llu requested %llu acked %llu alloc %llu used %llu state %d\n",
 				dst_id, dst->demand_tslots, dst->requested_tslots,
 				dst->acked_tslots, dst->alloc_tslots, dst->used_tslots,
 				dst->state);
 	}
 
 	printk(KERN_DEBUG "fastpass printed %u flows\n", num_printed);
-}
-
-/* dumps statistics to netlink skb (part of qdisc API) */
-static int fp_tc_dump_stats(struct Qdisc *sch, struct gnet_dump *d)
-{
-	struct fp_sched_data *q = qdisc_priv(sch);
-	u64 now_real = fp_get_time_ns();
-	u64 now_monotonic = fp_monotonic_time_ns();
-	u64 time_next_req = pacer_next_event(&q->request_pacer);
-	struct tc_fastpass_qd_stats st = {
-		.version			= FASTPASS_STAT_VERSION,
-		.n_unreq_flows		= n_unreq_dsts(q),
-		.stat_timestamp		= now_real,
-		.current_timeslot	= q->current_timeslot,
-		.horizon_mask		= wnd_get_mask(&q->alloc_wnd, q->current_timeslot+63),
-		.time_next_request	= time_next_req - ( ~time_next_req ? now_monotonic : 0),
-		.demand_tslots		= q->demand_tslots,
-		.requested_tslots	= q->requested_tslots,
-		.alloc_tslots		= q->alloc_tslots,
-		.acked_tslots		= q->acked_tslots,
-		.used_tslots		= q->used_tslots,
-	};
-
-	memset(&st.sched_stats[0], 0, TC_FASTPASS_SCHED_STAT_MAX_BYTES);
-	memset(&st.socket_stats[0], 0, TC_FASTPASS_SOCKET_STAT_MAX_BYTES);
-	memset(&st.proto_stats[0], 0, TC_FASTPASS_PROTO_STAT_MAX_BYTES);
-
-	memcpy(&st.sched_stats[0], &q->stat, sizeof(q->stat));
-
-	/* gather socket statistics */
-	if (q->ctrl_sock) {
-		struct fastpass_sock *fp = (struct fastpass_sock *)q->ctrl_sock->sk;
-		memcpy(&st.socket_stats[0], &fp->stat, sizeof(fp->stat));
-		fpproto_dump_stats(&q->conn, (struct fp_proto_stat *)&st.proto_stats);
-	}
-
-	if (SHOULD_DUMP_FLOW_INFO)
-		dump_flow_info(q, false);
-
-	return gnet_stats_copy_app(d, &st, sizeof(st));
 }
 
 static int fastpass_proc_show(struct seq_file *seq, void *v)
@@ -913,7 +872,7 @@ static int fastpass_proc_show(struct seq_file *seq, void *v)
 	seq_printf(seq, "\n  %llu requests w/no a-req", scs->request_with_empty_flowqueue);
 
 	/* protocol state */
-	fpproto_print_stats(sps, seq);
+	fpproto_print_stats(&q->conn.stat, seq);
 	/* socket state */
 	fpproto_print_socket_stats(q->ctrl_sock->sk, seq);
 
@@ -925,7 +884,7 @@ static int fastpass_proc_show(struct seq_file *seq, void *v)
 		seq_printf(seq, "\n  %llu alloc report larger than requested_timeslots (causes a reset)",
 				scs->alloc_report_larger_than_requested);
 
-	fpproto_print_errors(sps, seq);
+	fpproto_print_errors(&q->conn.stat, seq);
 	fpproto_print_socket_errors(q->ctrl_sock->sk, seq);
 
 	/* warnings */
@@ -940,7 +899,7 @@ static int fastpass_proc_show(struct seq_file *seq, void *v)
 		seq_printf(seq, "\n  %llu premature allocations (something wrong with time-sync?)\n",
 				scs->alloc_premature);
 
-	fpproto_print_warnings(sps);
+	fpproto_print_warnings(&q->conn.stat, seq);
 
 	/* flow info */
 	if (proc_dump_dst)
@@ -962,17 +921,17 @@ static const struct file_operations fastpass_proc_fops = {
 	.release = single_release,
 };
 
-static int fastpass_proc_init(struct fpq_sched_data *fpq)
+static int fastpass_proc_init(struct fp_sched_data *q)
 {
 	char fname[PROC_FILENAME_MAX_SIZE];
-	snprintf(fname, PROC_FILENAME_MAX_SIZE, "fastpass/stats-%p", fpq);
-	fpq->proc_entry = proc_create_data(fname, S_IRUGO, NULL, &fastpass_proc_fops, fpq);
-	if (fpq->proc_entry == NULL)
+	snprintf(fname, PROC_FILENAME_MAX_SIZE, "fastpass/stats-%p", q);
+	q->proc_entry = proc_create_data(fname, S_IRUGO, NULL, &fastpass_proc_fops, q);
+	if (q->proc_entry == NULL)
 		return -1; /* error */
 	return 0; /* success */
 }
 
-static void fastpass_proc_cleanup(struct fpq_sched_data *q)
+static void fastpass_proc_cleanup(struct fp_sched_data *q)
 {
 	proc_remove(q->proc_entry);
 }
@@ -1032,7 +991,7 @@ out_destroy_conn:
 	fpproto_destroy_conn(&q->conn);
 	fastpass_proc_cleanup(q);
 out:
-	pr_info("%s: error creating new qdisc err=%d\n", err);
+	pr_info("%s: error creating new qdisc err=%d\n", __func__, err);
 	return err;
 }
 

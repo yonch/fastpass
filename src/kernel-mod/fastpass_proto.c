@@ -289,7 +289,6 @@ static void fpproto_send_skb(struct sock *sk, struct sk_buff *skb)
 void fpproto_send_pktdesc(struct sock *sk,
 		struct fp_kernel_pktdesc *kern_pd)
 {
-	struct fastpass_sock *fp = fastpass_sk(sk);
 	struct fpproto_pktdesc *pd = &kern_pd->pktdesc;
 	struct sk_buff *skb;
 

@@ -301,7 +301,7 @@ static struct sk_buff *fpproto_make_skb(struct sock *sk, struct fpproto_pktdesc 
 
 	/* encode the packet from the descriptor */
 	data = &skb->data[0];
-	payload_len = fpproto_encode_packet(&fp->conn, pd, data, FASTPASS_MAX_PAYLOAD,
+	payload_len = fpproto_encode_packet(pd, data, FASTPASS_MAX_PAYLOAD,
 			inet->inet_saddr, inet->inet_daddr, 26);
 
 	/* adjust the size of the skb based on encoded size */

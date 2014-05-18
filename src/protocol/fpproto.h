@@ -283,8 +283,7 @@ void fpproto_commit_packet(struct fpproto_conn *conn,
  * Encodes @pd into the buffer @data.
  * Returns the number of used bytes (not to exceed @max_len)
  */
-int fpproto_encode_packet(struct fpproto_conn *conn,
-		struct fpproto_pktdesc *pd, u8 *data, u32 max_len, __be32 saddr,
-		__be32 daddr, u32 min_size);
+int fpproto_encode_packet(struct fpproto_pktdesc *pd, u8 *data, u32 max_len,
+		__be32 saddr, __be32 daddr, u32 min_size);
 
 #endif /* FPPROTO_H_ */

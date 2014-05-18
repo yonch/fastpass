@@ -440,8 +440,8 @@ make_packet(struct end_node_state *en, struct fpproto_pktdesc *pd)
 	ipv4_hdr->dst_addr = en->dst_ip;
 
 	/* encode fastpass payload */
-	data_len = fpproto_encode_packet(&en->conn, pd, payload_ptr,
-			FASTPASS_MAX_PAYLOAD, en->controller_ip, en->dst_ip, 26);
+	data_len = fpproto_encode_packet(pd, payload_ptr, FASTPASS_MAX_PAYLOAD,
+			en->controller_ip, en->dst_ip, 26);
 	if (data_len < 0) {
 		comm_log_error_encoding_packet(en->dst_ip, en - end_nodes, data_len);
 	}

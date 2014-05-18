@@ -775,9 +775,8 @@ void fpproto_commit_packet(struct fpproto_conn *conn, struct fpproto_pktdesc *pd
 	recompute_and_reset_retrans_timer(conn);
 }
 
-int fpproto_encode_packet(struct fpproto_conn *conn,
-		struct fpproto_pktdesc *pd, u8 *pkt, u32 max_len, __be32 saddr,
-		__be32 daddr, u32 min_size)
+int fpproto_encode_packet(struct fpproto_pktdesc *pd, u8 *pkt, u32 max_len,
+		__be32 saddr, __be32 daddr, u32 min_size)
 {
 	int i;
 	struct fastpass_areq *areq;

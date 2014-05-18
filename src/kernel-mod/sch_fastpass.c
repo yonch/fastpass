@@ -158,9 +158,6 @@ struct fp_sched_data {
 	spinlock_t 				conn_lock;
 
 	/* counters */
-	u32		flows;
-	u32		inactive_flows;  /* protected by fpproto_maintenance_lock */
-	u32		n_unreq_flows;
 	u64		demand_tslots;		/* total needed timeslots */
 	u64		requested_tslots;	/* highest requested timeslots */
 	u64		alloc_tslots;		/* total received allocations */
@@ -285,8 +282,6 @@ static void handle_reset(void *param)
 	/* reset future allocations */
 	wnd_reset(&q->alloc_wnd, q->current_timeslot);
 
-	q->flows = 0;
-	q->inactive_flows = 0;		/* will remain 0 when we're done */
 	q->demand_tslots = 0;
 	q->requested_tslots = 0;	/* will remain 0 when we're done */
 	q->alloc_tslots = 0;		/* will remain 0 when we're done */
@@ -312,7 +307,6 @@ static void handle_reset(void *param)
 		dst->requested_tslots = 0;
 		dst->used_tslots = 0;
 
-		q->flows++;
 		q->demand_tslots += dst->demand_tslots;
 
 		fp_debug("rebased flow 0x%04llX, new demand %llu timeslots\n",
@@ -867,8 +861,6 @@ static int fp_tc_dump_stats(struct Qdisc *sch, struct gnet_dump *d)
 	u64 time_next_req = pacer_next_event(&q->request_pacer);
 	struct tc_fastpass_qd_stats st = {
 		.version			= FASTPASS_STAT_VERSION,
-		.flows				= q->flows,
-		.inactive_flows		= q->inactive_flows,
 		.n_unreq_flows		= n_unreq_dsts(q),
 		.stat_timestamp		= now_real,
 		.current_timeslot	= q->current_timeslot,

@@ -109,8 +109,13 @@ EXPORT_SYMBOL_GPL(proc_dump_dst);
 
 static u32 miss_threshold = 16;
 module_param(miss_threshold, uint, 0444);
-MODULE_PARM_DESC(miss_threshold, "how often to perform periodic tasks");
+MODULE_PARM_DESC(miss_threshold, "how far in the past can the allocation be and still be accepted");
 EXPORT_SYMBOL_GPL(miss_threshold);
+
+static u32 max_preload = 64;
+module_param(max_preload, uint, 0444);
+MODULE_PARM_DESC(max_preload, "how futuristic can an allocation be and still be accepted");
+EXPORT_SYMBOL_GPL(max_preload);
 
 /*
  * Per flow structure, dynamically allocated
@@ -296,14 +301,15 @@ static void flow_inc_demand(struct fp_sched_data *q, u32 dst_id, u64 amount)
  */
 static void handle_reset(void *param)
 {
-	BUILD_BUG_ON_MSG(MAX_NODES & (MAX_NODES - 1), "MAX_NODES needs to be a power of 2");
 	struct fp_sched_data *q = (struct fp_sched_data *)param;
 
 	struct fp_dst *dst;
 	u32 idx;
 	u32 dst_id;
 	u32 mask = MAX_NODES - 1;
-	u32 base_idx = src_dst_key_hash(fp_monotonic_time_ns()) & mask;
+	u32 base_idx = jhash_1word((__be32)fp_monotonic_time_ns(), 0) & mask;
+
+	BUILD_BUG_ON_MSG(MAX_NODES & (MAX_NODES - 1), "MAX_NODES needs to be a power of 2");
 
 	/* reset future allocations */
 	wnd_reset(&q->alloc_wnd, q->current_timeslot);
@@ -357,7 +363,6 @@ static void handle_alloc(void *param, u32 base_tslot, u16 *dst_ids,
 	u32 dst_id;
 	u64 full_tslot;
 	u64 now_real = fp_get_time_ns();
-	u16 node_id;
 	u64 current_timeslot;
 
 	/* every alloc should be ACKed */
@@ -401,14 +406,14 @@ static void handle_alloc(void *param, u32 base_tslot, u16 *dst_ids,
 				base_tslot, full_tslot, dst_ids[dst_id_idx - 1], dst_ids[dst_id_idx - 1]);
 
 		/* is alloc too far in the past? */
-		if (unlikely(time_before64(full_tslot, current_timeslot - q->miss_threshold))) {
+		if (unlikely(time_before64(full_tslot, current_timeslot - miss_threshold))) {
 		//if (unlikely(wnd_seq_before(&q->alloc_wnd, full_tslot))) {
 			q->stat.alloc_too_late++;
 			fp_debug("-X- already gone, dropping\n");
 			continue;
 		}
 
-		if (unlikely(time_after64(full_tslot, current_timeslot + q->max_preload))) {
+		if (unlikely(time_after64(full_tslot, current_timeslot + max_preload))) {
 //		if (unlikely(wnd_seq_after(&q->alloc_wnd, full_tslot))) {
 			q->stat.alloc_premature++;
 			fp_debug("-X- too futuristic, dropping\n");
@@ -430,7 +435,7 @@ static void handle_alloc(void *param, u32 base_tslot, u16 *dst_ids,
 //		q->schedule[wnd_pos(full_tslot)] = dst[dst_ind - 1];
 		if (f->used_tslots != f->demand_tslots) {
 
-			tsq_admit_now(q, dst_id)
+			tsq_admit_now(q, dst_id);
 			flow_inc_used(q, f, 1);
 
 			f->alloc_tslots++;
@@ -711,7 +716,6 @@ static void retrans_tasklet_func(unsigned long int param)
 {
 	struct fp_sched_data *q = (struct fp_sched_data *)param;
 	u64 now_monotonic = fp_monotonic_time_ns();
-	struct socket *ctrl_sock;
 
 	spin_lock_irq(&q->conn_lock);
 	if (likely(q->is_destroyed == false))
@@ -749,7 +753,7 @@ struct fpproto_ops fastpass_sch_proto_ops = {
 };
 
 /* reconnects the control socket to the controller */
-static int connect_ctrl_socket(struct fp_sched_data *q)
+static int connect_ctrl_socket(struct fp_sched_data *q, struct net *qdisc_net)
 {
 	struct sock *sk;
 	int opt;
@@ -762,8 +766,8 @@ static int connect_ctrl_socket(struct fp_sched_data *q)
 	FASTPASS_BUG_ON(q->ctrl_sock != NULL);
 
 	/* create socket */
-	rc = __sock_create(dev_net(qdisc_dev(sch)), AF_INET, SOCK_DGRAM,
-			   IPPROTO_FASTPASS, &q->ctrl_sock, 1);
+	rc = __sock_create(qdisc_net, AF_INET, SOCK_DGRAM, IPPROTO_FASTPASS,
+			&q->ctrl_sock, 1);
 	if (rc != 0) {
 		FASTPASS_WARN("Error %d creating socket\n", rc);
 		q->ctrl_sock = NULL;
@@ -973,7 +977,8 @@ static void fastpass_proc_cleanup(struct fpq_sched_data *q)
 	proc_remove(q->proc_entry);
 }
 
-static int fpq_new_qdisc(void *priv, u32 tslot_mul, u32 tslot_shift)
+static int fpq_new_qdisc(void *priv, struct net *qdisc_net, u32 tslot_mul,
+		u32 tslot_shift)
 {
 	struct fp_sched_data *q = (struct fp_sched_data *)priv;
 
@@ -1005,7 +1010,7 @@ static int fpq_new_qdisc(void *priv, u32 tslot_mul, u32 tslot_shift)
 
 	/* connect socket */
 	q->ctrl_sock		= NULL;
-	err = connect_ctrl_socket(q);
+	err = connect_ctrl_socket(q, qdisc_net);
 	if (err != 0)
 		goto out_destroy_conn;
 

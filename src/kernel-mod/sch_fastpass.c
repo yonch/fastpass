@@ -149,6 +149,7 @@ struct fp_sched_data {
 	struct tasklet_struct	retrans_tasklet;
 	struct hrtimer			retrans_timer;
 
+	spinlock_t 				pacer_lock;
 	struct fp_pacer request_pacer;
 	struct socket	*ctrl_sock;			/* socket to the controller */
 	struct qdisc_watchdog watchdog;
@@ -178,7 +179,11 @@ static struct proc_dir_entry *fastpass_proc_entry;
 static inline bool trigger_tx(struct fp_sched_data* q)
 {
 	/* rate limit sending of requests */
-	return pacer_trigger(&q->request_pacer, fp_monotonic_time_ns());
+	bool res;
+	spin_lock_irq(&q->pacer_lock);
+	res = pacer_trigger(&q->request_pacer, fp_monotonic_time_ns());
+	spin_unlock_irq(&q->pacer_lock);
+	return res;
 }
 
 void trigger_tx_voidp(void *param)
@@ -572,9 +577,6 @@ static void send_request(struct fp_sched_data *q)
 	}
 	FASTPASS_BUG_ON(!q->ctrl_sock);
 
-	/* update request credits */
-	pacer_reset(&q->request_pacer);
-
 	/* allocate packet descriptor */
 	kern_pd = fpproto_pktdesc_alloc();
 	if (!kern_pd)
@@ -658,7 +660,8 @@ static enum hrtimer_restart maintenance_timer_func(struct hrtimer *timer)
 static void maintenance_tasklet_func(unsigned long int param)
 {
 	struct fp_sched_data *q = (struct fp_sched_data *)param;
-	u64 now_monotonic;
+	u64 now_monotonic = fp_monotonic_time_ns();
+	bool should_send = false;
 //	u64 now_real;
 
 
@@ -669,10 +672,18 @@ static void maintenance_tasklet_func(unsigned long int param)
 //	fpproto_maintenance_unlock(q->ctrl_sock->sk);
 
 	/* now is also a good opportunity to send a request, if allowed */
+	spin_lock_irq(&q->pacer_lock);
 	if (pacer_is_triggered(&q->request_pacer) &&
 		time_after_eq64(now_monotonic, pacer_next_event(&q->request_pacer))) {
-		send_request(q);
+		/* update request credits */
+		pacer_reset(&q->request_pacer);
+		/* mark that we need to send */
+		should_send = true;
 	}
+	spin_unlock_irq(&q->pacer_lock);
+
+	if (should_send)
+		send_request(q);
 
 }
 
@@ -790,6 +801,7 @@ static int fpq_new_qdisc(void *priv, u32 tslot_mul, u32 tslot_shift)
 	q->current_timeslot = (now_real * q->tslot_mul) >> q->tslot_shift;
 	wnd_reset(&q->alloc_wnd, q->current_timeslot);
 
+	spin_lock_init(&q->pacer_lock);
 	pacer_init_full(&q->request_pacer, now_monotonic, req_cost,
 			req_bucketlen, req_min_gap);
 

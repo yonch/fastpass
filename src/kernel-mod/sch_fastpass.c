@@ -784,58 +784,6 @@ err_release:
 	return rc;
 }
 
-static int fpq_new_qdisc(void *priv, u32 tslot_mul, u32 tslot_shift)
-{
-	struct fp_sched_data *q = (struct fp_sched_data *)priv;
-
-	u64 now_real = fp_get_time_ns();
-	u64 now_monotonic = fp_monotonic_time_ns();
-	int err;
-
-	q->unreq_dsts_head = q->unreq_dsts_tail = 0;
-	q->tslot_mul		= tslot_mul;
-	q->tslot_shift		= tslot_shift;
-
-	/* calculate timeslot from beginning of Epoch */
-	q->current_timeslot = (now_real * q->tslot_mul) >> q->tslot_shift;
-	wnd_reset(&q->alloc_wnd, q->current_timeslot);
-
-	spin_lock_init(&q->pacer_lock);
-	pacer_init_full(&q->request_pacer, now_monotonic, req_cost,
-			req_bucketlen, req_min_gap);
-
-	/* initialize the fastpass protocol (before initializing socket) */
-	q->is_destroyed = false;
-	spin_lock_init(&q->conn_lock);
-	fpproto_init_conn(&q->conn, &fastpass_sch_proto_ops, (void *)q,
-			(u64)reset_window_us * NSEC_PER_USEC, retrans_timeout_ns);
-
-	/* connect socket */
-	q->ctrl_sock		= NULL;
-	err = connect_ctrl_socket(q);
-	if (err != 0)
-		goto out_destroy_conn;
-
-	tasklet_init(&q->maintenance_tasklet, &maintenance_tasklet_func, (unsigned long int)q);
-
-	hrtimer_init(&q->maintenance_timer, CLOCK_MONOTONIC, HRTIMER_MODE_REL);
-	q->maintenance_timer.function = maintenance_timer_func;
-	hrtimer_start(&q->maintenance_timer, ns_to_ktime(update_timer_ns),
-			HRTIMER_MODE_REL);
-
-	/* initialize retransmission timer */
-	tasklet_init(&q->retrans_tasklet, &retrans_tasklet_func, (unsigned long int)q);
-	hrtimer_init(&q->retrans_timer, CLOCK_MONOTONIC, HRTIMER_MODE_REL);
-	q->retrans_timer.function = retrans_timer_func;
-
-	return err;
-
-out_destroy_conn:
-	fpproto_destroy_conn(&q->conn);
-	pr_info("%s: error creating new qdisc err=%d\n", err);
-	return err;
-}
-
 /*
  * Prints flow status
  */
@@ -927,7 +875,6 @@ static int fastpass_proc_show(struct seq_file *seq, void *v)
 			scs->late_enqueue3, scs->late_enqueue2, scs->late_enqueue1,
 			scs->early_enqueue);
 	seq_printf(seq, ", %llu missed", scs->missed_timeslots);
-	seq_printf(seq, ", %llu high_backlog", scs->backlog_too_high);
 	seq_printf(seq, ", %llu assumed_lost", scs->timeslots_assumed_lost);
 	seq_printf(seq, "  (%llu late", scs->alloc_too_late);
 	seq_printf(seq, ", %llu premature)", scs->alloc_premature);
@@ -976,10 +923,10 @@ static const struct file_operations fastpass_proc_fops = {
 	.release = single_release,
 };
 
-static int fastpass_proc_init(struct fpq_sched_data *fpq, struct tsq_ops *ops)
+static int fastpass_proc_init(struct fpq_sched_data *fpq)
 {
 	char fname[PROC_FILENAME_MAX_SIZE];
-	snprintf(fname, PROC_FILENAME_MAX_SIZE, "fastpass/%s-%p", ops->id, fpq);
+	snprintf(fname, PROC_FILENAME_MAX_SIZE, "fastpass/stats-%p", fpq);
 	fpq->proc_entry = proc_create_data(fname, S_IRUGO, NULL, &fastpass_proc_fops, fpq);
 	if (fpq->proc_entry == NULL)
 		return -1; /* error */
@@ -989,6 +936,64 @@ static int fastpass_proc_init(struct fpq_sched_data *fpq, struct tsq_ops *ops)
 static void fastpass_proc_cleanup(struct fpq_sched_data *q)
 {
 	proc_remove(q->proc_entry);
+}
+
+static int fpq_new_qdisc(void *priv, u32 tslot_mul, u32 tslot_shift)
+{
+	struct fp_sched_data *q = (struct fp_sched_data *)priv;
+
+	u64 now_real = fp_get_time_ns();
+	u64 now_monotonic = fp_monotonic_time_ns();
+	int err;
+
+	q->unreq_dsts_head = q->unreq_dsts_tail = 0;
+	q->tslot_mul		= tslot_mul;
+	q->tslot_shift		= tslot_shift;
+
+	/* calculate timeslot from beginning of Epoch */
+	q->current_timeslot = (now_real * q->tslot_mul) >> q->tslot_shift;
+	wnd_reset(&q->alloc_wnd, q->current_timeslot);
+
+	spin_lock_init(&q->pacer_lock);
+	pacer_init_full(&q->request_pacer, now_monotonic, req_cost,
+			req_bucketlen, req_min_gap);
+
+	err = fastpass_proc_init(q);
+	if (err != 0)
+		goto out;
+
+	/* initialize the fastpass protocol (before initializing socket) */
+	q->is_destroyed = false;
+	spin_lock_init(&q->conn_lock);
+	fpproto_init_conn(&q->conn, &fastpass_sch_proto_ops, (void *)q,
+			(u64)reset_window_us * NSEC_PER_USEC, retrans_timeout_ns);
+
+	/* connect socket */
+	q->ctrl_sock		= NULL;
+	err = connect_ctrl_socket(q);
+	if (err != 0)
+		goto out_destroy_conn;
+
+	tasklet_init(&q->maintenance_tasklet, &maintenance_tasklet_func, (unsigned long int)q);
+
+	hrtimer_init(&q->maintenance_timer, CLOCK_MONOTONIC, HRTIMER_MODE_REL);
+	q->maintenance_timer.function = maintenance_timer_func;
+	hrtimer_start(&q->maintenance_timer, ns_to_ktime(update_timer_ns),
+			HRTIMER_MODE_REL);
+
+	/* initialize retransmission timer */
+	tasklet_init(&q->retrans_tasklet, &retrans_tasklet_func, (unsigned long int)q);
+	hrtimer_init(&q->retrans_timer, CLOCK_MONOTONIC, HRTIMER_MODE_REL);
+	q->retrans_timer.function = retrans_timer_func;
+
+	return err;
+
+out_destroy_conn:
+	fpproto_destroy_conn(&q->conn);
+	fastpass_proc_cleanup(q);
+out:
+	pr_info("%s: error creating new qdisc err=%d\n", err);
+	return err;
 }
 
 static void fpq_stop_qdisc(void *priv) {
@@ -1025,6 +1030,8 @@ static void fpq_stop_qdisc(void *priv) {
 	/* no race with other code setting the timer, so we can cancel retrans_timer */
 	hrtimer_cancel(&q->retrans_timer);
 	tasklet_kill(&q->retrans_tasklet);
+
+	fastpass_proc_cleanup(q);
 }
 
 static void fpq_add_timeslot(void *priv, u64 src_dst_key)

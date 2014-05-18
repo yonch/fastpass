@@ -152,7 +152,6 @@ struct fp_sched_data {
 	spinlock_t 				pacer_lock;
 	struct fp_pacer request_pacer;
 	struct socket	*ctrl_sock;			/* socket to the controller */
-	struct qdisc_watchdog watchdog;
 
 	bool					is_destroyed;
 	struct fpproto_conn		conn;

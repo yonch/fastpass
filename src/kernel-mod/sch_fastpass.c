@@ -580,13 +580,6 @@ static void send_request(struct fp_sched_data *q)
 	/* update request credits */
 	pacer_reset(&q->request_pacer);
 
-	spin_lock_irq(&q->conn_lock);
-	if (unlikely(q->is_destroyed == true))
-		goto out_conn_destroyed;
-	/* nack the tail of the outwnd if it has not been nacked or acked */
-	fpproto_prepare_to_send(&q->conn);
-	spin_unlock_irq(&q->conn_lock);
-
 	/* allocate packet descriptor */
 	kern_pd = fpproto_pktdesc_alloc();
 	if (!kern_pd)
@@ -594,6 +587,12 @@ static void send_request(struct fp_sched_data *q)
 	pd = &kern_pd->pktdesc;
 
 	pd->n_areq = 0;
+
+	spin_lock_irq(&q->conn_lock);
+	if (unlikely(q->is_destroyed == true))
+		goto out_conn_destroyed;
+	/* nack the tail of the outwnd if it has not been nacked or acked */
+	fpproto_prepare_to_send(&q->conn);
 
 	while ((pd->n_areq < FASTPASS_PKT_MAX_AREQ) && !unreq_dsts_is_empty(q)) {
 		/* get entry */
@@ -621,11 +620,6 @@ static void send_request(struct fp_sched_data *q)
 	fp_debug("end: unreq_flows=%u, unreq_tslots=%llu\n",
 			n_unreq_dsts(q), q->demand_tslots - q->requested_tslots);
 
-	/* commit packet. need to prepare again in case state changed */
-	spin_lock_irq(&q->conn_lock);
-	if (unlikely(q->is_destroyed == true))
-		goto out_conn_destroyed;
-	fpproto_prepare_to_send(&q->conn);
 	fpproto_commit_packet(&q->conn, pd, now_monotonic);
 	spin_unlock_irq(&q->conn_lock);
 
@@ -1028,7 +1022,10 @@ static void fpq_stop_qdisc(void *priv) {
 
 static void fpq_add_timeslot(void *priv, u64 src_dst_key)
 {
+	struct fp_sched_data *q = (struct fp_sched_data *)priv;
+	spin_lock_irq(&q->conn_lock);
 	flow_inc_demand(priv, src_dst_key, 1);
+	spin_unlock_irq(&q->conn_lock);
 }
 
 static struct tsq_ops fastpass_tsq_ops __read_mostly = {

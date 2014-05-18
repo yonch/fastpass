@@ -25,7 +25,7 @@ int main(int argc, char *argv[])
 		if (n_read == 0)
 			usleep(10000);
 		else
-			fpproto_print_log_struct(&conn_log);
+			fpproto_print_log_struct(&conn_log, stdout);
 	}
 
 	return 0;

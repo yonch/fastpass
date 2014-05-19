@@ -15,7 +15,8 @@ SRCS-y := main.c \
           ../protocol/fpproto.c \
           ../graph-algo/admissible_traffic.c \
           ../graph-algo/path_selection.c \
-          ../graph-algo/euler_split.c
+          ../graph-algo/euler_split.c \
+          ../grant-accept/pim.c
 
 CFLAGS += -O3 
 #CFLAGS += $(WERROR_FLAGS)
@@ -29,5 +30,6 @@ CFLAGS += -I${PWD}
 CFLAGS += -g 
 CFLAGS += -DNDEBUG
 CFLAGS += -march=core2
+#CCFLAGS += -DPARALLEL_ALGO
 
 include $(RTE_SDK)/mk/rte.extapp.mk

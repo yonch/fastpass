@@ -492,10 +492,10 @@ static void enqueue_single_skb(struct Qdisc *sch, struct sk_buff *skb)
 	spin_unlock(&q->hash_tbl_lock);
 
 	if (created_new_timeslot)
-		q->timeslot_ops->add_timeslot(sched_data_to_priv(q), src_dst_key)
+		q->timeslot_ops->add_timeslot(sched_data_to_priv(q), src_dst_key);
 
-	fp_debug("enqueued data packet of len %d to flow 0x%llX, qlen=%d\n",
-			qdisc_pkt_len(skb), dst->src_dst_key, dst->qlen);
+	fp_debug("enqueued data packet of len %d to flow 0x%llX\n",
+			qdisc_pkt_len(skb), dst->src_dst_key);
 
 	return;
 
@@ -757,8 +757,8 @@ static struct sk_buff *tsq_dequeue(struct Qdisc *sch)
 	/* no packets in queue, go to sleep */
 	qdisc_throttled(sch);
 	/* will re-read time, to make sure we sleep >0 time */
-	qdisc_watchdog_schedule_ns(&q->watchdog,
-				   fp_monotonic_time_ns() + q->update_timeslot_timer_ns);
+//	qdisc_watchdog_schedule_ns(&q->watchdog,
+//				   fp_monotonic_time_ns() + q->update_timeslot_timer_ns);
 	return NULL;
 
 out_got_skb:
@@ -924,8 +924,7 @@ void tsq_garbage_collect(void *priv)
 				/* yes, let's gc */
 				/* erase from old tree */
 				rb_erase(cur, root);
-				fp_debug("gc flow 0x%04llX, used %llu timeslots\n",
-						dst->src_dst_key, dst->demand_tslots);
+				fp_debug("gc flow 0x%04llX\n", dst->src_dst_key);
 				kmem_cache_free(timeslot_dst_cachep, dst);
 				q->stat.gc_flows++;
 				continue;

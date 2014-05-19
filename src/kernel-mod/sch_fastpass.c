@@ -246,7 +246,7 @@ static void unreq_dsts_enqueue(struct fp_sched_data *q, u32 dst_id)
 	FASTPASS_BUG_ON(q->dsts[dst_id].state == FLOW_REQUEST_QUEUE);
 
 	/* enqueue */
-	q->unreq_flows[q->unreq_dsts_tail++] = dst_id;
+	q->unreq_flows[q->unreq_dsts_tail++ % MAX_NODES] = dst_id;
 	q->dsts[dst_id].state = FLOW_REQUEST_QUEUE;
 
 	/* update request timer if necessary */
@@ -266,7 +266,7 @@ static u32 unreq_dsts_dequeue(struct fp_sched_data* q)
 	FASTPASS_BUG_ON(unreq_dsts_is_empty(q));
 
 	/* get entry and remove from queue */
-	res = q->unreq_flows[q->unreq_dsts_head++];
+	res = q->unreq_flows[q->unreq_dsts_head++ % MAX_NODES];
 	q->dsts[res].state = FLOW_UNQUEUED;
 
 	return res;
@@ -343,7 +343,7 @@ static void handle_reset(void *param)
 
 		q->demand_tslots += dst->demand_tslots;
 
-		fp_debug("rebased flow 0x%04llX, new demand %llu timeslots\n",
+		fp_debug("rebased flow 0x%04X, new demand %llu timeslots\n",
 				dst_id, dst->demand_tslots);
 
 		/* add flow to request queue if it's not already there */
@@ -381,7 +381,7 @@ static void handle_alloc(void *param, u32 base_tslot, u16 *dst_ids,
 			wnd_get_mask(&q->alloc_wnd, q->current_timeslot+63));
 
 	for (i = 0; i < n_tslots; i++) {
-		struct fp_dst *f;
+		struct fp_dst *dst;
 
 		spec = tslots[i];
 		dst_id_idx = spec >> 4;
@@ -431,16 +431,16 @@ static void handle_alloc(void *param, u32 base_tslot, u16 *dst_ids,
 //		}
 
 		dst_id = dst_ids[dst_id_idx - 1];
-		f = &q->dsts[dst_id];
+		dst = &q->dsts[dst_id];
 		/* okay, allocate */
 //		wnd_mark(&q->alloc_wnd, full_tslot);
 //		q->schedule[wnd_pos(full_tslot)] = dst[dst_ind - 1];
-		if (f->used_tslots != f->demand_tslots) {
+		if (dst->used_tslots != dst->demand_tslots) {
 
 			tsq_admit_now(q, dst_id);
-			flow_inc_used(q, f, 1);
+			flow_inc_used(q, dst, 1);
 
-			f->alloc_tslots++;
+			dst->alloc_tslots++;
 			q->alloc_tslots++;
 			q->stat.admitted_timeslots++;
 			if (full_tslot > current_timeslot) {
@@ -465,8 +465,8 @@ static void handle_alloc(void *param, u32 base_tslot, u16 *dst_ids,
 			 *  q->schedule so it might at least reduce latency if demand
 			 *  increases later */
 			q->stat.unwanted_alloc++;
-			fp_debug("got an allocation over demand, flow 0x%04llX, demand %llu\n",
-					f->src_dst_key, f->demand_tslots);
+			fp_debug("got an allocation over demand, flow 0x%04X, demand %llu\n",
+					dst_id, dst->demand_tslots);
 		}
 	}
 
@@ -543,8 +543,8 @@ static void handle_ack(void *param, struct fpproto_pktdesc *pd)
 			delta = new_acked - dst->acked_tslots;
 			q->acked_tslots += delta;
 			dst->acked_tslots = new_acked;
-			fp_debug("acked request of %llu additional slots, flow 0x%04llX, total %llu slots\n",
-					delta, dst->src_dst_key, new_acked);
+			fp_debug("acked request of %llu additional slots, flow 0x%04X, total %llu slots\n",
+					delta, dst_id, new_acked);
 
 			/* the demand-limiting window might be in effect, re-enqueue flow */
 			if (unlikely((!dst_is_unreq(dst))
@@ -568,8 +568,8 @@ static void handle_neg_ack(void *param, struct fpproto_pktdesc *pd)
 		req_tslots = pd->areq[i].tslots;
 		/* don't need to resend if got ack >= req_tslots */
 		if (req_tslots <= dst->acked_tslots) {
-			fp_debug("nack for request of %llu for flow 0x%04llX, but already acked %llu\n",
-							req_tslots, dst->src_dst_key, dst->acked_tslots);
+			fp_debug("nack for request of %llu for flow 0x%04X, but already acked %llu\n",
+							req_tslots, dst_id, dst->acked_tslots);
 			continue;
 		}
 
@@ -577,7 +577,7 @@ static void handle_neg_ack(void *param, struct fpproto_pktdesc *pd)
 		if (!dst_is_unreq(dst))
 			unreq_dsts_enqueue(q, dst_id);
 
-		fp_debug("nack for request of %llu for flow 0x%04llX (%llu acked), added to retransmit queue\n",
+		fp_debug("nack for request of %llu for flow 0x%04X (%llu acked), added to retransmit queue\n",
 						req_tslots, dst_id, dst->acked_tslots);
 	}
 }
@@ -628,7 +628,7 @@ static void send_request(struct fp_sched_data *q)
 				dst->acked_tslots + FASTPASS_REQUEST_WINDOW_SIZE - 1);
 		if(new_requested <= dst->acked_tslots) {
 			q->stat.queued_flow_already_acked++;
-			fp_debug("flow 0x%04llX was in queue, but already fully acked\n",
+			fp_debug("flow 0x%04X was in queue, but already fully acked\n",
 					dst_id);
 			continue;
 		}
@@ -982,7 +982,7 @@ static int fpq_new_qdisc(void *priv, struct net *qdisc_net, u32 tslot_mul,
 
 	/* initialize retransmission timer */
 	tasklet_init(&q->retrans_tasklet, &retrans_tasklet_func, (unsigned long int)q);
-	hrtimer_init(&q->retrans_timer, CLOCK_MONOTONIC, HRTIMER_MODE_REL);
+	hrtimer_init(&q->retrans_timer, CLOCK_MONOTONIC, HRTIMER_MODE_ABS);
 	q->retrans_timer.function = retrans_timer_func;
 
 	return err;

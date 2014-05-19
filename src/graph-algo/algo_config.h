@@ -17,7 +17,7 @@
 #ifdef PARALLEL_ALGO
 /* parallel algo */
 #ifndef ALGO_N_CORES
-#define ALGO_N_CORES				N_PARTITIONS
+#define ALGO_N_CORES				1 /* for now */
 #endif
 
 #endif

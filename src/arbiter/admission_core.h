@@ -12,29 +12,6 @@
 #include "seq_admission_core.h"
 #include "../graph-algo/admissible.h"
 
-#define		NUM_NODES					256
-
-#define		ALLOWED_TIMESLOT_LAG		4
-
-#define		ADMITTED_TRAFFIC_MEMPOOL_SIZE	(BATCH_SIZE * 16 * N_ADMISSION_CORES)
-#define		ADMITTED_TRAFFIC_CACHE_SIZE		(2 * BATCH_SIZE)
-
-#define		BIN_MEMPOOL_CACHE_SIZE			(16 * NUM_BINS - 1)
-#define		BIN_MEMPOOL_SIZE				(1024 + 32 * NUM_BINS * N_ADMISSION_CORES)
-
-/* admitted_traffic pool */
-extern struct rte_mempool* admitted_traffic_pool[NB_SOCKETS];
-
-/* Specifications for controller thread */
-struct admission_core_cmd {
-	uint64_t start_time;
-	uint64_t end_time;
-
-	uint64_t start_timeslot;
-
-	uint32_t admission_core_index; /* the index among admission cores of this one */
-};
-
 static inline
 void admission_init_global(struct rte_ring *q_admitted_out) {
 	seq_admission_init_global(q_admitted_out);

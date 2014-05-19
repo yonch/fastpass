@@ -21,6 +21,7 @@
 #include "dpdk-platform.h"
 #include "bigmap.h"
 #include "admission_core.h"
+#include "admission_core_common.h"
 #include "fp_timer.h"
 #include "../protocol/stat_print.h"
 #include "igmp.h"

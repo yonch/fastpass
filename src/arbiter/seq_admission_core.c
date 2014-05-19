@@ -8,7 +8,7 @@
 #include <string.h>
 
 #include "main.h"
-#include "admission_core.h"
+#include "admission_core_common.h"
 #include "admission_log.h"
 #include "../protocol/platform.h"
 #include "../graph-algo/admissible.h"

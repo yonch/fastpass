@@ -8,9 +8,13 @@
 #ifndef PIM_ADMISSION_CORE_H
 #define PIM_ADMISSION_CORE_H
 
-#include "main.h"
+#include <rte_ring.h>
 
-#include <rte_mempool.h>
+#define		ADMITTED_TRAFFIC_MEMPOOL_SIZE		(16 * N_ADMISSION_CORES)
+#define		ADMITTED_TRAFFIC_CACHE_SIZE		8
+
+#define		BIN_MEMPOOL_SIZE			(16 * N_ADMISSION_CORES)
+#define		BIN_MEMPOOL_CACHE_SIZE			8
 
 #define		Q_NEW_DEMANDS_RING_SIZE      (64 * 1024)
 

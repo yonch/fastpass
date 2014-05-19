@@ -10,15 +10,11 @@
 
 #include <rte_ring.h>
 
+#include "main.h"
+
 #define		NUM_NODES					256
 
 #define		ALLOWED_TIMESLOT_LAG		4
-
-#define		ADMITTED_TRAFFIC_MEMPOOL_SIZE	(BATCH_SIZE * 16 * N_ADMISSION_CORES)
-#define		ADMITTED_TRAFFIC_CACHE_SIZE		(2 * BATCH_SIZE)
-
-#define		BIN_MEMPOOL_CACHE_SIZE			(16 * NUM_BINS - 1)
-#define		BIN_MEMPOOL_SIZE				(1024 + 32 * NUM_BINS * N_ADMISSION_CORES)
 
 /* admitted_traffic pool */
 extern struct rte_mempool* admitted_traffic_pool[NB_SOCKETS];

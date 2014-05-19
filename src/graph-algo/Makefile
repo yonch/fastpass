@@ -8,6 +8,7 @@ CCFLAGS += -march=core2
 #CCFLAGS += -O1
 CCFLAGS += -DNO_DPDK -DALGO_N_CORES=1 
 #CCFLAGS += -DPARALLEL_ALGO
+CCFLAGS += -DPIPELINED_ALGO
 #CCFLAGS += -debug inline-debug-info
 LDFLAGS = -lm
 #LDFLAGS = -debug inline-debug-info

@@ -30,6 +30,7 @@ CFLAGS += -I${PWD}
 CFLAGS += -g 
 CFLAGS += -DNDEBUG
 CFLAGS += -march=core2
-#CCFLAGS += -DPARALLEL_ALGO
+#CFLAGS += -DPARALLEL_ALGO
+CFLAGS += -DPIPELINED_ALGO
 
 include $(RTE_SDK)/mk/rte.extapp.mk

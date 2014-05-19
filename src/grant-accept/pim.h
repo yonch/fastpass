@@ -24,9 +24,13 @@
 #define PIM_BITMASK_WORD(node)      (node >> 3)
 #define PIM_BITMASK_SHIFT(node)     (node & (PIM_BITMASKS_PER_8_BIT - 1))
 
-/**
- * A structure for the state of a grant partition
- */
+/* Data structures associated with one allocation core */
+/* TODO: move more stuff from pim_state to this structure? */
+struct pim_core_state {
+        struct admission_core_statistics stat;
+} __attribute__((aligned(64))) /* don't want sharing between cores */;
+
+/* A structure for the state of a grant partition */
 struct pim_state {
         struct ga_adj requests_by_src[N_PARTITIONS]; /* per src partition */
         struct ga_partd_edgelist grants;
@@ -41,6 +45,7 @@ struct pim_state {
         struct fp_ring *q_admitted_out;
         struct fp_mempool *bin_mempool;
         struct fp_mempool *admitted_traffic_mempool;
+        struct pim_core_state cores[N_PARTITIONS];
         struct admission_statistics stat;
 };
 

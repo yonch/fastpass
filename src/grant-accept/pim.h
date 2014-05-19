@@ -61,6 +61,11 @@ void pim_add_backlog(struct pim_state *state, uint16_t src, uint16_t dst,
 void pim_flush_backlog(struct pim_state *state);
 
 /**
+ * Reset state of all flows for which src is the sender
+ */
+void pim_reset_sender(struct pim_state *state, uint16_t src);
+
+/**
  * Prepare data structures so they are ready to allocate the next timeslot
  */
 void pim_prepare(struct pim_state *state, uint16_t partition_index);

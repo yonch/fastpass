@@ -8,6 +8,7 @@ APP = fast
 SRCS-y := main.c \
           control.c \
           comm_core.c \
+          pim_admission_core.c \
           seq_admission_core.c \
           path_sel_core.c \
           log_core.c \

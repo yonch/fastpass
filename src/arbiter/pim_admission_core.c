@@ -7,8 +7,14 @@
 
 #include "pim_admission_core.h"
 
+#include <rte_errno.h>
+#include <rte_string_fns.h>
+#include <rte_timer.h>
+
+#include "admission_core_common.h"
 #include "admission_log.h"
 #include "../grant-accept/pim.h"
+#include "../graph-algo/algo_config.h"
 
 struct pim_state g_pim_state;
 
@@ -72,13 +78,13 @@ void pim_admission_init_global(struct rte_ring *q_admitted_out)
 		rte_snprintf(s, sizeof(s), "q_new_demands_%d", i);
 		q_new_demands[i] = rte_ring_create(s, Q_NEW_DEMANDS_RING_SIZE, 0,
                                                    RING_F_SP_ENQ | RING_F_SC_DEQ);
-		if (q_bin[i] == NULL)
+		if (q_new_demands[i] == NULL)
 			rte_exit(EXIT_FAILURE, "Cannot init q_new_demands[%d]: %s\n",
                                  i, rte_strerror(rte_errno));
 	}
 
 	/* init pim_state */
-	pim_init_state(&g_pim_state, q_new_dmeands, q_admitted_out,
+	pim_init_state(&g_pim_state, q_new_demands, q_admitted_out,
                        bin_mempool, admitted_traffic_pool[0]);
 }
 
@@ -97,9 +103,6 @@ int exec_pim_admission_core(void *void_cmd_p)
 	struct admission_core_cmd *cmd = (struct admission_core_cmd *)void_cmd_p;
 	uint32_t core_ind = cmd->admission_core_index;
 	uint64_t logical_timeslot = cmd->start_timeslot;
-	struct admission_core_state *core = &g_pim_state.cores[core_ind];
-	int traffic_pool_socketid = 0;
-	int rc;
 	uint64_t start_time_first_timeslot;
 
 	ADMISSION_DEBUG("core %d admission %d starting allocations\n",
@@ -114,22 +117,17 @@ int exec_pim_admission_core(void *void_cmd_p)
 				start_time_first_timeslot);
 
                 /* reset per-timeslot state */
-                uint16_t partition;
-                for (partition = 0; partition < N_PARTITIONS; partition++)
-                        pim_prepare(&g_pim_state, partition);
+                pim_prepare(&g_pim_state, core_ind);
 
                 /* run multiple iterations of pim and print out accepted edges */
-                /* TODO: add synchronization to enable multiple admission cores */
+                /* TODO: add synchronization to enable multiple admission cores and partitions */
                 uint8_t i;
                 for (i = 0; i < NUM_ITERATIONS; i++) {
-                        for (partition = 0; partition < N_PARTITIONS; partition++)
-                                pim_do_grant(&g_pim_state, partition);
-                        for (partition = 0; partition < N_PARTITIONS; partition++)
-                                pim_do_accept(&g_pim_state, partition);
+                        pim_do_grant(&g_pim_state, core_ind);
+                        pim_do_accept(&g_pim_state, core_ind);
                 }
 
-                for (partition = 0; partition < N_PARTITIONS; partition++)
-                        pim_process_accepts(&g_pim_state, partition);
+                pim_process_accepts(&g_pim_state, core_ind);
 
 		admission_log_allocation_end();
 

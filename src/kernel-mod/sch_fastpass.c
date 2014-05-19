@@ -35,11 +35,11 @@
 
 #include "sch_timeslot.h"
 #include "fastpass_proto.h"
-#include "fp_statistics.h"
 #include "../protocol/platform.h"
 #include "../protocol/pacer.h"
 #include "../protocol/window.h"
 #include "../protocol/topology.h"
+#include "../protocol/stat_print.h"
 
 /*
  * FastPass client qdisc
@@ -56,11 +56,10 @@
 #define FASTPASS_HORIZON					64
 #define FASTPASS_REQUEST_WINDOW_SIZE 		(1 << 13)
 
-#define CLOCK_MOVE_RESET_THRESHOLD_TSLOTS	64
-
 #define FASTPASS_CTRL_SOCK_WMEM				(64*1024*1024)
 
-#define SHOULD_DUMP_FLOW_INFO				0
+#define PROC_FILENAME_MAX_SIZE				64
+
 enum {
 	FLOW_UNQUEUED,
 	FLOW_REQUEST_QUEUE,
@@ -72,7 +71,7 @@ module_param(req_cost, uint, 0444);
 MODULE_PARM_DESC(req_cost, "Cost of sending a request in ns, for request pacing");
 EXPORT_SYMBOL_GPL(req_cost);
 
-static u32 req_bucketlen = (4 * req_cost);
+static u32 req_bucketlen = 4 * (2 << 20); /* 4 * req_cost */
 module_param(req_bucketlen, uint, 0444);
 MODULE_PARM_DESC(req_bucketlen, "Max bucket size in ns, for request pacing");
 EXPORT_SYMBOL_GPL(req_bucketlen);
@@ -110,8 +109,13 @@ EXPORT_SYMBOL_GPL(proc_dump_dst);
 
 static u32 miss_threshold = 16;
 module_param(miss_threshold, uint, 0444);
-MODULE_PARM_DESC(miss_threshold, "how often to perform periodic tasks");
+MODULE_PARM_DESC(miss_threshold, "how far in the past can the allocation be and still be accepted");
 EXPORT_SYMBOL_GPL(miss_threshold);
+
+static u32 max_preload = 64;
+module_param(max_preload, uint, 0444);
+MODULE_PARM_DESC(max_preload, "how futuristic can an allocation be and still be accepted");
+EXPORT_SYMBOL_GPL(max_preload);
 
 /*
  * Per flow structure, dynamically allocated
@@ -123,6 +127,28 @@ struct fp_dst {
 	u64		alloc_tslots;		/* total received allocations */
 	u64		used_tslots;		/* timeslots in which packets moved */
 	uint8_t state;
+};
+
+struct fp_sched_stat {
+	/* dequeue-related */
+	__u64		admitted_timeslots;
+	__u64		early_enqueue;
+	__u64		late_enqueue1;
+	__u64		late_enqueue2;
+	__u64		late_enqueue3;
+	__u64		late_enqueue4;
+
+	/* request-related */
+	__u64		req_alloc_errors;
+	__u64		request_with_empty_flowqueue;
+	__u64		queued_flow_already_acked;
+	/* alloc-related */
+	__u64		alloc_too_late;
+	__u64		alloc_premature;
+	__u64		unwanted_alloc;
+	/* alloc report-related */
+	__u64		alloc_report_larger_than_requested;
+	__u64		timeslots_assumed_lost;
 };
 
 /**
@@ -156,6 +182,8 @@ struct fp_sched_data {
 	bool					is_destroyed;
 	struct fpproto_conn		conn;
 	spinlock_t 				conn_lock;
+
+	struct proc_dir_entry *proc_entry;
 
 	/* counters */
 	u64		demand_tslots;		/* total needed timeslots */
@@ -204,22 +232,22 @@ static void set_retrans_timer(void *param, u64 when)
 	hrtimer_start(&q->retrans_timer, ns_to_ktime(when), HRTIMER_MODE_ABS);
 }
 
-static inline bool dst_is_unreq(struct fp_sched_data *q, u32 dst_ind)
+static inline bool dst_is_unreq(struct fp_dst *dst)
 {
-	return (q->dsts[dst_ind].state != FLOW_UNQUEUED);
+	return (dst->state != FLOW_UNQUEUED);
 }
 
 /**
  * Enqueues flow to the request queue, if it's not already in the retransmit
  *    queue
  */
-static void unreq_dsts_enqueue(struct fp_sched_data *q, u32 dst_ind)
+static void unreq_dsts_enqueue(struct fp_sched_data *q, u32 dst_id)
 {
-	FASTPASS_BUG_ON(q->dsts[dst_ind].state == FLOW_REQUEST_QUEUE);
+	FASTPASS_BUG_ON(q->dsts[dst_id].state == FLOW_REQUEST_QUEUE);
 
 	/* enqueue */
-	q->unreq_flows[q->unreq_dsts_tail++] = dst_ind;
-	q->dsts[dst_ind].state = FLOW_REQUEST_QUEUE;
+	q->unreq_flows[q->unreq_dsts_tail++] = dst_id;
+	q->dsts[dst_id].state = FLOW_REQUEST_QUEUE;
 
 	/* update request timer if necessary */
 	if (trigger_tx(q))
@@ -228,7 +256,7 @@ static void unreq_dsts_enqueue(struct fp_sched_data *q, u32 dst_ind)
 
 static bool unreq_dsts_is_empty(struct fp_sched_data* q)
 {
-	return q->unreq_dsts_head = q->unreq_dsts_tail;
+	return q->unreq_dsts_head == q->unreq_dsts_tail;
 }
 
 static u32 unreq_dsts_dequeue(struct fp_sched_data* q)
@@ -259,14 +287,15 @@ void flow_inc_used(struct fp_sched_data *q, struct fp_dst* f, u64 amount) {
  *   Maintains the necessary invariants, e.g. adds the flow to the unreq_flows
  *   list if necessary
  */
-static void flow_inc_demand(struct fp_sched_data *q, struct fp_dst *f, u64 amount)
+static void flow_inc_demand(struct fp_sched_data *q, u32 dst_id, u64 amount)
 {
-	f->demand_tslots += amount;
+	struct fp_dst *dst = &q->dsts[dst_id];
+	dst->demand_tslots += amount;
 	q->demand_tslots += amount;
 
-	if (!dst_is_unreq(f))
+	if (!dst_is_unreq(dst))
 		/* flow not on scheduling queue yet, enqueue */
-		unreq_dsts_enqueue(q, f);
+		unreq_dsts_enqueue(q, dst_id);
 }
 
 /**
@@ -274,14 +303,15 @@ static void flow_inc_demand(struct fp_sched_data *q, struct fp_dst *f, u64 amoun
  */
 static void handle_reset(void *param)
 {
-	BUILD_BUG_ON_MSG(MAX_NODES & (MAX_NODES - 1), "MAX_NODES needs to be a power of 2");
 	struct fp_sched_data *q = (struct fp_sched_data *)param;
 
 	struct fp_dst *dst;
 	u32 idx;
-	u32 dst_ind;
+	u32 dst_id;
 	u32 mask = MAX_NODES - 1;
-	u32 base_idx = src_dst_key_hash(fp_monotonic_time_ns()) & mask;
+	u32 base_idx = jhash_1word((__be32)fp_monotonic_time_ns(), 0) & mask;
+
+	BUILD_BUG_ON_MSG(MAX_NODES & (MAX_NODES - 1), "MAX_NODES needs to be a power of 2");
 
 	/* reset future allocations */
 	wnd_reset(&q->alloc_wnd, q->current_timeslot);
@@ -297,8 +327,8 @@ static void handle_reset(void *param)
 		/* we start from a pseudo-random index 'base_idx' to have less
 		 * discrimination towards the lower idx in unreq_dsts_enqueue, however
 		 * this is not a perfectly fair scheme */
-		dst_ind = (idx + base_idx) & mask;
-		dst = &q->dsts[dst_ind];
+		dst_id = (idx + base_idx) & mask;
+		dst = &q->dsts[dst_id];
 
 		/* if flow was empty anyway, nothing more to do */
 		if (likely(dst->demand_tslots == dst->used_tslots))
@@ -314,11 +344,11 @@ static void handle_reset(void *param)
 		q->demand_tslots += dst->demand_tslots;
 
 		fp_debug("rebased flow 0x%04llX, new demand %llu timeslots\n",
-				dst_ind, dst->demand_tslots);
+				dst_id, dst->demand_tslots);
 
 		/* add flow to request queue if it's not already there */
 		if (dst->state == FLOW_UNQUEUED)
-			unreq_dsts_enqueue(q, dst_ind);
+			unreq_dsts_enqueue(q, dst_id);
 	}
 }
 
@@ -335,7 +365,6 @@ static void handle_alloc(void *param, u32 base_tslot, u16 *dst_ids,
 	u32 dst_id;
 	u64 full_tslot;
 	u64 now_real = fp_get_time_ns();
-	u16 node_id;
 	u64 current_timeslot;
 
 	/* every alloc should be ACKed */
@@ -379,14 +408,14 @@ static void handle_alloc(void *param, u32 base_tslot, u16 *dst_ids,
 				base_tslot, full_tslot, dst_ids[dst_id_idx - 1], dst_ids[dst_id_idx - 1]);
 
 		/* is alloc too far in the past? */
-		if (unlikely(time_before64(full_tslot, current_timeslot - q->miss_threshold))) {
+		if (unlikely(time_before64(full_tslot, current_timeslot - miss_threshold))) {
 		//if (unlikely(wnd_seq_before(&q->alloc_wnd, full_tslot))) {
 			q->stat.alloc_too_late++;
 			fp_debug("-X- already gone, dropping\n");
 			continue;
 		}
 
-		if (unlikely(time_after64(full_tslot, current_timeslot + q->max_preload))) {
+		if (unlikely(time_after64(full_tslot, current_timeslot + max_preload))) {
 //		if (unlikely(wnd_seq_after(&q->alloc_wnd, full_tslot))) {
 			q->stat.alloc_premature++;
 			fp_debug("-X- too futuristic, dropping\n");
@@ -408,12 +437,12 @@ static void handle_alloc(void *param, u32 base_tslot, u16 *dst_ids,
 //		q->schedule[wnd_pos(full_tslot)] = dst[dst_ind - 1];
 		if (f->used_tslots != f->demand_tslots) {
 
-			tsq_admit_now(q, dst_id)
+			tsq_admit_now(q, dst_id);
 			flow_inc_used(q, f, 1);
 
 			f->alloc_tslots++;
 			q->alloc_tslots++;
-			q->stat.sucessful_timeslots++;
+			q->stat.admitted_timeslots++;
 			if (full_tslot > current_timeslot) {
 				q->stat.early_enqueue++;
 			} else {
@@ -491,7 +520,7 @@ static void handle_areq(void *param, u16 *dst_and_count, int n)
 			q->stat.timeslots_assumed_lost += n_lost;
 
 			flow_inc_used(q, dst, n_lost);
-			flow_inc_demand(q, dst, n_lost);
+			flow_inc_demand(q, dst_id, n_lost);
 		}
 	}
 }
@@ -518,7 +547,7 @@ static void handle_ack(void *param, struct fpproto_pktdesc *pd)
 					delta, dst->src_dst_key, new_acked);
 
 			/* the demand-limiting window might be in effect, re-enqueue flow */
-			if (unlikely((!dst_is_unreq(dst_id))
+			if (unlikely((!dst_is_unreq(dst))
 					&& (dst->requested_tslots != dst->demand_tslots)))
 				unreq_dsts_enqueue(q, dst_id);
 		}
@@ -545,7 +574,7 @@ static void handle_neg_ack(void *param, struct fpproto_pktdesc *pd)
 		}
 
 		/* add to retransmit queue */
-		if (!dst_is_unreq(q, dst_id))
+		if (!dst_is_unreq(dst))
 			unreq_dsts_enqueue(q, dst_id);
 
 		fp_debug("nack for request of %llu for flow 0x%04llX (%llu acked), added to retransmit queue\n",
@@ -683,15 +712,12 @@ static void maintenance_tasklet_func(unsigned long int param)
 
 	if (should_send)
 		send_request(q);
-
 }
 
 static void retrans_tasklet_func(unsigned long int param)
 {
 	struct fp_sched_data *q = (struct fp_sched_data *)param;
 	u64 now_monotonic = fp_monotonic_time_ns();
-	struct socket *ctrl_sock;
-	rcu_read_lock_bh();
 
 	spin_lock_irq(&q->conn_lock);
 	if (likely(q->is_destroyed == false))
@@ -729,7 +755,7 @@ struct fpproto_ops fastpass_sch_proto_ops = {
 };
 
 /* reconnects the control socket to the controller */
-static int connect_ctrl_socket(struct fp_sched_data *q)
+static int connect_ctrl_socket(struct fp_sched_data *q, struct net *qdisc_net)
 {
 	struct sock *sk;
 	int opt;
@@ -742,8 +768,8 @@ static int connect_ctrl_socket(struct fp_sched_data *q)
 	FASTPASS_BUG_ON(q->ctrl_sock != NULL);
 
 	/* create socket */
-	rc = __sock_create(dev_net(qdisc_dev(sch)), AF_INET, SOCK_DGRAM,
-			   IPPROTO_FASTPASS, &q->ctrl_sock, 1);
+	rc = __sock_create(qdisc_net, AF_INET, SOCK_DGRAM, IPPROTO_FASTPASS,
+			&q->ctrl_sock, 1);
 	if (rc != 0) {
 		FASTPASS_WARN("Error %d creating socket\n", rc);
 		q->ctrl_sock = NULL;
@@ -765,7 +791,7 @@ static int connect_ctrl_socket(struct fp_sched_data *q)
 
 	/* give socket a reference to this qdisc for watchdog */
 	((struct fastpass_sock *)sk)->rcv_handler = ctrl_rcv_handler;
-	fpproto_set_priv(sk, q);
+	fpproto_set_priv(sk, (void *)q);
 
 	/* connect */
 	sock_addr.sin_addr.s_addr = ctrl_addr_netorder;
@@ -791,23 +817,20 @@ static void dump_flow_info(struct seq_file *seq, struct fp_sched_data *q,
 		bool only_active)
 {
 	struct fp_dst *dst;
-	u32 dst_ind;
-	struct fp_dst *dst;
-	u32 mask = MAX_NODES - 1;
-	u32 base_idx = src_dst_key_hash(fp_monotonic_time_ns()) & mask;
+	u32 dst_id;
 	u32 num_printed = 0;
 
 	printk(KERN_DEBUG "fastpass flows (only_active=%d):\n", only_active);
 
-	for (idx = 0; dst_ind < MAX_NODES; dst_ind++) {
-		dst = &q->dsts[dst_ind];
+	for (dst_id = 0; dst_id < MAX_NODES; dst_id++) {
+		dst = &q->dsts[dst_id];
 
 		if (dst->demand_tslots == dst->used_tslots && only_active)
 			continue;
 
 		num_printed++;
-		printk(KERN_DEBUG "flow 0x%04llX demand %llu requested %llu acked %llu alloc %llu used %llu state %d\n",
-				dst_ind, dst->demand_tslots, dst->requested_tslots,
+		printk(KERN_DEBUG "flow 0x%04X demand %llu requested %llu acked %llu alloc %llu used %llu state %d\n",
+				dst_id, dst->demand_tslots, dst->requested_tslots,
 				dst->acked_tslots, dst->alloc_tslots, dst->used_tslots,
 				dst->state);
 	}
@@ -815,49 +838,9 @@ static void dump_flow_info(struct seq_file *seq, struct fp_sched_data *q,
 	printk(KERN_DEBUG "fastpass printed %u flows\n", num_printed);
 }
 
-/* dumps statistics to netlink skb (part of qdisc API) */
-static int fp_tc_dump_stats(struct Qdisc *sch, struct gnet_dump *d)
-{
-	struct fp_sched_data *q = qdisc_priv(sch);
-	u64 now_real = fp_get_time_ns();
-	u64 now_monotonic = fp_monotonic_time_ns();
-	u64 time_next_req = pacer_next_event(&q->request_pacer);
-	struct tc_fastpass_qd_stats st = {
-		.version			= FASTPASS_STAT_VERSION,
-		.n_unreq_flows		= n_unreq_dsts(q),
-		.stat_timestamp		= now_real,
-		.current_timeslot	= q->current_timeslot,
-		.horizon_mask		= wnd_get_mask(&q->alloc_wnd, q->current_timeslot+63),
-		.time_next_request	= time_next_req - ( ~time_next_req ? now_monotonic : 0),
-		.demand_tslots		= q->demand_tslots,
-		.requested_tslots	= q->requested_tslots,
-		.alloc_tslots		= q->alloc_tslots,
-		.acked_tslots		= q->acked_tslots,
-		.used_tslots		= q->used_tslots,
-	};
-
-	memset(&st.sched_stats[0], 0, TC_FASTPASS_SCHED_STAT_MAX_BYTES);
-	memset(&st.socket_stats[0], 0, TC_FASTPASS_SOCKET_STAT_MAX_BYTES);
-	memset(&st.proto_stats[0], 0, TC_FASTPASS_PROTO_STAT_MAX_BYTES);
-
-	memcpy(&st.sched_stats[0], &q->stat, sizeof(q->stat));
-
-	/* gather socket statistics */
-	if (q->ctrl_sock) {
-		struct fastpass_sock *fp = (struct fastpass_sock *)q->ctrl_sock->sk;
-		memcpy(&st.socket_stats[0], &fp->stat, sizeof(fp->stat));
-		fpproto_dump_stats(&q->conn, (struct fp_proto_stat *)&st.proto_stats);
-	}
-
-	if (SHOULD_DUMP_FLOW_INFO)
-		dump_flow_info(q, false);
-
-	return gnet_stats_copy_app(d, &st, sizeof(st));
-}
-
 static int fastpass_proc_show(struct seq_file *seq, void *v)
 {
-	struct fpq_sched_data *q = (struct fpq_sched_data *)seq->private;
+	struct fp_sched_data *q = (struct fp_sched_data *)seq->private;
 	u64 now_real = fp_get_time_ns();
 	struct fp_sched_stat *scs = &q->stat;
 
@@ -869,39 +852,54 @@ static int fastpass_proc_show(struct seq_file *seq, void *v)
 	/* timeslot statistics */
 	seq_printf(seq, "\n  horizon mask 0x%016llx",
 			wnd_get_mask(&q->alloc_wnd, q->current_timeslot+63));
-	seq_printf(seq, ", %llu added timeslots", q->added_tslots);
-	seq_printf(seq, ", %llu used", scs->sucessful_timeslots);
 	seq_printf(seq, " (%llu %llu %llu %llu behind, %llu fast)", scs->late_enqueue4,
 			scs->late_enqueue3, scs->late_enqueue2, scs->late_enqueue1,
 			scs->early_enqueue);
-	seq_printf(seq, ", %llu missed", scs->missed_timeslots);
 	seq_printf(seq, ", %llu assumed_lost", scs->timeslots_assumed_lost);
 	seq_printf(seq, "  (%llu late", scs->alloc_too_late);
 	seq_printf(seq, ", %llu premature)", scs->alloc_premature);
 
+	/* total since reset */
+	seq_printf(seq, "\n  since reset: ");
+	seq_printf(seq, " demand %llu", q->demand_tslots);
+	seq_printf(seq, ", requested %llu", q->requested_tslots);
+	seq_printf(seq, " (%llu yet unrequested)", q->demand_tslots - q->requested_tslots);
+	seq_printf(seq, ", acked %llu", q->acked_tslots);
+	seq_printf(seq, ", allocs %llu", q->alloc_tslots);
+	seq_printf(seq, ", used %llu", q->used_tslots);
+	seq_printf(seq, ", admitted %llu", scs->admitted_timeslots);
+
+	seq_printf(seq, "\n  %llu requests w/no a-req", scs->request_with_empty_flowqueue);
+
+	/* protocol state */
+	fpproto_print_stats(&q->conn.stat, seq);
+	/* socket state */
+	fpproto_print_socket_stats(q->ctrl_sock->sk, seq);
+
 	/* error statistics */
 	seq_printf(seq, "\n errors:");
-	if (scs->allocation_errors)
-		seq_printf(seq, "\n  %llu allocation errors in dst_lookup", scs->allocation_errors);
-	if (scs->classify_errors)
-		seq_printf(seq, "\n  %llu packets could not be classified", scs->classify_errors);
-	if (scs->flow_not_found_update)
-		seq_printf(seq, "\n  %llu flow could not be found in update_current_tslot!",
-				scs->flow_not_found_update);
 	if (scs->req_alloc_errors)
 		seq_printf(seq, "\n  %llu could not allocate pkt_desc for request", scs->req_alloc_errors);
+	if (scs->alloc_report_larger_than_requested)
+		seq_printf(seq, "\n  %llu alloc report larger than requested_timeslots (causes a reset)",
+				scs->alloc_report_larger_than_requested);
+
+	fpproto_print_errors(&q->conn.stat, seq);
+	fpproto_print_socket_errors(q->ctrl_sock->sk, seq);
 
 	/* warnings */
 	seq_printf(seq, "\n warnings:");
+	if (scs->queued_flow_already_acked)
+		seq_printf(seq, "\n  %llu acked flows in flowqueue (possible ack just after timeout)",
+				scs->queued_flow_already_acked);
 	if (scs->unwanted_alloc)
 		seq_printf(seq, "\n  %llu timeslots allocated beyond the demand of the flow (could happen due to reset / controller timeouts)",
 				scs->unwanted_alloc);
 	if (scs->alloc_premature)
 		seq_printf(seq, "\n  %llu premature allocations (something wrong with time-sync?)\n",
 				scs->alloc_premature);
-	if (scs->clock_move_causes_reset)
-		seq_printf(seq, "\n  %llu large clock moves caused resets",
-				scs->clock_move_causes_reset);
+
+	fpproto_print_warnings(&q->conn.stat, seq);
 
 	/* flow info */
 	if (proc_dump_dst)
@@ -923,22 +921,23 @@ static const struct file_operations fastpass_proc_fops = {
 	.release = single_release,
 };
 
-static int fastpass_proc_init(struct fpq_sched_data *fpq)
+static int fastpass_proc_init(struct fp_sched_data *q)
 {
 	char fname[PROC_FILENAME_MAX_SIZE];
-	snprintf(fname, PROC_FILENAME_MAX_SIZE, "fastpass/stats-%p", fpq);
-	fpq->proc_entry = proc_create_data(fname, S_IRUGO, NULL, &fastpass_proc_fops, fpq);
-	if (fpq->proc_entry == NULL)
+	snprintf(fname, PROC_FILENAME_MAX_SIZE, "fastpass/stats-%p", q);
+	q->proc_entry = proc_create_data(fname, S_IRUGO, NULL, &fastpass_proc_fops, q);
+	if (q->proc_entry == NULL)
 		return -1; /* error */
 	return 0; /* success */
 }
 
-static void fastpass_proc_cleanup(struct fpq_sched_data *q)
+static void fastpass_proc_cleanup(struct fp_sched_data *q)
 {
 	proc_remove(q->proc_entry);
 }
 
-static int fpq_new_qdisc(void *priv, u32 tslot_mul, u32 tslot_shift)
+static int fpq_new_qdisc(void *priv, struct net *qdisc_net, u32 tslot_mul,
+		u32 tslot_shift)
 {
 	struct fp_sched_data *q = (struct fp_sched_data *)priv;
 
@@ -970,7 +969,7 @@ static int fpq_new_qdisc(void *priv, u32 tslot_mul, u32 tslot_shift)
 
 	/* connect socket */
 	q->ctrl_sock		= NULL;
-	err = connect_ctrl_socket(q);
+	err = connect_ctrl_socket(q, qdisc_net);
 	if (err != 0)
 		goto out_destroy_conn;
 
@@ -992,7 +991,7 @@ out_destroy_conn:
 	fpproto_destroy_conn(&q->conn);
 	fastpass_proc_cleanup(q);
 out:
-	pr_info("%s: error creating new qdisc err=%d\n", err);
+	pr_info("%s: error creating new qdisc err=%d\n", __func__, err);
 	return err;
 }
 
@@ -1034,11 +1033,11 @@ static void fpq_stop_qdisc(void *priv) {
 	fastpass_proc_cleanup(q);
 }
 
-static void fpq_add_timeslot(void *priv, u64 src_dst_key)
+static void fpq_add_timeslot(void *priv, u64 dst_id)
 {
 	struct fp_sched_data *q = (struct fp_sched_data *)priv;
 	spin_lock_irq(&q->conn_lock);
-	flow_inc_demand(priv, src_dst_key, 1);
+	flow_inc_demand(priv, dst_id, 1);
 	spin_unlock_irq(&q->conn_lock);
 }
 

@@ -15,7 +15,6 @@
 
 #include "../protocol/platform/generic.h"
 #include "../protocol/fpproto.h"
-#include "fp_statistics.h"
 
 #define FASTPASS_DEFAULT_PORT_NETORDER 1
 
@@ -23,6 +22,15 @@
 
 extern struct kmem_cache *fpproto_pktdesc_cachep __read_mostly;
 
+struct fp_socket_stat {
+	/* rx-related */
+	__u64 rx_fragmented;
+
+	/* send-related */
+	__u64 xmit_errors;
+	__u64 skb_alloc_error;
+	__u64 xmit_success;
+};
 
 /**
  * @inet: the IPv4 socket information
@@ -49,11 +57,14 @@ struct fp_kernel_pktdesc {
 extern int __init fpproto_register(void);
 void __exit fpproto_unregister(void);
 
-void fpproto_set_priv(struct sock *sk, struct Qdisc *new_qdisc);
+void fpproto_set_priv(struct sock *sk, void *priv);
 
 void fpproto_send_pktdesc(struct sock *sk, struct fp_kernel_pktdesc *kern_pd);
 
 void fpproto_handle_pending_rx(struct sock *sk);
+
+void fpproto_print_socket_stats(struct sock *sk, struct seq_file *seq);
+void fpproto_print_socket_errors(struct sock *sk, struct seq_file *seq);
 
 static inline struct fastpass_hdr *fastpass_hdr(
 		const struct sk_buff *skb)

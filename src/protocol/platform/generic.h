@@ -23,6 +23,8 @@
 
 #define fp_jhash_3words 	jhash_3words
 
+#define fp_fprintf(f, ...)		seq_printf((struct seq_file *)f, __VA_ARGS__)
+
 #else
 
 #include <stdio.h>
@@ -30,6 +32,8 @@
 #include <stdlib.h>
 #include <stdint.h>
 #include <stdbool.h>
+
+#define fp_fprintf(f, ...)		fprintf(f, __VA_ARGS__)
 
 #ifdef __APPLE__
 #include <sys/types.h>

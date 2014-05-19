@@ -289,7 +289,6 @@ static void fpproto_send_skb(struct sock *sk, struct sk_buff *skb)
 void fpproto_send_pktdesc(struct sock *sk,
 		struct fp_kernel_pktdesc *kern_pd)
 {
-	struct fastpass_sock *fp = fastpass_sk(sk);
 	struct fpproto_pktdesc *pd = &kern_pd->pktdesc;
 	struct sk_buff *skb;
 
@@ -388,6 +387,30 @@ static int fpproto_bind(struct sock *sk, struct sockaddr *uaddr,
 		int addr_len)
 {
 	return -ENOTSUPP;
+}
+
+void fpproto_print_socket_stats(struct sock *sk, struct seq_file *seq)
+{
+	struct fastpass_sock *fp = fastpass_sk(sk);
+	struct fp_socket_stat *sks = &fp->stat;
+
+	seq_printf(seq, "\n  %llu control packets outputted", sks->xmit_success);
+}
+
+void fpproto_print_socket_errors(struct sock *sk, struct seq_file *seq)
+{
+	struct fastpass_sock *fp = fastpass_sk(sk);
+	struct fp_socket_stat *sks = &fp->stat;
+
+	if (sks->skb_alloc_error)
+		seq_printf(seq, "\n  %llu control packets failed to allocate skb",
+				sks->skb_alloc_error);
+	if (sks->xmit_errors)
+		seq_printf(seq, "\n  %llu control packets had errors traversing the IP stack",
+				sks->xmit_errors);
+	if (sks->rx_fragmented)
+		seq_printf(seq, "\n  %llu received a fragmented skb (no current support)",
+				sks->rx_fragmented);
 }
 
 /* The interface for receiving packets from IP */

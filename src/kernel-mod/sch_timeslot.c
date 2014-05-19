@@ -39,15 +39,12 @@
 
 #include "sch_timeslot.h"
 #include "fastpass_proto.h"
-#include "fp_statistics.h"
 #include "../protocol/platform.h"
 #include "../protocol/pacer.h"
 #include "../protocol/window.h"
 #include "../protocol/topology.h"
 
 #define CLOCK_MOVE_RESET_THRESHOLD_TSLOTS	64
-
-#define SHOULD_DUMP_FLOW_INFO				0
 
 #define PROC_FILENAME_MAX_SIZE				64
 
@@ -1144,8 +1141,8 @@ static int tsq_tc_init(struct Qdisc *sch, struct nlattr *opt)
 		goto out_free_cleanup;
 
 	q->timeslot_ops = reg->ops;
-	err = reg->ops->new_qdisc(sched_data_to_priv(q), q->tslot_mul,
-			q->tslot_shift);
+	err = reg->ops->new_qdisc(sched_data_to_priv(q), dev_net(qdisc_dev(sch)),
+			q->tslot_mul, q->tslot_shift);
 	if (err)
 		goto out_free_hash_tbl;
 

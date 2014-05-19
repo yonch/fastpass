@@ -42,17 +42,17 @@ struct admission_core_cmd {
 	uint32_t admission_core_index; /* the index among admission cores of this one */
 };
 
-void admission_init_global(struct rte_ring *q_admitted_out);
+void seq_admission_init_global(struct rte_ring *q_admitted_out);
 
 /**
  * Initializes a single core to be a comm core
  */
-void admission_init_core(uint16_t lcore_id);
+void seq_admission_init_core(uint16_t lcore_id);
 
 /**
  * Runs the admission core
  */
-int exec_admission_core(void *void_cmd_p);
+int exec_seq_admission_core(void *void_cmd_p);
 
 
 #endif /* SEQ_ADMISSION_CORE_H */

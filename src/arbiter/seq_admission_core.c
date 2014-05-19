@@ -20,7 +20,7 @@ struct admission_log admission_core_logs[RTE_MAX_LCORE];
 struct rte_ring *q_head;
 struct rte_ring *q_bin[2 * N_ADMISSION_CORES];
 
-void admission_init_global(struct rte_ring *q_admitted_out)
+void seq_admission_init_global(struct rte_ring *q_admitted_out)
 {
 	int i;
 	char s[64];
@@ -94,7 +94,7 @@ void admission_init_global(struct rte_ring *q_admitted_out)
 
 }
 
-void admission_init_core(uint16_t lcore_id)
+void seq_admission_init_core(uint16_t lcore_id)
 {
 	int pool_index;
 	int socketid;
@@ -104,7 +104,7 @@ void admission_init_core(uint16_t lcore_id)
 
 }
 
-int exec_admission_core(void *void_cmd_p)
+int exec_seq_admission_core(void *void_cmd_p)
 {
 	struct admission_core_cmd *cmd = (struct admission_core_cmd *)void_cmd_p;
 	uint32_t core_ind = cmd->admission_core_index;

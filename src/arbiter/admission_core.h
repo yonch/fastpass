@@ -8,8 +8,24 @@
 #ifndef ADMISSION_CORE_H
 #define ADMISSION_CORE_H
 
+#include <rte_ring.h>
 #include "seq_admission_core.h"
 #include "../graph-algo/admissible.h"
+
+static inline
+void admission_init_global(struct rte_ring *q_admitted_out) {
+	seq_admission_init_global(q_admitted_out);
+}
+
+static inline
+void admission_init_core(uint16_t lcore_id) {
+	seq_admission_init_core(lcore_id);
+}
+
+static inline
+int exec_admission_core(void *void_cmd_p) {
+	exec_seq_admission_core(void_cmd_p);
+}
 
 static inline
 struct admissible_state *g_admissible_status(void) {

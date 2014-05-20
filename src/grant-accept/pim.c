@@ -96,6 +96,13 @@ void pim_add_backlog(struct pim_state *state, uint16_t src, uint16_t dst,
 }
 
 /**
+ * Reset state of all flows for which src is the sender
+ */
+void pim_reset_sender(struct pim_state *state, uint16_t src) {
+	/* TODO: implement this */
+}
+
+/**
  * Move a bin worth of demands from 'q_new_demands' to requests_by_src
  */
 static inline

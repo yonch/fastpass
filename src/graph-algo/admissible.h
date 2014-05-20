@@ -67,6 +67,12 @@ void reset_admissible_state(struct admissible_state *state, bool a, uint16_t b,
 }
 
 static inline
+void reset_sender(struct admissible_state *status, uint16_t src)
+{
+	pim_reset_sender((struct pim_state *) status, src);
+}
+
+static inline
 struct fp_ring *get_q_admitted_out(struct admissible_state *state)
 {
         struct pim_state *pim_state = (struct pim_state *) state;

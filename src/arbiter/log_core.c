@@ -14,6 +14,7 @@
 #include "comm_core.h"
 #include "admission_core.h"
 #include "admission_log.h"
+#include "../graph-algo/algo_config.h"
 #include "../protocol/fpproto.h"
 #include "../protocol/platform.h"
 #include "../protocol/stat_print.h"
@@ -115,7 +116,12 @@ void print_global_admission_log() {
 	int i;
 
 #define D(X) (st->X - sv->X)
-	printf("\nadmission core");
+	#ifdef PARALLEL_ALGO
+	printf("\nadmission core (pim)");
+	#endif
+	#ifdef PIPELINED_ALGO
+	printf("\nadmission core (seq)");
+	#endif
 	printf("\n  enqueue waits: %lu q_head, %lu alloc_new_demands",
 			st->wait_for_space_in_q_head, st->new_demands_bin_alloc_failed);
 	printf("\n  add_backlog; %lu atomic add %0.2f to avg %0.2f; %lu queue add %0.2f to avg %0.2f",

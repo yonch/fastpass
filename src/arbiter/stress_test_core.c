@@ -14,6 +14,7 @@
 #include "../graph-algo/admissible.h"
 #include "../graph-algo/generate_requests.h"
 #include "admission_core.h"
+#include "admission_core_common.h"
 #include "../protocol/stat_print.h"
 #include "../protocol/topology.h"
 #include "comm_log.h"

@@ -8,11 +8,14 @@
 #include <string.h>
 
 #include "main.h"
-#include "admission_core.h"
+#include "admission_core_common.h"
 #include "admission_log.h"
 #include "../protocol/platform.h"
-#include "../graph-algo/admissible.h"
+#include "../graph-algo/admissible_structures.h"
+#include "../graph-algo/admissible_traffic.h"
 #include "../graph-algo/algo_config.h"
+
+struct seq_admissible_status g_seq_admissible_status;
 
 struct rte_mempool* admitted_traffic_pool[NB_SOCKETS];
 

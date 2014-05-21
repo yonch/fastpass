@@ -238,8 +238,7 @@ void pim_process_accepts(struct pim_state *state, uint16_t partition_index) {
         /* get memory for admitted traffic, init it */
         struct admitted_traffic *admitted;
         while (fp_mempool_get(state->admitted_traffic_mempool, (void**) &admitted) != 0)
-                printf("failure to allocate admitted memory at partition %d\n",
-                       partition_index);
+        	adm_log_admitted_traffic_alloc_failed(&state->cores[partition_index].stat);
         init_admitted_traffic(admitted);
 
         /* iterate through all accepted edges */

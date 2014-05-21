@@ -762,6 +762,7 @@ static struct sk_buff *tsq_dequeue(struct Qdisc *sch)
 	return NULL;
 
 out_got_skb:
+	sch->q.qlen--;
 	qdisc_bstats_update(sch, skb);
 	qdisc_unthrottled(sch);
 	return skb;

@@ -23,6 +23,7 @@
 #include <linux/bitops.h>
 #include <linux/version.h>
 #include <linux/ip.h>
+#include <linux/inet.h>
 #include <net/netlink.h>
 #include <net/pkt_sched.h>
 #include <net/sock.h>
@@ -81,7 +82,7 @@ module_param(req_min_gap, uint, 0444);
 MODULE_PARM_DESC(req_min_gap, "ns to wait from when data arrives to sending request");
 EXPORT_SYMBOL_GPL(req_min_gap);
 
-static char *ctrl_addr = NULL;
+static char *ctrl_addr = "192.168.100.222";
 module_param(ctrl_addr, charp, 0444);
 MODULE_PARM_DESC(ctrl_addr, "IPv4 address of the controller");
 EXPORT_SYMBOL_GPL(ctrl_addr);
@@ -1053,8 +1054,17 @@ static struct tsq_ops fastpass_tsq_ops __read_mostly = {
 static int __init fastpass_module_init(void)
 {
 	int ret = -ENOSYS;
+	const char *ctrl_addr_end;
 
 	pr_info("%s: initializing\n", __func__);
+
+	ret = in4_pton(ctrl_addr, -1, (u8*)&ctrl_addr_netorder, -1, &ctrl_addr_end);
+	if (ret != 1) {
+		FASTPASS_CRIT("could not parse controller's IP address (got %s)\n", ctrl_addr);
+		goto out;
+	}
+	pr_info("%s: controller address is %s, parsed as 0x%X (netorder)\n",
+			__func__, ctrl_addr, ctrl_addr_netorder);
 
 	fastpass_proc_entry = proc_mkdir("fastpass", NULL);
 	if (fastpass_proc_entry == NULL)

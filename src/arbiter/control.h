@@ -5,6 +5,7 @@
 #ifndef CONTROL_H_
 #define CONTROL_H_
 
+#include <rte_ip.h>
 #include <stdint.h>
 #include "../graph-algo/algo_config.h"
 

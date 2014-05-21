@@ -16,8 +16,10 @@
 
 #ifdef PARALLEL_ALGO
 /* parallel algo */
+#include "../grant-accept/partitioning.h"
+
 #ifndef ALGO_N_CORES
-#define ALGO_N_CORES				1 /* for now */
+#define ALGO_N_CORES			        N_PARTITIONS
 #endif
 
 #endif

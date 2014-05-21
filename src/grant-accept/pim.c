@@ -148,8 +148,8 @@ void pim_prepare(struct pim_state *state, uint16_t partition_index) {
         /* reset src and dst endnodes */
         uint32_t start_word = PIM_BITMASK_WORD(first_in_partition(partition_index));
         uint32_t words_per_partition = PIM_BITMASK_WORD(PARTITION_N_NODES);
-        memset(((uint8_t *) &state->src_endnodes) + start_word, 0, PARTITION_N_NODES);
-        memset(((uint8_t *) &state->dst_endnodes) + start_word, 0, PARTITION_N_NODES);
+        memset(((uint8_t *) &state->src_endnodes) + start_word, 0, words_per_partition);
+        memset(((uint8_t *) &state->dst_endnodes) + start_word, 0, words_per_partition);
 }
 
 /**

@@ -10,6 +10,7 @@
 
 #include "edgelist.h"
 #include "grant-accept.h"
+#include "phase.h"
 #include "../graph-algo/admitted.h"
 #include "../graph-algo/backlog.h"
 #include "../graph-algo/bin.h"
@@ -47,6 +48,7 @@ struct pim_state {
         struct fp_mempool *admitted_traffic_mempool;
         struct pim_core_state cores[N_PARTITIONS];
         struct admission_statistics stat;
+        struct phase_state phase;
 };
 
 /**
@@ -108,7 +110,8 @@ static inline
 void pim_init_state(struct pim_state *state, struct fp_ring **q_new_demands,
                     struct fp_ring *q_admitted_out,
                     struct fp_mempool *bin_mempool,
-                    struct fp_mempool *admitted_traffic_mempool)
+                    struct fp_mempool *admitted_traffic_mempool,
+                    struct fp_ring **q_ready_partitions)
 {
         pim_reset_state(state);
 
@@ -122,6 +125,7 @@ void pim_init_state(struct pim_state *state, struct fp_ring **q_new_demands,
                 init_bin(state->new_demands[partition]);
                 state->q_new_demands[partition] = q_new_demands[partition];
         }
+        phase_state_init(&state->phase, q_ready_partitions);
 }
 
 #endif /* PIM_H_ */

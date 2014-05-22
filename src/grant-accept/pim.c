@@ -9,6 +9,8 @@
 
 #include <assert.h>
 
+#include "phase.h"
+
 #define MAX_TRIES 10
 #define RING_DEQUEUE_BURST_SIZE		256
 
@@ -157,7 +159,10 @@ void pim_prepare(struct pim_state *state, uint16_t partition_index) {
  *    selects edges to grant. These are added to 'grants'.
  */
 void pim_do_grant(struct pim_state *state, uint16_t partition_index) {
-        /* add new backlogs to requests */
+        /* wait until all partitions have finished the previous phase */
+        phase_barrier_wait(&state->phase, partition_index);
+
+         /* add new backlogs to requests */
         process_new_requests(state, partition_index);
 
         /* reset grant edgelist */
@@ -201,6 +206,9 @@ void pim_do_grant(struct pim_state *state, uint16_t partition_index) {
  *    added to 'accepts'
  */
 void pim_do_accept(struct pim_state *state, uint16_t partition_index) {
+        /* wait until all partitions have finished the previous phase */
+        phase_barrier_wait(&state->phase, partition_index);
+
         /* reset grant adjacency list */
         ga_reset_adj(&state->grants_by_dst[partition_index]);
 
@@ -234,6 +242,9 @@ void pim_do_accept(struct pim_state *state, uint16_t partition_index) {
  */
 void pim_process_accepts(struct pim_state *state, uint16_t partition_index) {
         uint16_t dst_partition;
+
+        /* wait until all partitions have finished the previous phase */
+        phase_barrier_wait(&state->phase, partition_index);
 
         /* get memory for admitted traffic, init it */
         struct admitted_traffic *admitted;

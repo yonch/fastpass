@@ -51,11 +51,13 @@ create_admissible_state(bool a, uint16_t b, uint16_t c, uint16_t d,
                         struct fp_ring *e, struct fp_ring *q_admitted_out,
                         struct fp_mempool *bin_mempool,
                         struct fp_mempool *admitted_traffic_mempool,
-                        struct fp_ring **f, struct fp_ring **q_new_demands)
+                        struct fp_ring **f, struct fp_ring **q_new_demands,
+                        struct fp_ring **q_ready_partitions)
 {
         struct pim_state *state = pim_create_state(q_new_demands, q_admitted_out,
                                                    bin_mempool,
-                                                   admitted_traffic_mempool);
+                                                   admitted_traffic_mempool,
+                                                   q_ready_partitions);
         return (struct admissible_state *) state;
 }
 
@@ -123,7 +125,7 @@ create_admissible_state(bool oversubscribed, uint16_t inter_rack_capacity,
                         struct fp_ring *q_head, struct fp_ring *q_admitted_out,
                         struct fp_mempool *head_bin_mempool,
                         struct fp_mempool *admitted_traffic_mempool,
-                        struct fp_ring **q_bin, struct fp_ring **a)
+                        struct fp_ring **q_bin, struct fp_ring **a, struct fp_ring **b)
 {
         struct seq_admissible_status *status;
         status = seq_create_admissible_status(oversubscribed, inter_rack_capacity,

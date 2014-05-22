@@ -27,6 +27,7 @@
 #define BIN_MEMPOOL_SIZE 2048
 #define ADMITTED_TRAFFIC_MEMPOOL_SIZE	(51*1000)
 #define ADMITTED_OUT_RING_LOG_SIZE		16
+#define READY_PARTITIONS_Q_SIZE                 2
 
 const double admissible_fractions [NUM_FRACTIONS_A] =
     {0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9, 0.95, 0.99};
@@ -225,6 +226,7 @@ int main(int argc, char **argv)
     struct fp_mempool *bin_mempool;
     struct fp_mempool *admitted_traffic_mempool;
     struct fp_ring *q_new_demands[NUM_BIN_RINGS];
+    struct fp_ring *q_ready_partitions[NUM_BIN_RINGS];
 
     /* init queues */
     q_bin = fp_ring_create(2 * NUM_BINS_SHIFT);
@@ -236,6 +238,8 @@ int main(int argc, char **argv)
     for (i = 0; i < NUM_BIN_RINGS; i++) {
             q_new_demands[i] = fp_ring_create(BIN_RING_SHIFT);
             if (!q_new_demands[i]) exit(-1);
+            q_ready_partitions[i] = fp_ring_create(READY_PARTITIONS_Q_SIZE);
+            if (!q_ready_partitions[i]) exit(-1);
     }
     if (!q_bin) exit(-1);
     if (!q_head) exit(-1);
@@ -246,7 +250,8 @@ int main(int argc, char **argv)
     /* init global status */
     status = create_admissible_state(false, 0, 0, 0, q_head, q_admitted_out,
                                      bin_mempool, admitted_traffic_mempool,
-                                     &q_bin, &q_new_demands[0]);
+                                     &q_bin, &q_new_demands[0],
+                                     &q_ready_partitions[0]);
     if (status == NULL) {
         printf("Error initializing admissible_status!\n");
         exit(-1);

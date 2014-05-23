@@ -14,6 +14,7 @@
 #include "comm_core.h"
 #include "admission_core.h"
 #include "admission_log.h"
+#include "../grant-accept/partitioning.h"
 #include "../graph-algo/algo_config.h"
 #include "../protocol/fpproto.h"
 #include "../protocol/platform.h"
@@ -117,7 +118,7 @@ void print_global_admission_log() {
 
 #define D(X) (st->X - sv->X)
 	#ifdef PARALLEL_ALGO
-	printf("\nadmission core (pim)");
+	printf("\nadmission core (pim with %d partitions)", N_PARTITIONS);
 	#endif
 	#ifdef PIPELINED_ALGO
 	printf("\nadmission core (seq)");

@@ -31,7 +31,7 @@ struct phase_state {
 
 static inline
 uint64_t create_queue_entry(uint16_t phase, uint16_t partition_index) {
-        return (phase << 16) || partition_index;
+        return (((uint64_t) phase) << 16) | partition_index;
 }
 
 static inline
@@ -63,7 +63,7 @@ void phase_state_init(struct phase_state *phase,
 static inline
 void phase_finished(struct phase_state *phase_state,
                     uint16_t partition_index) {
- 
+
         uint16_t phase = ++phase_state->partitions[partition_index].phase;
         uint64_t queue_entry = create_queue_entry(phase, partition_index);
 

@@ -16,13 +16,15 @@
 #include "../grant-accept/pim.h"
 #include "../graph-algo/algo_config.h"
 
+#define		Q_NEW_DEMANDS_RING_SIZE      (64 * 1024)
+#define		Q_READY_PARTITIONS_RING_SIZE (2 * N_PARTITIONS)
+
 struct pim_state g_pim_state;
 
 struct rte_mempool* admitted_traffic_pool[NB_SOCKETS];
-
 struct admission_log admission_core_logs[RTE_MAX_LCORE];
-
 struct rte_ring *q_new_demands[N_ADMISSION_CORES];
+struct rte_ring *q_ready_partitions[N_ADMISSION_CORES];
 
 void pim_admission_init_global(struct rte_ring *q_admitted_out)
 {
@@ -83,9 +85,19 @@ void pim_admission_init_global(struct rte_ring *q_admitted_out)
                                  i, rte_strerror(rte_errno));
 	}
 
+	/* init q_ready_partitions */
+	for (i = 0; i < N_ADMISSION_CORES; i++) {
+		rte_snprintf(s, sizeof(s), "q_ready_partitions_%d", i);
+		q_ready_partitions[i] = rte_ring_create(s, Q_READY_PARTITIONS_RING_SIZE,
+							0, RING_F_SC_DEQ);
+		if (q_ready_partitions[i] == NULL)
+			rte_exit(EXIT_FAILURE, "Cannot init q_ready_partitions[%d]: %s\n",
+                                 i, rte_strerror(rte_errno));
+	}
+
 	/* init pim_state */
 	pim_init_state(&g_pim_state, q_new_demands, q_admitted_out,
-                       bin_mempool, admitted_traffic_pool[0]);
+                       bin_mempool, admitted_traffic_pool[0], q_ready_partitions);
 }
 
 void pim_admission_init_core(uint16_t lcore_id)

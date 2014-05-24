@@ -176,6 +176,7 @@ void print_admission_core_log(uint16_t lcore, uint16_t adm_core_index) {
 		printf("%lu ", st->backlog_histogram[i]);
 	printf ("\n");
 
+	#ifdef PIPELINED_ALGO
 	printf("  bin_index >> %d: ", BIN_SIZE_HISTOGRAM_SHIFT);
 	for (i = 0; i < BIN_SIZE_HISTOGRAM_NUM_BINS; i++)
 		printf("%lu ", st->bin_size_histogram[i]);
@@ -187,6 +188,7 @@ void print_admission_core_log(uint16_t lcore, uint16_t adm_core_index) {
 			printf("%lu ", st->core_bins_histogram[i]);
 		printf ("\n");
 	}
+	#endif
 
 }
 

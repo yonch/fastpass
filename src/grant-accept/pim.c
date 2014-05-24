@@ -55,7 +55,7 @@ void _flush_backlog_now(struct pim_state *state, uint16_t partition_index) {
         /* enqueue state->new_demands[partition_index] */
         while (fp_ring_enqueue(state->q_new_demands[partition_index],
                                state->new_demands[partition_index]) == -ENOBUFS)
-		adm_log_wait_for_space_in_q_head(&state->stat);
+                adm_log_wait_for_space_in_q_head(&state->stat);
 
         /* get a fresh bin for state->new_demands[partition_index] */
         while (fp_mempool_get(state->bin_mempool,
@@ -139,7 +139,7 @@ void process_new_requests(struct pim_state *state, uint16_t partition_index) {
                 process_incoming_bin(state, partition_index, bins[i]);
                 fp_mempool_put(state->bin_mempool, bins[i]);
         }
-	adm_log_processed_new_requests(&state->cores[partition_index].stat,
+        adm_log_processed_new_requests(&state->cores[partition_index].stat,
 				       num_bins, num_entries);
 }
 
@@ -176,7 +176,7 @@ void pim_do_grant(struct pim_state *state, uint16_t partition_index) {
         for (src = first_in_partition(partition_index);
              src <= last_in_partition(partition_index);
              src++) {
-		if (src_is_allocated(state, src))
+                if (src_is_allocated(state, src))
                         continue; /* this src has been allocated in this timeslot */
 
                 uint16_t src_index = PARTITION_IDX(src);
@@ -245,7 +245,7 @@ void pim_do_accept(struct pim_state *state, uint16_t partition_index) {
  */
 void pim_process_accepts(struct pim_state *state, uint16_t partition_index) {
         struct admission_core_statistics *core_stat = &state->cores[partition_index].stat;
-	uint16_t dst_partition;
+        uint16_t dst_partition;
 
         /* wait until all partitions have finished the previous phase */
         phase_barrier_wait(&state->phase, partition_index);
@@ -271,14 +271,14 @@ void pim_process_accepts(struct pim_state *state, uint16_t partition_index) {
                         /* decrease the backlog */
                         int32_t backlog = backlog_decrease(&state->backlog, edge->src, edge->dst);
                         if (backlog != 0) {
-				/* there is remaining backlog */
-				adm_log_allocated_backlog_remaining(core_stat, edge->src,
-								    edge->dst, backlog);
+                                /* there is remaining backlog */
+                                adm_log_allocated_backlog_remaining(core_stat, edge->src,
+                                                                    edge->dst, backlog);
 				continue;
 			}
 
                         /* no more backlog, delete the edge from requests */
-			adm_log_allocator_no_backlog(core_stat, edge->src, edge->dst);
+                        adm_log_allocator_no_backlog(core_stat, edge->src, edge->dst);
                         uint16_t grant_adj_index = state->grant_adj_index[edge->src];
                         ga_adj_delete_neigh(&state->requests_by_src[PARTITION_OF(edge->src)],
                                             PARTITION_IDX(edge->src), grant_adj_index);
@@ -287,5 +287,5 @@ void pim_process_accepts(struct pim_state *state, uint16_t partition_index) {
 
         /* send out the admitted traffic */
         while (fp_ring_enqueue(state->q_admitted_out, admitted) != 0)
-		adm_log_wait_for_space_in_q_admitted_traffic(core_stat);
+                adm_log_wait_for_space_in_q_admitted_traffic(core_stat);
 }

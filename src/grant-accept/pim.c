@@ -147,6 +147,9 @@ void process_new_requests(struct pim_state *state, uint16_t partition_index) {
  * Prepare data structures so they are ready to allocate the next timeslot
  */
 void pim_prepare(struct pim_state *state, uint16_t partition_index) {
+         /* add new backlogs to requests */
+        process_new_requests(state, partition_index);
+
         /* reset accepts */
         ga_partd_edgelist_src_reset(&state->accepts, partition_index);
 
@@ -166,9 +169,6 @@ void pim_do_grant(struct pim_state *state, uint16_t partition_index) {
 
         /* wait until all partitions have finished the previous phase */
         phase_barrier_wait(&state->phase, partition_index, core_stat);
-
-         /* add new backlogs to requests */
-        process_new_requests(state, partition_index);
 
         /* reset grant edgelist */
         ga_partd_edgelist_src_reset(&state->grants, partition_index);

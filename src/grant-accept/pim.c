@@ -259,6 +259,7 @@ void pim_process_accepts(struct pim_state *state, uint16_t partition_index) {
         while (fp_mempool_get(state->admitted_traffic_mempool, (void**) &admitted) != 0)
 		adm_log_admitted_traffic_alloc_failed(core_stat);
         init_admitted_traffic(admitted);
+        set_admitted_partition(admitted, partition_index);
 
         /* iterate through all accepted edges */
         for (dst_partition = 0; dst_partition < N_PARTITIONS; dst_partition++) {

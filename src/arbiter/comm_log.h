@@ -191,9 +191,11 @@ static inline void comm_log_dequeue_admitted_failed(int rc) {
 	COMM_DEBUG("failed to dequeue admitted flows, got error %d\n", rc);
 }
 
-static inline void comm_log_got_admitted_tslot(uint16_t size, uint64_t timeslot) {
+static inline void comm_log_got_admitted_tslot(uint16_t size, uint64_t timeslot,
+                                               uint16_t partition) {
 	(void)size;(void)timeslot;
-	CL->processed_tslots++;
+        if (partition == 0)
+                CL->processed_tslots++;
 	if (size > 0) {
 		CL->non_empty_tslots++;
 		CL->occupied_node_tslots += size;

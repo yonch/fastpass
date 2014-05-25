@@ -47,6 +47,10 @@ struct admission_core_statistics {
 	uint64_t dequeued_demands_during_wrap_up;
 	uint64_t wrap_up_non_empty_bin;
 	uint64_t wrap_up_non_empty_bin_demands;
+
+        /* pim-specific statistics */
+        uint64_t phase_finished;
+        uint64_t phase_none_ready;
 };
 
 /**
@@ -260,6 +264,20 @@ void adm_log_wait_for_q_bin_out_enqueue_token(
 		struct admission_core_statistics *st) {
 	if (MAINTAIN_ADM_LOG_COUNTERS)
 		st->waiting_to_pass_token++;
+}
+
+static inline __attribute__((always_inline))
+void adm_log_phase_finished(
+		struct admission_core_statistics *st) {
+	if (MAINTAIN_ADM_LOG_COUNTERS)
+		st->phase_finished++;
+}
+
+static inline __attribute__((always_inline))
+void adm_log_phase_none_ready(
+		struct admission_core_statistics *st) {
+	if (MAINTAIN_ADM_LOG_COUNTERS)
+		st->phase_none_ready++;
 }
 
 #endif /* ADMISSIBLE_ALGO_LOG_H_ */

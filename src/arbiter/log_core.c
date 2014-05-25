@@ -168,6 +168,10 @@ void print_admission_core_log(uint16_t lcore, uint16_t adm_core_index) {
 			st->dequeue_bin_during_wrap_up,
 			st->dequeued_demands_during_wrap_up,
 			st->wrap_up_non_empty_bin, st->wrap_up_non_empty_bin_demands);
+	#ifdef PARALLEL_ALGO
+	printf("\n    %lu phases completed, %lu times not ready", st->phase_finished,
+               st->phase_none_ready);
+	#endif
 	printf("\n");
 #undef D
 

@@ -9,6 +9,7 @@
 #define PHASE_H_
 
 #include "partitioning.h"
+#include "../graph-algo/admissible_algo_log.h"
 #include "../graph-algo/fp_ring.h"
 
 #define NONE_READY     N_PARTITIONS
@@ -62,7 +63,9 @@ void phase_state_init(struct phase_state *phase,
  */
 static inline
 void phase_finished(struct phase_state *phase_state,
-                    uint16_t partition_index) {
+                    uint16_t partition_index,
+                    struct admission_core_statistics *stat) {
+        adm_log_phase_finished(stat);
 
         uint16_t phase = ++phase_state->partitions[partition_index].phase;
         uint64_t queue_entry = create_queue_entry(phase, partition_index);
@@ -84,13 +87,16 @@ void phase_finished(struct phase_state *phase_state,
  */
 static inline
 uint16_t phase_get_finished_partition(struct phase_state *phase_state,
-                                      uint16_t partition_index) {
+                                      uint16_t partition_index,
+                                      struct admission_core_statistics *stat) {
         uint64_t queue_entry;
         int ret = fp_ring_dequeue(phase_state->partitions[partition_index].q_ready,
                                   (void *) &queue_entry);
 
-        if (ret == -ENOENT)
+        if (ret == -ENOENT) {
+                adm_log_phase_none_ready(stat);
                 return NONE_READY;
+        }
 
         uint16_t entry_phase = get_phase_from_queue_entry(queue_entry);
         uint16_t my_phase = phase_state->partitions[partition_index].phase;
@@ -108,15 +114,16 @@ uint16_t phase_get_finished_partition(struct phase_state *phase_state,
  * waiting for other partitions to finish
  */
 static inline
-void phase_barrier_wait(struct phase_state *phase_state, uint16_t partition_index) {
+void phase_barrier_wait(struct phase_state *phase_state, uint16_t partition_index,
+                        struct admission_core_statistics *stat) {
         /* indicate that this partition finished its phase */
-        phase_finished(phase_state, partition_index);
+        phase_finished(phase_state, partition_index, stat);
 
         /* wait for all other partitions to finish their phases too */
         uint16_t count = 0;
         while (count < N_PARTITIONS - 1) {
-                if (phase_get_finished_partition(phase_state,
-                                                 partition_index) != NONE_READY)
+                if (phase_get_finished_partition(phase_state, partition_index,
+                                                 stat) != NONE_READY)
                         count++;
         }
 }

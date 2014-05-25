@@ -162,8 +162,10 @@ void pim_prepare(struct pim_state *state, uint16_t partition_index) {
  *    selects edges to grant. These are added to 'grants'.
  */
 void pim_do_grant(struct pim_state *state, uint16_t partition_index) {
+        struct admission_core_statistics *core_stat = &state->cores[partition_index].stat;
+
         /* wait until all partitions have finished the previous phase */
-        phase_barrier_wait(&state->phase, partition_index);
+        phase_barrier_wait(&state->phase, partition_index, core_stat);
 
          /* add new backlogs to requests */
         process_new_requests(state, partition_index);
@@ -209,8 +211,10 @@ void pim_do_grant(struct pim_state *state, uint16_t partition_index) {
  *    added to 'accepts'
  */
 void pim_do_accept(struct pim_state *state, uint16_t partition_index) {
+        struct admission_core_statistics *core_stat = &state->cores[partition_index].stat;
+
         /* wait until all partitions have finished the previous phase */
-        phase_barrier_wait(&state->phase, partition_index);
+        phase_barrier_wait(&state->phase, partition_index, core_stat);
 
         /* reset grant adjacency list */
         ga_reset_adj(&state->grants_by_dst[partition_index]);
@@ -248,7 +252,7 @@ void pim_process_accepts(struct pim_state *state, uint16_t partition_index) {
         uint16_t dst_partition;
 
         /* wait until all partitions have finished the previous phase */
-        phase_barrier_wait(&state->phase, partition_index);
+        phase_barrier_wait(&state->phase, partition_index, core_stat);
 
         /* get memory for admitted traffic, init it */
         struct admitted_traffic *admitted;

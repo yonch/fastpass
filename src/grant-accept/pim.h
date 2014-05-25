@@ -18,7 +18,7 @@
 #include "../graph-algo/platform.h"
 
 #define NUM_ITERATIONS 3
-#define SMALL_BIN_SIZE (10*MAX_NODES / N_PARTITIONS)
+#define SMALL_BIN_SIZE (MAX_NODES / N_PARTITIONS)
 
 /* packing of bitmasks into 8 bit words */
 #define PIM_BITMASKS_PER_8_BIT      8

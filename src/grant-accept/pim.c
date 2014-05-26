@@ -215,11 +215,11 @@ void pim_do_accept(struct pim_state *state, uint16_t partition_index) {
         struct ga_edgelist *edgelist;
         struct admission_core_statistics *core_stat = &state->cores[partition_index].stat;
 
-        /* reset grant adjacency list */
-        ga_reset_adj(&state->grants_by_dst[partition_index]);
-
         /* indicate that this partition finished its phase */
         phase_finished(&state->phase, partition_index, core_stat);
+
+        /* reset grant adjacency list */
+        ga_reset_adj(&state->grants_by_dst[partition_index]);
 
         /* sort grants from all src partitions by destination node */
         struct ga_adj *dest_adj = &state->grants_by_dst[partition_index];

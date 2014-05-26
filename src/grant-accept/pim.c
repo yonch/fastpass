@@ -211,17 +211,34 @@ void pim_do_grant(struct pim_state *state, uint16_t partition_index) {
  *    added to 'accepts'
  */
 void pim_do_accept(struct pim_state *state, uint16_t partition_index) {
+        uint16_t count, src_partition;
+        struct ga_edgelist *edgelist;
         struct admission_core_statistics *core_stat = &state->cores[partition_index].stat;
-
-        /* wait until all partitions have finished the previous phase */
-        phase_barrier_wait(&state->phase, partition_index, core_stat);
 
         /* reset grant adjacency list */
         ga_reset_adj(&state->grants_by_dst[partition_index]);
 
+        /* indicate that this partition finished its phase */
+        phase_finished(&state->phase, partition_index, core_stat);
+
         /* sort grants from all src partitions by destination node */
         struct ga_adj *dest_adj = &state->grants_by_dst[partition_index];
-        ga_edgelist_to_adj_by_dst(&state->grants, partition_index, dest_adj);
+
+        /* sort grants from this partition first */
+        edgelist = &state->grants.dst[partition_index].src[partition_index];
+        ga_edges_to_adj_by_dst(&edgelist->edge[0], edgelist->n, dest_adj);
+
+        /* sort grants from other partitions, as they are ready */
+        count = 0;
+        while (count < N_PARTITIONS - 1) {
+                src_partition = phase_get_finished_partition(&state->phase, partition_index,
+                                                             core_stat);
+                if (src_partition != NONE_READY) {
+                        count++;
+                        edgelist = &state->grants.dst[partition_index].src[src_partition];
+                        ga_edges_to_adj_by_dst(&edgelist->edge[0], edgelist->n, dest_adj);
+                }
+        }
 
         /* for each dst in the partition, randomly choose a src to accept */
         uint16_t dst;

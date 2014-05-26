@@ -101,9 +101,12 @@ uint16_t phase_get_finished_partition(struct phase_state *phase_state,
         uint16_t entry_phase = get_phase_from_queue_entry(queue_entry);
         uint16_t my_phase = phase_state->partitions[partition_index].phase;
         if (entry_phase != my_phase) {
-                /* this partition fell behind or jumped ahead */
-                printf("Error: inconsistent phases. Got %u, expected %u\n",
-                       entry_phase, my_phase);
+                /* this phase is out of order.
+                   re-enqueue the entry and return NONE_READY */
+                fp_ring_enqueue(phase_state->partitions[partition_index].q_ready,
+                                (void *) queue_entry);
+                adm_log_phase_out_of_order(stat);
+                return NONE_READY;
         }
 
         return get_partition_from_queue_entry(queue_entry);

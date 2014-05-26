@@ -51,6 +51,7 @@ struct admission_core_statistics {
         /* pim-specific statistics */
         uint64_t phase_finished;
         uint64_t phase_none_ready;
+        uint64_t phase_out_of_order;
 };
 
 /**
@@ -278,6 +279,13 @@ void adm_log_phase_none_ready(
 		struct admission_core_statistics *st) {
 	if (MAINTAIN_ADM_LOG_COUNTERS)
 		st->phase_none_ready++;
+}
+
+static inline __attribute__((always_inline))
+void adm_log_phase_out_of_order(
+		struct admission_core_statistics *st) {
+	if (MAINTAIN_ADM_LOG_COUNTERS)
+		st->phase_out_of_order++;
 }
 
 #endif /* ADMISSIBLE_ALGO_LOG_H_ */

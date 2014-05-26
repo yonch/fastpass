@@ -128,6 +128,8 @@ void phase_barrier_wait(struct phase_state *phase_state, uint16_t partition_inde
                 if (phase_get_finished_partition(phase_state, partition_index,
                                                  stat) != NONE_READY)
                         count++;
+                else
+                        adm_log_phase_none_ready_in_barrier(stat);
         }
 }
 

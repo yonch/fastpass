@@ -118,7 +118,7 @@ void print_global_admission_log() {
 
 #define D(X) (st->X - sv->X)
 	#ifdef PARALLEL_ALGO
-	printf("\nadmission core (pim with %d partitions)", N_PARTITIONS);
+	printf("\nadmission core (pim with %d ptns, %d nodes per ptn)", N_PARTITIONS, PARTITION_N_NODES);
 	#endif
 	#ifdef PIPELINED_ALGO
 	printf("\nadmission core (seq)");

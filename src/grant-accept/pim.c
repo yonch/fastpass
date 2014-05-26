@@ -9,6 +9,8 @@
 
 #include <assert.h>
 
+#include "phase.h"
+
 #define MAX_TRIES 10
 #define RING_DEQUEUE_BURST_SIZE		256
 
@@ -52,7 +54,8 @@ void mark_dst_allocated(struct pim_state *state, uint16_t dst) {
 void _flush_backlog_now(struct pim_state *state, uint16_t partition_index) {
         /* enqueue state->new_demands[partition_index] */
         while (fp_ring_enqueue(state->q_new_demands[partition_index],
-                               state->new_demands[partition_index]) == -ENOBUFS); /* TODO: log this */
+                               state->new_demands[partition_index]) == -ENOBUFS)
+                adm_log_wait_for_space_in_q_head(&state->stat);
 
         /* get a fresh bin for state->new_demands[partition_index] */
         while (fp_mempool_get(state->bin_mempool,
@@ -136,20 +139,25 @@ void process_new_requests(struct pim_state *state, uint16_t partition_index) {
                 process_incoming_bin(state, partition_index, bins[i]);
                 fp_mempool_put(state->bin_mempool, bins[i]);
         }
+        adm_log_processed_new_requests(&state->cores[partition_index].stat,
+				       num_bins, num_entries);
 }
 
 /**
  * Prepare data structures so they are ready to allocate the next timeslot
  */
 void pim_prepare(struct pim_state *state, uint16_t partition_index) {
+         /* add new backlogs to requests */
+        process_new_requests(state, partition_index);
+
         /* reset accepts */
         ga_partd_edgelist_src_reset(&state->accepts, partition_index);
 
         /* reset src and dst endnodes */
         uint32_t start_word = PIM_BITMASK_WORD(first_in_partition(partition_index));
         uint32_t words_per_partition = PIM_BITMASK_WORD(PARTITION_N_NODES);
-        memset(((uint8_t *) &state->src_endnodes) + start_word, 0, PARTITION_N_NODES);
-        memset(((uint8_t *) &state->dst_endnodes) + start_word, 0, PARTITION_N_NODES);
+        memset(((uint8_t *) &state->src_endnodes) + start_word, 0, words_per_partition);
+        memset(((uint8_t *) &state->dst_endnodes) + start_word, 0, words_per_partition);
 }
 
 /**
@@ -157,8 +165,10 @@ void pim_prepare(struct pim_state *state, uint16_t partition_index) {
  *    selects edges to grant. These are added to 'grants'.
  */
 void pim_do_grant(struct pim_state *state, uint16_t partition_index) {
-        /* add new backlogs to requests */
-        process_new_requests(state, partition_index);
+        struct admission_core_statistics *core_stat = &state->cores[partition_index].stat;
+
+        /* wait until all partitions have finished the previous phase */
+        phase_barrier_wait(&state->phase, partition_index, core_stat);
 
         /* reset grant edgelist */
         ga_partd_edgelist_src_reset(&state->grants, partition_index);
@@ -201,12 +211,34 @@ void pim_do_grant(struct pim_state *state, uint16_t partition_index) {
  *    added to 'accepts'
  */
 void pim_do_accept(struct pim_state *state, uint16_t partition_index) {
+        uint16_t count, src_partition;
+        struct ga_edgelist *edgelist;
+        struct admission_core_statistics *core_stat = &state->cores[partition_index].stat;
+
+        /* indicate that this partition finished its phase */
+        phase_finished(&state->phase, partition_index, core_stat);
+
         /* reset grant adjacency list */
         ga_reset_adj(&state->grants_by_dst[partition_index]);
 
         /* sort grants from all src partitions by destination node */
         struct ga_adj *dest_adj = &state->grants_by_dst[partition_index];
-        ga_edgelist_to_adj_by_dst(&state->grants, partition_index, dest_adj);
+
+        /* sort grants from this partition first */
+        edgelist = &state->grants.dst[partition_index].src[partition_index];
+        ga_edges_to_adj_by_dst(&edgelist->edge[0], edgelist->n, dest_adj);
+
+        /* sort grants from other partitions, as they are ready */
+        count = 0;
+        while (count < N_PARTITIONS - 1) {
+                src_partition = phase_get_finished_partition(&state->phase, partition_index,
+                                                             core_stat);
+                if (src_partition != NONE_READY) {
+                        count++;
+                        edgelist = &state->grants.dst[partition_index].src[src_partition];
+                        ga_edges_to_adj_by_dst(&edgelist->edge[0], edgelist->n, dest_adj);
+                }
+        }
 
         /* for each dst in the partition, randomly choose a src to accept */
         uint16_t dst;
@@ -229,44 +261,72 @@ void pim_do_accept(struct pim_state *state, uint16_t partition_index) {
         }
 }
 
+/* Process accepts involving one source and one destination partition */
+static inline
+void process_accepts_from_partition(struct pim_state *state, uint16_t src_partition,
+                                    uint16_t dst_partition, struct admitted_traffic *admitted) {
+        struct admission_core_statistics *core_stat = &state->cores[src_partition].stat;
+        struct ga_edgelist *edgelist;
+        uint16_t i;
+
+        edgelist = &state->accepts.dst[dst_partition].src[src_partition];
+        for (i = 0; i < edgelist->n; i++) {
+                struct ga_edge *edge = &edgelist->edge[i];
+
+                /* add edge to admitted traffic */
+                insert_admitted_edge(admitted, edge->src, edge->dst);
+
+                /* decrease the backlog */
+                int32_t backlog = backlog_decrease(&state->backlog, edge->src, edge->dst);
+                if (backlog != 0) {
+                        /* there is remaining backlog */
+                        adm_log_allocated_backlog_remaining(core_stat, edge->src,
+                                                            edge->dst, backlog);
+                        continue;
+                }
+
+                 /* no more backlog, delete the edge from requests */
+                 adm_log_allocator_no_backlog(core_stat, edge->src, edge->dst);
+                 uint16_t grant_adj_index = state->grant_adj_index[edge->src];
+                 ga_adj_delete_neigh(&state->requests_by_src[PARTITION_OF(edge->src)],
+                                     PARTITION_IDX(edge->src), grant_adj_index);
+        }
+}
+
 /**
  * Process all of the accepts, after a timeslot is done being allocated
  */
 void pim_process_accepts(struct pim_state *state, uint16_t partition_index) {
-        uint16_t dst_partition;
+        struct admission_core_statistics *core_stat = &state->cores[partition_index].stat;
+        uint16_t dst_partition, count;
+
+        /* indicate that this partition finished its phase */
+        phase_finished(&state->phase, partition_index, core_stat);
 
         /* get memory for admitted traffic, init it */
         struct admitted_traffic *admitted;
         while (fp_mempool_get(state->admitted_traffic_mempool, (void**) &admitted) != 0)
-        	adm_log_admitted_traffic_alloc_failed(&state->cores[partition_index].stat);
+		adm_log_admitted_traffic_alloc_failed(core_stat);
         init_admitted_traffic(admitted);
+        set_admitted_partition(admitted, partition_index);
 
         /* iterate through all accepted edges */
-        for (dst_partition = 0; dst_partition < N_PARTITIONS; dst_partition++) {
-                struct ga_edgelist *edgelist;
-                edgelist = &state->accepts.dst[dst_partition].src[partition_index];
-
-                uint16_t i;
-                for (i = 0; i < edgelist->n; i++) {
-                        struct ga_edge *edge = &edgelist->edge[i];
-
-                        /* add edge to admitted traffic */
-                        insert_admitted_edge(admitted, edge->src, edge->dst);
-
-                        /* decrease the backlog */
-                        int32_t backlog = backlog_decrease(&state->backlog, edge->src, edge->dst);
-                        if (backlog != 0)
-                                continue; /* there is remaining backlog */
-
-                        /* no more backlog, delete the edge from requests */
-                        uint16_t grant_adj_index = state->grant_adj_index[edge->src];
-                        ga_adj_delete_neigh(&state->requests_by_src[PARTITION_OF(edge->src)],
-                                            PARTITION_IDX(edge->src), grant_adj_index);
+        /* process accepts from this partition first */
+        process_accepts_from_partition(state, partition_index, partition_index, admitted);
+        
+        /* process accepts from other partitions, as they are ready */
+        count = 0;
+        while (count < N_PARTITIONS - 1) {
+                dst_partition = phase_get_finished_partition(&state->phase, partition_index,
+                                                             core_stat);
+                if (dst_partition != NONE_READY) {
+                        count++;
+                        process_accepts_from_partition(state, partition_index,
+                                                       dst_partition, admitted);
                 }
         }
 
         /* send out the admitted traffic */
         while (fp_ring_enqueue(state->q_admitted_out, admitted) != 0)
-                printf("failure to enqueue admitted traffic at partition %d\n",
-                       partition_index);
+                adm_log_wait_for_space_in_q_admitted_traffic(core_stat);
 }

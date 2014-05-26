@@ -26,7 +26,7 @@
 struct ga_edgelist {
 	uint32_t n;
 	struct ga_edge edge[EDGELIST_PARTITION_MAX_EDGES];
-} __attribute__((align(64)));
+} __attribute__((aligned(64)));
 
 /**
  * An edgelist partitioned by source

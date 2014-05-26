@@ -14,6 +14,7 @@
 #define ADMITTED_OUT_RING_LOG_SIZE		16
 #define BIN_MEMPOOL_SIZE                        (10*N_PARTITIONS)
 #define NEW_DEMANDS_Q_SIZE                      16
+#define READY_PARTITIONS_Q_SIZE                 2
 
 /**
  * Simple test of pim for a few timeslots
@@ -27,10 +28,12 @@ int main() {
         struct fp_ring *q_admitted_out;
         struct fp_mempool *bin_mempool;
         struct fp_mempool *admitted_traffic_mempool;
+        struct fp_ring *q_ready_partitions[N_PARTITIONS];
 
         uint16_t i;
         for (i = 0; i < N_PARTITIONS; i++) {
                 q_new_demands[i] = fp_ring_create(NEW_DEMANDS_Q_SIZE);
+                q_ready_partitions[i] = fp_ring_create(READY_PARTITIONS_Q_SIZE);
         }
         bin_mempool = fp_mempool_create(BIN_MEMPOOL_SIZE, bin_num_bytes(SMALL_BIN_SIZE));
         q_admitted_out = fp_ring_create(ADMITTED_OUT_RING_LOG_SIZE);
@@ -38,7 +41,8 @@ int main() {
                                                      sizeof(struct admitted_traffic));
         struct pim_state *state = pim_create_state(&q_new_demands[0], q_admitted_out,
                                                    bin_mempool,
-                                                   admitted_traffic_mempool);
+                                                   admitted_traffic_mempool,
+                                                   q_ready_partitions);
 
         /* add some test edges */
         struct ga_edge test_edges[] = {{1, 3}, {4, 5}, {1, 5}};

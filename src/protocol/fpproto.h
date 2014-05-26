@@ -12,6 +12,10 @@
 #error "Neither FASTPASS_CONTROLLER or FASTPASS_ENDPOINT is defined"
 #endif
 
+#ifdef FASTPASS_CONTROLLER
+#include <rte_ip.h>
+#endif
+
 #include "platform/generic.h"
 #include "platform/debug.h"
 #include "window.h"

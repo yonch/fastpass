@@ -21,6 +21,7 @@ struct admitted_edge {
 // Admitted traffic
 struct admitted_traffic {
     uint16_t size;
+    uint16_t partition; /* for PIM */
     struct admitted_edge edges[MAX_NODES];
 };
 
@@ -30,6 +31,7 @@ void init_admitted_traffic(struct admitted_traffic *admitted) {
     assert(admitted != NULL);
 
     admitted->size = 0;
+    admitted->partition = 0;
 }
 
 // Insert an edge into the admitted traffic
@@ -54,6 +56,21 @@ struct admitted_edge *get_admitted_edge(struct admitted_traffic *admitted,
     assert(index <= admitted->size);
 
     return &admitted->edges[index];
+}
+
+// Set the partition index
+static inline __attribute__((always_inline))
+void set_admitted_partition(struct admitted_traffic *admitted,
+                            uint16_t partition_index) {
+        assert(admitted != NULL);
+        admitted->partition = partition_index;
+}
+
+// Get the partition index
+static inline __attribute__((always_inline))
+uint16_t get_admitted_partition(struct admitted_traffic *admitted) {
+        assert(admitted != NULL);
+        return admitted->partition;
 }
 
 // Helper methods for testing in python

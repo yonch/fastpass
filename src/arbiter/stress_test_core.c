@@ -47,6 +47,7 @@ static inline void process_allocated_traffic(struct comm_core_state *core,
 	int rc;
 	int i;
 	struct admitted_traffic* admitted[MAX_ADMITTED_PER_LOOP];
+        uint16_t partition;
 	uint64_t current_timeslot;
 
 	/* Process newly allocated timeslots */
@@ -59,8 +60,10 @@ static inline void process_allocated_traffic(struct comm_core_state *core,
 	}
 
 	for (i = 0; i < rc; i++) {
-		current_timeslot = ++core->latest_timeslot;
-		comm_log_got_admitted_tslot(admitted[i]->size, current_timeslot);
+                partition = get_admitted_partition(admitted[i]);
+		current_timeslot = ++core->latest_timeslot[partition];
+		comm_log_got_admitted_tslot(admitted[i]->size, current_timeslot,
+                                            partition);
 	}
 	/* free memory */
 	rte_mempool_put_bulk(admitted_traffic_pool[0], (void **) admitted, rc);
@@ -98,7 +101,8 @@ void exec_stress_test_core(struct stress_test_core_cmd * cmd,
 	uint64_t next_rate_increase_time;
 	double next_mean_t_btwn_requests;
 
-	core->latest_timeslot = first_time_slot - 1;
+        for (i = 0; i < N_PARTITIONS; i++)
+                core->latest_timeslot[i] = first_time_slot - 1;
 	stress_test_log_init(&stress_test_core_logs[lcore_id]);
 	comm_log_init(&comm_core_logs[lcore_id]);
 

@@ -13,10 +13,8 @@
 #define		ADMITTED_TRAFFIC_MEMPOOL_SIZE		(16 * N_ADMISSION_CORES)
 #define		ADMITTED_TRAFFIC_CACHE_SIZE		8
 
-#define		BIN_MEMPOOL_SIZE			(16 * N_ADMISSION_CORES)
+#define		BIN_MEMPOOL_SIZE			(64 * N_ADMISSION_CORES)
 #define		BIN_MEMPOOL_CACHE_SIZE			8
-
-#define		Q_NEW_DEMANDS_RING_SIZE      (64 * 1024)
 
 /* pim state */
 extern struct pim_state g_pim_state;

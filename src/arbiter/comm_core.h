@@ -4,6 +4,7 @@
 
 #include <stdint.h>
 #include <rte_ip.h>
+#include "../grant-accept/partitioning.h"
 #include "../protocol/fpproto.h"
 #include "../protocol/stat_print.h"
 #include "../protocol/topology.h"
@@ -53,7 +54,7 @@ struct comm_core_cmd {
  */
 struct comm_core_state {
 	uint8_t alloc_enc_space[MAX_NODES * MAX_PATHS];
-	uint64_t latest_timeslot;
+	uint64_t latest_timeslot[N_PARTITIONS];
 
 	struct fp_timers timeout_timers;
 	struct fp_timers tx_timers;

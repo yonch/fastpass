@@ -14,6 +14,7 @@
 #include "comm_core.h"
 #include "admission_core.h"
 #include "admission_log.h"
+#include "../grant-accept/partitioning.h"
 #include "../graph-algo/algo_config.h"
 #include "../protocol/fpproto.h"
 #include "../protocol/platform.h"
@@ -35,8 +36,8 @@ void print_comm_log(uint16_t lcore_id)
 	u64 now_timeslot = (now_real * TIMESLOT_MUL) >> TIMESLOT_SHIFT;
 
 	printf("\ncomm_log lcore %d timeslot 0x%lX (now_timeslot 0x%llX, now - served %lld)",
-			lcore_id, ccs->latest_timeslot, now_timeslot,
-			(s64)(now_timeslot - ccs->latest_timeslot));
+			lcore_id, ccs->latest_timeslot[0], now_timeslot,
+			(s64)(now_timeslot - ccs->latest_timeslot[0]));
 
 #define D(X) (cl->X - sv->X)
 	printf("\n  RX %lu pkts, %lu bytes in %lu batches (%lu non-empty batches), %lu dropped",
@@ -47,7 +48,7 @@ void print_comm_log(uint16_t lcore_id)
 			D(neg_ack_timeslots));
 	printf("\n  %lu informative acks for %lu allocations, %lu non-informative",
 			D(acks_with_alloc), D(total_acked_timeslots), D(acks_without_alloc));
-	printf("\n  processed %lu tslots (%lu non-empty) with %lu node-tslots",
+	printf("\n  processed %lu tslots (%lu non-empty ptn) with %lu node-tslots",
 			D(processed_tslots), D(non_empty_tslots), D(occupied_node_tslots));
 	printf("\n  TX %lu pkts, %lu bytes, %lu triggers, %lu report-triggers",
 			D(tx_pkt), D(tx_bytes), D(triggered_send), D(reports_triggered));
@@ -65,7 +66,7 @@ void print_comm_log(uint16_t lcore_id)
 			cl->acks_with_alloc, cl->total_acked_timeslots, cl->acks_without_alloc);
 	printf("\n  handled %lu resets", cl->handle_reset);
 
-	printf("\n  processed %lu tslots (%lu non-empty) with %lu node-tslots",
+	printf("\n  processed %lu tslots (%lu non-empty ptn) with %lu node-tslots",
 			cl->processed_tslots, cl->non_empty_tslots, cl->occupied_node_tslots);
 	printf("\n  TX %lu pkts (%lu watchdogs), %lu bytes, %lu triggers, %lu report-triggers (%lu due to neg-acks(",
 			cl->tx_pkt, cl->tx_watchdog_pkts, cl->tx_bytes, cl->triggered_send, cl->reports_triggered,
@@ -117,7 +118,7 @@ void print_global_admission_log() {
 
 #define D(X) (st->X - sv->X)
 	#ifdef PARALLEL_ALGO
-	printf("\nadmission core (pim)");
+	printf("\nadmission core (pim with %d ptns, %d nodes per ptn)", N_PARTITIONS, PARTITION_N_NODES);
 	#endif
 	#ifdef PIPELINED_ALGO
 	printf("\nadmission core (seq)");
@@ -167,6 +168,12 @@ void print_admission_core_log(uint16_t lcore, uint16_t adm_core_index) {
 			st->dequeue_bin_during_wrap_up,
 			st->dequeued_demands_during_wrap_up,
 			st->wrap_up_non_empty_bin, st->wrap_up_non_empty_bin_demands);
+	#ifdef PARALLEL_ALGO
+	printf("\n    %lu phases completed, %lu not ready (%0.2f in barrier), %lu out of order",
+               st->phase_finished, st->phase_none_ready,
+               (float)st->phase_none_ready_in_barrier / (float)st->phase_none_ready,
+               st->phase_out_of_order);
+	#endif
 	printf("\n");
 #undef D
 
@@ -175,6 +182,7 @@ void print_admission_core_log(uint16_t lcore, uint16_t adm_core_index) {
 		printf("%lu ", st->backlog_histogram[i]);
 	printf ("\n");
 
+	#ifdef PIPELINED_ALGO
 	printf("  bin_index >> %d: ", BIN_SIZE_HISTOGRAM_SHIFT);
 	for (i = 0; i < BIN_SIZE_HISTOGRAM_NUM_BINS; i++)
 		printf("%lu ", st->bin_size_histogram[i]);
@@ -186,7 +194,7 @@ void print_admission_core_log(uint16_t lcore, uint16_t adm_core_index) {
 			printf("%lu ", st->core_bins_histogram[i]);
 		printf ("\n");
 	}
-
+	#endif
 }
 
 int exec_log_core(void *void_cmd_p)

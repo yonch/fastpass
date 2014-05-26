@@ -5,7 +5,7 @@
 
 /* to use a non-multiple-of-8 PARTITION_N_NODES, modify the packing of
  * bitmasks specified by macros in pim.h */
-#define PARTITION_N_NODES	MAX_NODES
+#define PARTITION_N_NODES	128
 #define N_PARTITIONS			((MAX_NODES + PARTITION_N_NODES - 1) / PARTITION_N_NODES)
 
 #if (PARTITION_N_NODES >= MAX_NODES)

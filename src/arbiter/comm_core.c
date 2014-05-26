@@ -156,13 +156,15 @@ void comm_init_core(uint16_t lcore_id, uint64_t first_time_slot)
 	int socketid;
 	char s[64];
 	struct comm_core_state *core = &ccore_state[lcore_id];
+        uint16_t i;
 
 	socketid = rte_lcore_to_socket_id(lcore_id);
 
 	/* initialize the space for encoding ALLOCs */
 	memset(&core->alloc_enc_space, 0, sizeof(core->alloc_enc_space));
 
-	core->latest_timeslot = first_time_slot - 1;
+        for (i = 0; i < N_PARTITIONS; i++)
+                core->latest_timeslot[i] = first_time_slot - 1;
 
 	/* initialize mempool for pktdescs */
 	if (pktdesc_pool[socketid] == NULL) {
@@ -625,6 +627,7 @@ static inline void process_allocated_traffic(struct comm_core_state *core,
 	int rc;
 	int i, j;
 	struct admitted_traffic* admitted[MAX_ADMITTED_PER_LOOP];
+        uint16_t partition;
 	uint64_t current_timeslot;
 	struct end_node_state *en;
 	struct fp_window *wnd;
@@ -643,8 +646,10 @@ static inline void process_allocated_traffic(struct comm_core_state *core,
 	}
 
 	for (i = 0; i < rc; i++) {
-		current_timeslot = ++core->latest_timeslot;
-		comm_log_got_admitted_tslot(admitted[i]->size, current_timeslot);
+                partition = get_admitted_partition(admitted[i]);
+		current_timeslot = ++core->latest_timeslot[partition];
+		comm_log_got_admitted_tslot(admitted[i]->size, current_timeslot,
+                                            partition);
 		for (j = 0; j < admitted[i]->size; j++) {
 			/* process this node's allocation */
 			src = admitted[i]->edges[j].src;

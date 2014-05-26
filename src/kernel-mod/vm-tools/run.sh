@@ -3,6 +3,7 @@
 . ~/fastpass_env.sh
 
 ./mount_vm.sh
+sleep 0.5
 
 sudo cp ~/fastpass/src/kernel-mod/fastpass.ko $VM_HD_MOUNTPOINT/root
 sudo cp ~/fastpass/src/kernel-mod/vm-tools/* $VM_HD_MOUNTPOINT/root

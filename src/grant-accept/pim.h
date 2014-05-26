@@ -11,6 +11,7 @@
 #include "edgelist.h"
 #include "grant-accept.h"
 #include "phase.h"
+#include "ga_random.h"
 #include "../graph-algo/admitted.h"
 #include "../graph-algo/backlog.h"
 #include "../graph-algo/bin.h"
@@ -28,6 +29,7 @@
 /* Data structures associated with one allocation core */
 /* TODO: move more stuff from pim_state to this structure? */
 struct pim_core_state {
+		u32 rand_state;
         struct admission_core_statistics stat;
 } __attribute__((aligned(64))) /* don't want sharing between cores */;
 
@@ -124,6 +126,7 @@ void pim_init_state(struct pim_state *state, struct fp_ring **q_new_demands,
                 fp_mempool_get(bin_mempool, (void**) &state->new_demands[partition]);
                 init_bin(state->new_demands[partition]);
                 state->q_new_demands[partition] = q_new_demands[partition];
+                ga_srand(&state->cores[partition].rand_state, rand());
         }
         phase_state_init(&state->phase, q_ready_partitions);
 }

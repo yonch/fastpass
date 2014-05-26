@@ -10,6 +10,7 @@
 #include <assert.h>
 
 #include "phase.h"
+#include "ga_random.h"
 
 #define MAX_TRIES 10
 #define RING_DEQUEUE_BURST_SIZE		256
@@ -165,7 +166,8 @@ void pim_prepare(struct pim_state *state, uint16_t partition_index) {
  *    selects edges to grant. These are added to 'grants'.
  */
 void pim_do_grant(struct pim_state *state, uint16_t partition_index) {
-        struct admission_core_statistics *core_stat = &state->cores[partition_index].stat;
+		struct pim_core_state *core = &state->cores[partition_index];
+        struct admission_core_statistics *core_stat = &core->stat;
 
         /* wait until all partitions have finished the previous phase */
         phase_barrier_wait(&state->phase, partition_index, core_stat);
@@ -190,7 +192,7 @@ void pim_do_grant(struct pim_state *state, uint16_t partition_index) {
                 uint8_t tries = MAX_TRIES;
                 uint16_t dst_adj_index, dst;
                 do {
-                        dst_adj_index = rand() % degree;
+                        dst_adj_index = ga_rand(&core->rand_state, degree);
                         dst = state->requests_by_src[partition_index].neigh[src_index][dst_adj_index];
                 } while (dst_is_allocated(state, dst) && (--tries > 0));
 
@@ -213,7 +215,8 @@ void pim_do_grant(struct pim_state *state, uint16_t partition_index) {
 void pim_do_accept(struct pim_state *state, uint16_t partition_index) {
         uint16_t count, src_partition;
         struct ga_edgelist *edgelist;
-        struct admission_core_statistics *core_stat = &state->cores[partition_index].stat;
+		struct pim_core_state *core = &state->cores[partition_index];
+        struct admission_core_statistics *core_stat = &core->stat;
 
         /* indicate that this partition finished its phase */
         phase_finished(&state->phase, partition_index, core_stat);
@@ -251,7 +254,7 @@ void pim_do_accept(struct pim_state *state, uint16_t partition_index) {
                         continue; /* no grants for this dst */
 
                 /* choose an edge and accept it */
-                uint16_t src_adj_index = rand() % degree;
+                uint16_t src_adj_index = ga_rand(&core->rand_state, degree);
                 uint16_t src = state->grants_by_dst[partition_index].neigh[dst_index][src_adj_index];
                 ga_partd_edgelist_add(&state->accepts, src, dst);
 

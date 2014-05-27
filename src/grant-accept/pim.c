@@ -148,6 +148,9 @@ void process_new_requests(struct pim_state *state, uint16_t partition_index) {
  * Prepare data structures so they are ready to allocate the next timeslot
  */
 void pim_prepare(struct pim_state *state, uint16_t partition_index) {
+        struct pim_core_state *core = &state->cores[partition_index];
+        struct admission_core_statistics *core_stat = &core->stat;
+
         /* add new backlogs to requests */
         process_new_requests(state, partition_index);
 
@@ -159,6 +162,12 @@ void pim_prepare(struct pim_state *state, uint16_t partition_index) {
         uint32_t words_per_partition = PIM_BITMASK_WORD(PARTITION_N_NODES);
         memset(((uint8_t *) &state->src_endnodes) + start_word, 0, words_per_partition);
         memset(((uint8_t *) &state->dst_endnodes) + start_word, 0, words_per_partition);
+
+        /* get memory for admitted traffic, init it */
+        while (fp_mempool_get(state->admitted_traffic_mempool, (void**) &core->admitted) != 0)
+		adm_log_admitted_traffic_alloc_failed(core_stat);
+        init_admitted_traffic(core->admitted);
+        set_admitted_partition(core->admitted, partition_index);
 }
 
 /**
@@ -314,22 +323,17 @@ void process_accepts_from_partition(struct pim_state *state, uint16_t src_partit
  * Process all of the accepts, after a timeslot is done being allocated
  */
 void pim_process_accepts(struct pim_state *state, uint16_t partition_index) {
-        struct admission_core_statistics *core_stat = &state->cores[partition_index].stat;
+	struct pim_core_state *core = &state->cores[partition_index];
+        struct admission_core_statistics *core_stat = &core->stat;
         uint16_t dst_partition, count;
 
         /* indicate that this partition finished its phase */
         phase_finished(&state->phase, partition_index, core_stat);
 
-        /* get memory for admitted traffic, init it */
-        struct admitted_traffic *admitted;
-        while (fp_mempool_get(state->admitted_traffic_mempool, (void**) &admitted) != 0)
-		adm_log_admitted_traffic_alloc_failed(core_stat);
-        init_admitted_traffic(admitted);
-        set_admitted_partition(admitted, partition_index);
-
         /* iterate through all accepted edges */
         /* process accepts from this partition first */
-        process_accepts_from_partition(state, partition_index, partition_index, admitted);
+        process_accepts_from_partition(state, partition_index, partition_index,
+                                       core->admitted);
         
         /* process accepts from other partitions, as they are ready */
         count = 0;
@@ -339,12 +343,12 @@ void pim_process_accepts(struct pim_state *state, uint16_t partition_index) {
                 if (dst_partition != NONE_READY) {
                         count++;
                         process_accepts_from_partition(state, partition_index,
-                                                       dst_partition, admitted);
+                                                       dst_partition, core->admitted);
                 } else
                         process_new_requests(state, partition_index);
         }
 
-        /* send out the admitted traffic */
-        while (fp_ring_enqueue(state->q_admitted_out, admitted) != 0)
+        /* send out the &core->admitted traffic */
+        while (fp_ring_enqueue(state->q_admitted_out, core->admitted) != 0)
                 adm_log_wait_for_space_in_q_admitted_traffic(core_stat);
 }

@@ -29,7 +29,8 @@
 /* Data structures associated with one allocation core */
 /* TODO: move more stuff from pim_state to this structure? */
 struct pim_core_state {
-		u32 rand_state;
+        u32 rand_state;
+        struct admitted_traffic *admitted;
         struct admission_core_statistics stat;
 } __attribute__((aligned(64))) /* don't want sharing between cores */;
 

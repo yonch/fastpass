@@ -20,6 +20,7 @@ u32 ga_rand(u32 *state, u16 max_val)
 {
 	u32 res = ((*state >> 16) * max_val) >> 16;
 	*state = *state * GA_RAND_A + GA_RAND_C;
+        return res;
 }
 
 #endif /* GRANT_ACCEPT_RANDOM_H_ */

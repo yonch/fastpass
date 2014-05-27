@@ -13,7 +13,7 @@
 #include "ga_random.h"
 
 #define MAX_TRIES 10
-#define RING_DEQUEUE_BURST_SIZE		256
+#define RING_DEQUEUE_BURST_SIZE		8
 
 /**
  * Return true if the src is already allocated, false otherwise.
@@ -148,7 +148,7 @@ void process_new_requests(struct pim_state *state, uint16_t partition_index) {
  * Prepare data structures so they are ready to allocate the next timeslot
  */
 void pim_prepare(struct pim_state *state, uint16_t partition_index) {
-         /* add new backlogs to requests */
+        /* add new backlogs to requests */
         process_new_requests(state, partition_index);
 
         /* reset accepts */
@@ -166,14 +166,27 @@ void pim_prepare(struct pim_state *state, uint16_t partition_index) {
  *    selects edges to grant. These are added to 'grants'.
  */
 void pim_do_grant(struct pim_state *state, uint16_t partition_index) {
-		struct pim_core_state *core = &state->cores[partition_index];
+        uint16_t count, src_partition;
+        struct pim_core_state *core = &state->cores[partition_index];
         struct admission_core_statistics *core_stat = &core->stat;
 
-        /* wait until all partitions have finished the previous phase */
-        phase_barrier_wait(&state->phase, partition_index, core_stat);
+        /* indicate that this partition finished its phase */
+        phase_finished(&state->phase, partition_index, core_stat);
 
         /* reset grant edgelist */
         ga_partd_edgelist_src_reset(&state->grants, partition_index);
+
+        /* wait until all partitions have finished the previous phase */
+        /* process new requests while waiting */
+        count = 0;
+        while (count < N_PARTITIONS - 1) {
+                src_partition = phase_get_finished_partition(&state->phase, partition_index,
+                                                             core_stat);
+                if (src_partition != NONE_READY)
+                        count++;
+                else
+                        process_new_requests(state, partition_index);
+        }
 
         /* for each src in the partition, randomly choose a dst to grant to */
         uint16_t src;
@@ -215,7 +228,7 @@ void pim_do_grant(struct pim_state *state, uint16_t partition_index) {
 void pim_do_accept(struct pim_state *state, uint16_t partition_index) {
         uint16_t count, src_partition;
         struct ga_edgelist *edgelist;
-		struct pim_core_state *core = &state->cores[partition_index];
+	struct pim_core_state *core = &state->cores[partition_index];
         struct admission_core_statistics *core_stat = &core->stat;
 
         /* indicate that this partition finished its phase */
@@ -240,7 +253,8 @@ void pim_do_accept(struct pim_state *state, uint16_t partition_index) {
                         count++;
                         edgelist = &state->grants.dst[partition_index].src[src_partition];
                         ga_edges_to_adj_by_dst(&edgelist->edge[0], edgelist->n, dest_adj);
-                }
+                } else
+                        process_new_requests(state, partition_index);
         }
 
         /* for each dst in the partition, randomly choose a src to accept */
@@ -326,7 +340,8 @@ void pim_process_accepts(struct pim_state *state, uint16_t partition_index) {
                         count++;
                         process_accepts_from_partition(state, partition_index,
                                                        dst_partition, admitted);
-                }
+                } else
+                        process_new_requests(state, partition_index);
         }
 
         /* send out the admitted traffic */

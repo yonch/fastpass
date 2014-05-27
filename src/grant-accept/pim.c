@@ -225,7 +225,7 @@ void pim_do_grant(struct pim_state *state, uint16_t partition_index) {
                 ga_partd_edgelist_add(&state->grants, src, dst);
 
                 /* record the index of the destination we granted to */
-                state->grant_adj_index[src] = dst_adj_index;
+                core->grant_adj_index[PARTITION_IDX(src)] = dst_adj_index;
         }
 }
 
@@ -291,7 +291,8 @@ void pim_do_accept(struct pim_state *state, uint16_t partition_index) {
 static inline
 void process_accepts_from_partition(struct pim_state *state, uint16_t src_partition,
                                     uint16_t dst_partition, struct admitted_traffic *admitted) {
-        struct admission_core_statistics *core_stat = &state->cores[src_partition].stat;
+	struct pim_core_state *core = &state->cores[src_partition];
+        struct admission_core_statistics *core_stat = &core->stat;
         struct ga_edgelist *edgelist;
         uint16_t i;
 
@@ -313,7 +314,7 @@ void process_accepts_from_partition(struct pim_state *state, uint16_t src_partit
 
                  /* no more backlog, delete the edge from requests */
                  adm_log_allocator_no_backlog(core_stat, edge->src, edge->dst);
-                 uint16_t grant_adj_index = state->grant_adj_index[edge->src];
+                 uint16_t grant_adj_index = core->grant_adj_index[PARTITION_IDX(edge->src)];
                  ga_adj_delete_neigh(&state->requests_by_src[PARTITION_OF(edge->src)],
                                      PARTITION_IDX(edge->src), grant_adj_index);
         }

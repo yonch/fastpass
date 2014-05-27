@@ -27,7 +27,7 @@ struct ga_edge {
 struct ga_adj {
 	uint16_t	degree[PARTITION_N_NODES];
 	uint16_t	neigh[PARTITION_N_NODES][GA_MAX_DEGREE];
-};
+} __attribute__((aligned(64))) /* don't want sharing between cores */;
 
 /**
  * Erases all edges from the adjacency structure

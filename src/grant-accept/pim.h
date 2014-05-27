@@ -31,6 +31,7 @@
 struct pim_core_state {
         u32 rand_state;
         struct admitted_traffic *admitted;
+        uint16_t grant_adj_index[PARTITION_N_NODES]; /* per src adj index of grant */
         struct admission_core_statistics stat;
 } __attribute__((aligned(64))) /* don't want sharing between cores */;
 
@@ -40,7 +41,6 @@ struct pim_state {
         struct ga_partd_edgelist grants;
         struct ga_adj grants_by_dst[N_PARTITIONS]; /* per dst partition */
         struct ga_partd_edgelist accepts;
-        uint8_t grant_adj_index[MAX_NODES]; /* per src adj index of grant */
         uint8_t src_endnodes[MAX_NODES / PIM_BITMASKS_PER_8_BIT];
         uint8_t dst_endnodes[MAX_NODES / PIM_BITMASKS_PER_8_BIT];
         struct backlog backlog;

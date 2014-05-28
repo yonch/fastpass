@@ -18,7 +18,7 @@
 /**
  * Return true if the src is already allocated, false otherwise.
  */
-static inline
+static inline __attribute__((always_inline))
 bool src_is_allocated(struct pim_core_state *core, uint16_t src) {
         uint16_t src_index = PARTITION_IDX(src);
         return ((core->src_endnodes[PIM_BITMASK_WORD(src_index)] >>
@@ -28,7 +28,7 @@ bool src_is_allocated(struct pim_core_state *core, uint16_t src) {
 /**
  * Return true if the dst is already allocated, false otherwise.
  */
-static inline
+static inline __attribute__((always_inline))
 bool dst_is_allocated(struct pim_state *state, uint16_t dst) {
         /* this function may be called by a different core than
          * the core of dst */
@@ -42,7 +42,7 @@ bool dst_is_allocated(struct pim_state *state, uint16_t dst) {
 /**
  * Mark the src as allocated.
  */
-static inline
+static inline __attribute__((always_inline))
 void mark_src_allocated(struct pim_core_state *core, uint16_t src) {
         uint16_t src_index = PARTITION_IDX(src);
         core->src_endnodes[PIM_BITMASK_WORD(src_index)] |=
@@ -52,7 +52,7 @@ void mark_src_allocated(struct pim_core_state *core, uint16_t src) {
 /**
  * Mark the dst as allocated.
  */
-static inline
+static inline __attribute__((always_inline))
 void mark_dst_allocated(struct pim_core_state *core, uint16_t dst) {
         uint16_t dst_index = PARTITION_IDX(dst);
         core->dst_endnodes[PIM_BITMASK_WORD(dst_index)]
@@ -62,6 +62,7 @@ void mark_dst_allocated(struct pim_core_state *core, uint16_t dst) {
 /**
  * Flushes the bin for a specific partition to state and allocates a new bin
  */
+static inline __attribute__((always_inline))
 void _flush_backlog_now(struct pim_state *state, uint16_t partition_index) {
         struct pim_core_state *core = &state->cores[partition_index];
 
@@ -121,7 +122,7 @@ void pim_reset_sender(struct pim_state *state, uint16_t src) {
 /**
  * Move demands from 'bin' to requests_by_src
  */
-static inline
+static inline __attribute__((always_inline))
 void process_incoming_bin(struct pim_state *state, uint16_t partition_index,
                           struct bin *bin) {
         uint32_t i;
@@ -136,7 +137,7 @@ void process_incoming_bin(struct pim_state *state, uint16_t partition_index,
 /**
  * Move new demands from 'q_new_demands' to requests_by_src
  */
-static inline
+static inline __attribute__((always_inline))
 void process_new_requests(struct pim_state *state, uint16_t partition_index) {
         struct pim_core_state *core = &state->cores[partition_index];
         struct bin *bins[RING_DEQUEUE_BURST_SIZE];
@@ -345,7 +346,7 @@ void pim_do_accept(struct pim_state *state, uint16_t partition_index) {
 }
 
 /* Process accepts involving one source and one destination partition */
-static inline
+static inline __attribute__((always_inline))
 void process_accepts_from_partition(struct pim_state *state, uint16_t src_partition,
                                     uint16_t dst_partition) {
 	struct pim_core_state *core = &state->cores[src_partition];

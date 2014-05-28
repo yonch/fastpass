@@ -175,6 +175,41 @@ void pim_prepare(struct pim_state *state, uint16_t partition_index) {
 
 /**
  * For all source (left-hand) nodes in partition 'partition_index',
+ *    selects edges to grant. These are added to 'grants'. For the
+ *    first iteration only.
+ */
+void pim_do_grant_first_it(struct pim_state *state, uint16_t partition_index) {
+        uint16_t count, src_partition, dst_adj_index, dst;
+        struct pim_core_state *core = &state->cores[partition_index];
+        struct admission_core_statistics *core_stat = &core->stat;
+
+        /* reset grant edgelist */
+        ga_partd_edgelist_src_reset(&state->grants, partition_index);
+
+        /* for each src in the partition, randomly choose a dst to grant to */
+        uint16_t src;
+        for (src = first_in_partition(partition_index);
+             src <= last_in_partition(partition_index);
+             src++) {
+                uint16_t src_index = PARTITION_IDX(src);
+                uint16_t degree = state->requests_by_src[partition_index].degree[src_index];
+                if (degree == 0)
+                        continue; /* no requests for this src */
+
+                /* pick a random destination to grant to */
+                dst_adj_index = ga_rand(&core->rand_state, degree);
+                dst = state->requests_by_src[partition_index].neigh[src_index][dst_adj_index];
+
+                /* add the granted edge */
+                ga_partd_edgelist_add(&state->grants, src, dst);
+
+                /* record the index of the destination we granted to */
+                core->grant_adj_index[PARTITION_IDX(src)] = dst_adj_index;
+        }
+}
+
+/**
+ * For all source (left-hand) nodes in partition 'partition_index',
  *    selects edges to grant. These are added to 'grants'.
  */
 void pim_do_grant(struct pim_state *state, uint16_t partition_index) {

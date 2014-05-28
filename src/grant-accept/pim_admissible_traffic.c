@@ -22,9 +22,12 @@ void pim_get_admissible_traffic(struct pim_state *state)
                 pim_prepare(state, partition);
 
         /* run multiple iterations of pim and print out accepted edges */
-        /* TODO: add multiple cores and synchronization between them */
+        for (partition = 0; partition < N_PARTITIONS; partition++) {
+                pim_do_grant_first_it(state, partition);
+                pim_do_accept(state, partition);
+        }
         uint8_t i;
-        for (i = 0; i < NUM_ITERATIONS; i++) {
+        for (i = 1; i < NUM_ITERATIONS; i++) {
                 for (partition = 0; partition < N_PARTITIONS; partition++)
                         pim_do_grant(state, partition);
                 for (partition = 0; partition < N_PARTITIONS; partition++)

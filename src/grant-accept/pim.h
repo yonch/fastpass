@@ -77,6 +77,13 @@ void pim_prepare(struct pim_state *state, uint16_t partition_index);
 
 /**
  * For all source (left-hand) nodes in partition 'partition_index',
+ *    selects edges to grant. These are added to 'grants'. For the
+ *    first iteration only.
+ */
+void pim_do_grant_first_it(struct pim_state *state, uint16_t partition_index);
+
+/**
+ * For all source (left-hand) nodes in partition 'partition_index',
  *    selects edges to grant. These are added to 'grants'.
  */
 void pim_do_grant(struct pim_state *state, uint16_t partition_index);

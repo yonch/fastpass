@@ -112,25 +112,4 @@ uint16_t phase_get_finished_partition(struct phase_state *phase_state,
         return get_partition_from_queue_entry(queue_entry);
 }
 
-/**
- * Temporary simplification that doesn't allow any useful work while
- * waiting for other partitions to finish
- */
-static inline
-void phase_barrier_wait(struct phase_state *phase_state, uint16_t partition_index,
-                        struct admission_core_statistics *stat) {
-        /* indicate that this partition finished its phase */
-        phase_finished(phase_state, partition_index, stat);
-
-        /* wait for all other partitions to finish their phases too */
-        uint16_t count = 0;
-        while (count < N_PARTITIONS - 1) {
-                if (phase_get_finished_partition(phase_state, partition_index,
-                                                 stat) != NONE_READY)
-                        count++;
-                else
-                        adm_log_phase_none_ready_in_barrier(stat);
-        }
-}
-
 #endif /* PHASE_H_ */

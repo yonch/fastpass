@@ -157,9 +157,6 @@ void pim_prepare(struct pim_state *state, uint16_t partition_index) {
         /* add new backlogs to requests */
         process_new_requests(state, partition_index);
 
-        /* reset accepts */
-        ga_partd_edgelist_src_reset(&state->accepts, partition_index);
-
         /* reset src and dst endnodes */
         uint32_t start_word = PIM_BITMASK_WORD(first_in_partition(partition_index));
         uint32_t words_per_partition = PIM_BITMASK_WORD(PARTITION_N_NODES);
@@ -319,8 +316,7 @@ void pim_do_accept(struct pim_state *state, uint16_t partition_index) {
                 uint16_t src = state->grants_by_dst[partition_index].neigh[dst_index][src_adj_index];
                 ga_partd_edgelist_add(&state->accepts, src, dst);
 
-                /* mark the src and dst as allocated for this timeslot */
-                mark_src_allocated(state, src); /* TODO: this write might cause cache contention */
+                /* mark the dst as allocated for this timeslot */
                 mark_dst_allocated(state, dst);
         }
 }
@@ -342,6 +338,9 @@ void process_accepts_from_partition(struct pim_state *state, uint16_t src_partit
                 /* add edge to admitted traffic */
                 insert_admitted_edge(admitted, edge->src, edge->dst);
 
+                /* mark the src as allocated for this timeslot */
+                mark_src_allocated(state, edge->src);
+
                 /* decrease the backlog */
                 assert(backlog_get(&state->backlog, edge->src, edge->dst) != 0);
                 backlog = backlog_decrease(&state->backlog, edge->src, edge->dst);
@@ -361,7 +360,7 @@ void process_accepts_from_partition(struct pim_state *state, uint16_t src_partit
 }
 
 /**
- * Process all of the accepts, after a timeslot is done being allocated
+ * Process all of the accepts, after each iteration
  */
 void pim_process_accepts(struct pim_state *state, uint16_t partition_index) {
 	struct pim_core_state *core = &state->cores[partition_index];
@@ -389,7 +388,18 @@ void pim_process_accepts(struct pim_state *state, uint16_t partition_index) {
                         process_new_requests(state, partition_index);
         }
 
-        /* send out the &core->admitted traffic */
+        /* reset accepts */
+        ga_partd_edgelist_src_reset(&state->accepts, partition_index);
+}
+
+/**
+ * Clean-up after a timeslot is done being allocated
+ */
+void pim_complete_timeslot(struct pim_state *state, uint16_t partition_index) {
+	struct pim_core_state *core = &state->cores[partition_index];
+        struct admission_core_statistics *core_stat = &core->stat;
+
+        /* send out the admitted traffic */
         while (fp_ring_enqueue(state->q_admitted_out, core->admitted) != 0)
                 adm_log_wait_for_space_in_q_admitted_traffic(core_stat);
 }

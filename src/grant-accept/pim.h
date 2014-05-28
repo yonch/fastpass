@@ -96,9 +96,14 @@ void pim_do_grant(struct pim_state *state, uint16_t partition_index);
 void pim_do_accept(struct pim_state *state, uint16_t partition_index);
 
 /**
- * Process all of the accepts, after a timeslot is done being allocated
+ * Process all of the accepts, after each iteration
  */
 void pim_process_accepts(struct pim_state *state, uint16_t partition_index);
+
+/**
+ * Clean-up after a timeslot is done being allocated
+ */
+void pim_complete_timeslot(struct pim_state *state, uint16_t partition_index);
 
 /**
  * Initialize all demands to zero
@@ -109,6 +114,7 @@ void pim_reset_state(struct pim_state *state)
         uint16_t src_partition;
         for (src_partition = 0; src_partition < N_PARTITIONS; src_partition++) {
                 ga_reset_adj(&state->requests_by_src[src_partition]);
+                ga_partd_edgelist_src_reset(&state->accepts, src_partition);
         }
         backlog_init(&state->backlog);
 }

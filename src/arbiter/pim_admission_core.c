@@ -134,13 +134,15 @@ int exec_pim_admission_core(void *void_cmd_p)
                 /* run multiple iterations of pim and print out accepted edges */
                 pim_do_grant_first_it(&g_pim_state, core_ind);
                 pim_do_accept(&g_pim_state, core_ind);
+                pim_process_accepts(&g_pim_state, core_ind);
                 uint8_t i;
                 for (i = 1; i < NUM_ITERATIONS; i++) {
                         pim_do_grant(&g_pim_state, core_ind);
                         pim_do_accept(&g_pim_state, core_ind);
+                        pim_process_accepts(&g_pim_state, core_ind);
                 }
 
-                pim_process_accepts(&g_pim_state, core_ind);
+                pim_complete_timeslot(&g_pim_state, core_ind);
 
 		admission_log_allocation_end();
 

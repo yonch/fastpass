@@ -333,6 +333,7 @@ void process_accepts_from_partition(struct pim_state *state, uint16_t src_partit
         struct admission_core_statistics *core_stat = &core->stat;
         struct ga_edgelist *edgelist;
         uint16_t i;
+        uint32_t backlog;
 
         edgelist = &state->accepts.dst[dst_partition].src[src_partition];
         for (i = 0; i < edgelist->n; i++) {
@@ -342,7 +343,8 @@ void process_accepts_from_partition(struct pim_state *state, uint16_t src_partit
                 insert_admitted_edge(admitted, edge->src, edge->dst);
 
                 /* decrease the backlog */
-                int32_t backlog = backlog_decrease(&state->backlog, edge->src, edge->dst);
+                assert(backlog_get(&state->backlog, edge->src, edge->dst) != 0);
+                backlog = backlog_decrease(&state->backlog, edge->src, edge->dst);
                 if (backlog != 0) {
                         /* there is remaining backlog */
                         adm_log_allocated_backlog_remaining(core_stat, edge->src,

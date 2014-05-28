@@ -260,12 +260,14 @@ void pim_do_grant(struct pim_state *state, uint16_t partition_index) {
                 /* find an un-allocated destination to grant to */
                 uint8_t tries = MAX_TRIES;
                 uint16_t dst_adj_index, dst;
+                bool dst_is_alloc;
                 do {
                         dst_adj_index = ga_rand(&core->rand_state, degree);
                         dst = state->requests_by_src[partition_index].neigh[src_index][dst_adj_index];
-                } while (dst_is_allocated(state, dst) && (--tries > 0));
+                        dst_is_alloc = dst_is_allocated(state, dst);
+                } while (dst_is_alloc && (--tries > 0));
 
-                if (dst_is_allocated(state, dst))
+                if (dst_is_alloc)
                         continue; /* couldn't find a free dst*/
 
                 /* add the granted edge */

@@ -19,9 +19,10 @@
  * Return true if the src is already allocated, false otherwise.
  */
 static inline
-bool src_is_allocated(struct pim_state *state, uint16_t src) {
-        return ((state->src_endnodes[PIM_BITMASK_WORD(src)] >> PIM_BITMASK_SHIFT(src)) &
-                0x1);
+bool src_is_allocated(struct pim_core_state *core, uint16_t src) {
+        uint16_t src_index = PARTITION_IDX(src);
+        return ((core->src_endnodes[PIM_BITMASK_WORD(src_index)] >>
+                 PIM_BITMASK_SHIFT(src_index)) & 0x1);
 }
 
 /**
@@ -29,24 +30,33 @@ bool src_is_allocated(struct pim_state *state, uint16_t src) {
  */
 static inline
 bool dst_is_allocated(struct pim_state *state, uint16_t dst) {
-    return ((state->dst_endnodes[PIM_BITMASK_WORD(dst)] >> PIM_BITMASK_SHIFT(dst)) &
-                0x1);
+        /* this function may be called by a different core than
+         * the core of dst */
+        struct pim_core_state *core = &state->cores[PARTITION_OF(dst)];
+
+        uint16_t dst_index = PARTITION_IDX(dst);
+        return ((core->dst_endnodes[PIM_BITMASK_WORD(dst_index)] >>
+                 PIM_BITMASK_SHIFT(dst_index)) & 0x1);
 }
 
 /**
  * Mark the src as allocated.
  */
 static inline
-void mark_src_allocated(struct pim_state *state, uint16_t src) {
-        state->src_endnodes[PIM_BITMASK_WORD(src)] |= (0x1 << PIM_BITMASK_SHIFT(src));
+void mark_src_allocated(struct pim_core_state *core, uint16_t src) {
+        uint16_t src_index = PARTITION_IDX(src);
+        core->src_endnodes[PIM_BITMASK_WORD(src_index)] |=
+                (0x1 << PIM_BITMASK_SHIFT(src_index));
 }
 
 /**
  * Mark the dst as allocated.
  */
 static inline
-void mark_dst_allocated(struct pim_state *state, uint16_t dst) {
-        state->dst_endnodes[PIM_BITMASK_WORD(dst)] |= (0x1 << PIM_BITMASK_SHIFT(dst));
+void mark_dst_allocated(struct pim_core_state *core, uint16_t dst) {
+        uint16_t dst_index = PARTITION_IDX(dst);
+        core->dst_endnodes[PIM_BITMASK_WORD(dst_index)]
+                |= (0x1 << PIM_BITMASK_SHIFT(dst_index));
 }
 
 /**
@@ -158,10 +168,8 @@ void pim_prepare(struct pim_state *state, uint16_t partition_index) {
         process_new_requests(state, partition_index);
 
         /* reset src and dst endnodes */
-        uint32_t start_word = PIM_BITMASK_WORD(first_in_partition(partition_index));
-        uint32_t words_per_partition = PIM_BITMASK_WORD(PARTITION_N_NODES);
-        memset(((uint8_t *) &state->src_endnodes) + start_word, 0, words_per_partition);
-        memset(((uint8_t *) &state->dst_endnodes) + start_word, 0, words_per_partition);
+        memset(&core->src_endnodes, 0, PIM_BITMASK_WORD(PARTITION_N_NODES));
+        memset(&core->dst_endnodes, 0, PIM_BITMASK_WORD(PARTITION_N_NODES));
 
         /* get memory for admitted traffic, init it */
         while (fp_mempool_get(state->admitted_traffic_mempool, (void**) &core->admitted) != 0)
@@ -237,7 +245,7 @@ void pim_do_grant(struct pim_state *state, uint16_t partition_index) {
         for (src = first_in_partition(partition_index);
              src <= last_in_partition(partition_index);
              src++) {
-                if (src_is_allocated(state, src))
+                if (src_is_allocated(core, src))
                         continue; /* this src has been allocated in this timeslot */
 
                 uint16_t src_index = PARTITION_IDX(src);
@@ -317,7 +325,7 @@ void pim_do_accept(struct pim_state *state, uint16_t partition_index) {
                 ga_partd_edgelist_add(&state->accepts, src, dst);
 
                 /* mark the dst as allocated for this timeslot */
-                mark_dst_allocated(state, dst);
+                mark_dst_allocated(core, dst);
         }
 }
 
@@ -341,7 +349,7 @@ void process_accepts_from_partition(struct pim_state *state, uint16_t src_partit
                 insert_admitted_edge(admitted, edge->src, edge->dst);
 
                 /* mark the src as allocated for this timeslot */
-                mark_src_allocated(state, edge->src);
+                mark_src_allocated(core, edge->src);
 
                 /* decrease the backlog */
                 assert(backlog_get(&state->backlog, edge->src, edge->dst) != 0);

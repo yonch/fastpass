@@ -27,11 +27,12 @@
 #define PIM_BITMASK_SHIFT(node)     (node & (PIM_BITMASKS_PER_8_BIT - 1))
 
 /* Data structures associated with one allocation core */
-/* TODO: move more stuff from pim_state to this structure? */
 struct pim_core_state {
         u32 rand_state;
         struct admitted_traffic *admitted;
         uint16_t grant_adj_index[PARTITION_N_NODES]; /* per src adj index of grant */
+        uint8_t src_endnodes[PARTITION_N_NODES / PIM_BITMASKS_PER_8_BIT];
+        uint8_t dst_endnodes[PARTITION_N_NODES / PIM_BITMASKS_PER_8_BIT];
         struct fp_ring *q_new_demands;
         struct admission_core_statistics stat;
 } __attribute__((aligned(64))) /* don't want sharing between cores */;
@@ -42,8 +43,6 @@ struct pim_state {
         struct ga_partd_edgelist grants;
         struct ga_adj grants_by_dst[N_PARTITIONS]; /* per dst partition */
         struct ga_partd_edgelist accepts;
-        uint8_t src_endnodes[MAX_NODES / PIM_BITMASKS_PER_8_BIT];
-        uint8_t dst_endnodes[MAX_NODES / PIM_BITMASKS_PER_8_BIT];
         struct backlog backlog;
         struct bin *new_demands[N_PARTITIONS]; /* per src partition */
         struct fp_ring *q_admitted_out;

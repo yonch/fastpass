@@ -22,11 +22,12 @@ void pim_get_admissible_traffic(struct pim_state *state)
                 pim_prepare(state, partition);
 
         /* run multiple iterations of pim and print out accepted edges */
-        for (partition = 0; partition < N_PARTITIONS; partition++) {
+        for (partition = 0; partition < N_PARTITIONS; partition++)
                 pim_do_grant_first_it(state, partition);
+        for (partition = 0; partition < N_PARTITIONS; partition++)
                 pim_do_accept(state, partition);
+        for (partition = 0; partition < N_PARTITIONS; partition++)
                 pim_process_accepts(state, partition);
-        }
         uint8_t i;
         for (i = 1; i < NUM_ITERATIONS; i++) {
                 for (partition = 0; partition < N_PARTITIONS; partition++)

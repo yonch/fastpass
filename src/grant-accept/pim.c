@@ -324,14 +324,16 @@ void pim_do_accept(struct pim_state *state, uint16_t partition_index) {
 /* Process accepts involving one source and one destination partition */
 static inline
 void process_accepts_from_partition(struct pim_state *state, uint16_t src_partition,
-                                    uint16_t dst_partition, struct admitted_traffic *admitted) {
+                                    uint16_t dst_partition) {
 	struct pim_core_state *core = &state->cores[src_partition];
         struct admission_core_statistics *core_stat = &core->stat;
         struct ga_edgelist *edgelist;
         uint16_t i;
         uint32_t backlog;
 
+        struct admitted_traffic *admitted = core->admitted;
         edgelist = &state->accepts.dst[dst_partition].src[src_partition];
+
         for (i = 0; i < edgelist->n; i++) {
                 struct ga_edge *edge = &edgelist->edge[i];
 
@@ -372,8 +374,7 @@ void pim_process_accepts(struct pim_state *state, uint16_t partition_index) {
 
         /* iterate through all accepted edges */
         /* process accepts from this partition first */
-        process_accepts_from_partition(state, partition_index, partition_index,
-                                       core->admitted);
+        process_accepts_from_partition(state, partition_index, partition_index);
         
         /* process accepts from other partitions, as they are ready */
         count = 0;
@@ -383,7 +384,7 @@ void pim_process_accepts(struct pim_state *state, uint16_t partition_index) {
                 if (dst_partition != NONE_READY) {
                         count++;
                         process_accepts_from_partition(state, partition_index,
-                                                       dst_partition, core->admitted);
+                                                       dst_partition);
                 } else
                         process_new_requests(state, partition_index);
         }

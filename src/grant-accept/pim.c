@@ -222,14 +222,17 @@ void pim_do_grant(struct pim_state *state, uint16_t partition_index) {
         struct pim_core_state *core = &state->cores[partition_index];
         struct admission_core_statistics *core_stat = &core->stat;
 
+#ifndef SINGLE_CORE
         /* indicate that this partition finished its phase */
         phase_finished(&state->phase, partition_index, core_stat);
+#endif
 
         /* reset grant edgelist */
         ga_partd_edgelist_src_reset(&state->grants, partition_index);
 
         /* wait until all partitions have finished the previous phase */
         /* process new requests while waiting */
+#ifndef SINGLE_CORE
         count = 0;
         while (count < N_PARTITIONS - 1) {
                 src_partition = phase_get_finished_partition(&state->phase, partition_index,
@@ -239,6 +242,7 @@ void pim_do_grant(struct pim_state *state, uint16_t partition_index) {
                 else
                         process_new_requests(state, partition_index);
         }
+#endif
 
         /* for each src in the partition, randomly choose a dst to grant to */
         uint16_t src;
@@ -283,8 +287,10 @@ void pim_do_accept(struct pim_state *state, uint16_t partition_index) {
 	struct pim_core_state *core = &state->cores[partition_index];
         struct admission_core_statistics *core_stat = &core->stat;
 
+#ifndef SINGLE_CORE
         /* indicate that this partition finished its phase */
         phase_finished(&state->phase, partition_index, core_stat);
+#endif
 
         /* reset grant adjacency list */
         ga_reset_adj(&state->grants_by_dst[partition_index]);
@@ -292,6 +298,7 @@ void pim_do_accept(struct pim_state *state, uint16_t partition_index) {
         /* sort grants from all src partitions by destination node */
         struct ga_adj *dest_adj = &state->grants_by_dst[partition_index];
 
+#ifndef SINGLE_CORE
         /* sort grants from this partition first */
         edgelist = &state->grants.dst[partition_index].src[partition_index];
         ga_edges_to_adj_by_dst(&edgelist->edge[0], edgelist->n, dest_adj);
@@ -308,6 +315,12 @@ void pim_do_accept(struct pim_state *state, uint16_t partition_index) {
                 } else
                         process_new_requests(state, partition_index);
         }
+#else
+        for (src_partition = 0; src_partition < N_PARTITIONS; src_partition++) {
+                edgelist = &state->grants.dst[partition_index].src[src_partition];
+                ga_edges_to_adj_by_dst(&edgelist->edge[0], edgelist->n, dest_adj);
+        }
+#endif
 
         /* for each dst in the partition, randomly choose a src to accept */
         uint16_t dst;
@@ -377,10 +390,13 @@ void pim_process_accepts(struct pim_state *state, uint16_t partition_index) {
         struct admission_core_statistics *core_stat = &core->stat;
         uint16_t dst_partition, count;
 
+#ifndef SINGLE_CORE
         /* indicate that this partition finished its phase */
         phase_finished(&state->phase, partition_index, core_stat);
+#endif
 
         /* iterate through all accepted edges */
+#ifndef SINGLE_CORE
         /* process accepts from this partition first */
         process_accepts_from_partition(state, partition_index, partition_index);
         
@@ -396,6 +412,11 @@ void pim_process_accepts(struct pim_state *state, uint16_t partition_index) {
                 } else
                         process_new_requests(state, partition_index);
         }
+#else
+        for (dst_partition = 0; dst_partition < N_PARTITIONS; dst_partition++) {
+                process_accepts_from_partition(state, partition_index, dst_partition);
+        }
+#endif
 
         /* reset accepts */
         ga_partd_edgelist_src_reset(&state->accepts, partition_index);

@@ -53,8 +53,10 @@ void mark_dst_allocated(struct pim_state *state, uint16_t dst) {
  * Flushes the bin for a specific partition to state and allocates a new bin
  */
 void _flush_backlog_now(struct pim_state *state, uint16_t partition_index) {
+        struct pim_core_state *core = &state->cores[partition_index];
+
         /* enqueue state->new_demands[partition_index] */
-        while (fp_ring_enqueue(state->q_new_demands[partition_index],
+        while (fp_ring_enqueue(core->q_new_demands,
                                state->new_demands[partition_index]) == -ENOBUFS)
                 adm_log_wait_for_space_in_q_head(&state->stat);
 
@@ -107,7 +109,7 @@ void pim_reset_sender(struct pim_state *state, uint16_t src) {
 }
 
 /**
- * Move a bin worth of demands from 'q_new_demands' to requests_by_src
+ * Move demands from 'bin' to requests_by_src
  */
 static inline
 void process_incoming_bin(struct pim_state *state, uint16_t partition_index,
@@ -126,12 +128,13 @@ void process_incoming_bin(struct pim_state *state, uint16_t partition_index,
  */
 static inline
 void process_new_requests(struct pim_state *state, uint16_t partition_index) {
+        struct pim_core_state *core = &state->cores[partition_index];
         struct bin *bins[RING_DEQUEUE_BURST_SIZE];
         int n, i;
         uint32_t num_entries = 0;
         uint32_t num_bins = 0;
 
-        n = fp_ring_dequeue_burst(state->q_new_demands[partition_index],
+        n = fp_ring_dequeue_burst(core->q_new_demands,
                                   (void **) &bins[0], RING_DEQUEUE_BURST_SIZE);
         for (i = 0; i < n; i++) {
                 num_entries += bin_size(bins[i]);

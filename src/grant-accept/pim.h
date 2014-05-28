@@ -32,6 +32,7 @@ struct pim_core_state {
         u32 rand_state;
         struct admitted_traffic *admitted;
         uint16_t grant_adj_index[PARTITION_N_NODES]; /* per src adj index of grant */
+        struct fp_ring *q_new_demands;
         struct admission_core_statistics stat;
 } __attribute__((aligned(64))) /* don't want sharing between cores */;
 
@@ -45,7 +46,6 @@ struct pim_state {
         uint8_t dst_endnodes[MAX_NODES / PIM_BITMASKS_PER_8_BIT];
         struct backlog backlog;
         struct bin *new_demands[N_PARTITIONS]; /* per src partition */
-        struct fp_ring *q_new_demands[N_PARTITIONS]; /* per src partition */
         struct fp_ring *q_admitted_out;
         struct fp_mempool *bin_mempool;
         struct fp_mempool *admitted_traffic_mempool;
@@ -126,7 +126,7 @@ void pim_init_state(struct pim_state *state, struct fp_ring **q_new_demands,
         for (partition = 0; partition < N_PARTITIONS; partition++) {
                 fp_mempool_get(bin_mempool, (void**) &state->new_demands[partition]);
                 init_bin(state->new_demands[partition]);
-                state->q_new_demands[partition] = q_new_demands[partition];
+                state->cores[partition].q_new_demands = q_new_demands[partition];
                 ga_srand(&state->cores[partition].rand_state, rand());
         }
         phase_state_init(&state->phase, q_ready_partitions);

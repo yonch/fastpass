@@ -132,9 +132,10 @@ int exec_pim_admission_core(void *void_cmd_p)
                 pim_prepare(&g_pim_state, core_ind);
 
                 /* run multiple iterations of pim and print out accepted edges */
-                /* TODO: add synchronization to enable multiple admission cores and partitions */
+                pim_do_grant_first_it(&g_pim_state, core_ind);
+                pim_do_accept(&g_pim_state, core_ind);
                 uint8_t i;
-                for (i = 0; i < NUM_ITERATIONS; i++) {
+                for (i = 1; i < NUM_ITERATIONS; i++) {
                         pim_do_grant(&g_pim_state, core_ind);
                         pim_do_accept(&g_pim_state, core_ind);
                 }

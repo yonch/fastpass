@@ -223,27 +223,8 @@ void pim_do_grant(struct pim_state *state, uint16_t partition_index) {
         struct pim_core_state *core = &state->cores[partition_index];
         struct admission_core_statistics *core_stat = &core->stat;
 
-#ifndef PIM_SINGLE_ADMISSION_CORE
-        /* indicate that this partition finished its phase */
-        phase_finished(&state->phase, partition_index, core_stat);
-#endif
-
         /* reset grant edgelist */
         ga_partd_edgelist_src_reset(&state->grants, partition_index);
-
-        /* wait until all partitions have finished the previous phase */
-        /* process new requests while waiting */
-#ifndef PIM_SINGLE_ADMISSION_CORE
-        count = 0;
-        while (count < N_PARTITIONS - 1) {
-                src_partition = phase_get_finished_partition(&state->phase, partition_index,
-                                                             core_stat);
-                if (src_partition != NONE_READY)
-                        count++;
-                else
-                        process_new_requests(state, partition_index);
-        }
-#endif
 
         /* for each src in the partition, randomly choose a dst to grant to */
         uint16_t src;

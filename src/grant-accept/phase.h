@@ -71,12 +71,10 @@ void phase_finished(struct phase_state *phase_state,
         uint64_t queue_entry = create_queue_entry(phase, partition_index);
 
         /* for each other partition, enqueue an entry */
-        uint16_t i;
-        for (i = 0; i < N_PARTITIONS; i++) {
-                if (i == partition_index)
-                        continue;
-
-                fp_ring_enqueue(phase_state->partitions[i].q_ready,
+        uint16_t i, partition;
+        for (i = 1; i < N_PARTITIONS; i++) {
+                partition = (partition_index + i) % N_PARTITIONS;
+                fp_ring_enqueue(phase_state->partitions[partition].q_ready,
                                 (void *) queue_entry);
         }
 }

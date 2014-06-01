@@ -100,7 +100,7 @@ ggplot(summary, aes(x=observed_utilization, y=time,
              scale_color_discrete(name="Nodes", guide = guide_legend(reverse = TRUE)) +
              scale_shape_manual(name="Nodes", guide = guide_legend(reverse = TRUE), values=c(15, 16, 17, 18)) +
              labs(x = "Network utilization (%)",
-                  y = expression(paste("Processing time per timeslot, (", mu, "s)"))) +
+                  y = expression(paste("Processing time per timeslot (", mu, "s)"))) +
              coord_cartesian(xlim=c(0,1))
 
 detach(data)

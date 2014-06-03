@@ -29,9 +29,12 @@ data$gbps = data$nodetslots * BYTES_PER_TIMESLOT * BITS_PER_BYTE / (EXPERIMENT_D
 
 data
 
-ggplot(data, aes(x=cores, y=gbps, color=as.factor(nodes), shape=as.factor(nodes))) +
-             geom_abline(aes(intercept=0, slope=data$gbps[1]), linetype="dashed", color="grey") +
+ggplot(data, aes(x=cores, y=gbps, color=as.factor(batch_size), shape=as.factor(batch_size))) +
+             geom_abline(aes(intercept=0, slope=data$gbps[2]*0.5), linetype="dashed", color="grey") +
+             geom_abline(aes(intercept=0, slope=data$gbps[7]), linetype="dashed", color="grey") +
              geom_point() + geom_line() +
              labs(x = "Cores", y = "Maximum throughput (Gbps)") +
-             scale_color_discrete(name="Nodes") + scale_shape_discrete(name="Nodes") +
-             coord_cartesian(xlim=c(0, 5), ylim=c(0, 750))
+             scale_color_discrete(name="Batch size", guide = guide_legend(reverse = TRUE)) +
+             scale_shape_discrete(name="Batch size", guide = guide_legend(reverse = TRUE)) +
+             scale_x_continuous(breaks=c(2, 4, 6, 8)) +
+             coord_cartesian(xlim=c(0, 9), ylim=c(0, 750))

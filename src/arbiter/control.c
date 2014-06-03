@@ -197,8 +197,9 @@ void launch_cores(void)
 
 	/*** COMM/STRESS_TEST CORES ***/
 	if (IS_STRESS_TEST) {
-		launch_stress_test_cores(start_time, end_time, first_time_slot, q_path_selected,
-				q_admitted);
+		launch_stress_test_cores(start_time + STRESS_TEST_START_GAP_SEC * rte_get_timer_hz(),
+                                         end_time + STRESS_TEST_START_GAP_SEC * rte_get_timer_hz(),
+                                         first_time_slot, q_path_selected, q_admitted);
 	} else {
 		launch_comm_cores(start_time, end_time, first_time_slot, q_path_selected,
 				q_admitted);

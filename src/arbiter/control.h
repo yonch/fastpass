@@ -21,6 +21,7 @@
 #define STRESS_TEST_INITIAL_SOURCES					40
 #define STRESS_TEST_INITIAL_DSTS_PER_SRC			1
 #define STRESS_TEST_INITIAL_FLOW_SIZE				(10)
+#define STRESS_TEST_START_GAP_SEC				1
 
 /* bits 1-3 occupied by other experiments */
 #define LAUNCH_CONTROLLER_EXPT 			0x8

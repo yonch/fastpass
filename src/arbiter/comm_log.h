@@ -62,6 +62,7 @@ struct comm_log {
 	uint64_t dropped_rx_due_to_deadline;
 	uint64_t failed_to_allocate_watchdog;
 	uint64_t failed_to_burst_watchdog;
+        double mean_t_btwn_requests; /* used only in stress test */
 };
 
 extern struct comm_log comm_core_logs[RTE_MAX_LCORE];
@@ -304,6 +305,10 @@ static inline void comm_log_failed_to_burst_watchdog() {
 
 static inline void comm_log_sent_watchdog() {
 	CL->tx_watchdog_pkts++;
+}
+
+static inline void comm_log_mean_t(double mean_t) {
+	CL->mean_t_btwn_requests = mean_t;
 }
 
 #undef CL

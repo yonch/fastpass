@@ -99,6 +99,7 @@ void exec_stress_test_core(struct stress_test_core_cmd * cmd,
 	uint64_t loop_minimum_iteration_time =
 			rte_get_timer_hz() * STRESS_TEST_MIN_LOOP_TIME_SEC;
 	uint64_t next_rate_increase_time;
+        double cur_mean_t_btwn_requests_sec;
 	double next_mean_t_btwn_requests;
 
         for (i = 0; i < N_PARTITIONS; i++)
@@ -114,6 +115,7 @@ void exec_stress_test_core(struct stress_test_core_cmd * cmd,
 
 	/* Initialize gen */
 	next_mean_t_btwn_requests = cmd->mean_t_btwn_requests;
+        cur_mean_t_btwn_requests_sec = cmd->mean_t_btwn_requests / rte_get_timer_hz();
 
 	while (rte_get_timer_cycles() < cmd->start_time);
 
@@ -127,11 +129,13 @@ void exec_stress_test_core(struct stress_test_core_cmd * cmd,
 
 		/* if need to change rate, do it */
 		if (now >= next_rate_increase_time) {
+                        comm_log_mean_t(cur_mean_t_btwn_requests_sec);
 			init_request_generator(&gen, next_mean_t_btwn_requests,
 					now, cmd->num_nodes);
 			get_next_request(&gen, &next_request);
 
 			next_mean_t_btwn_requests /= STRESS_TEST_RATE_INCREASE_FACTOR;
+                        cur_mean_t_btwn_requests_sec /= STRESS_TEST_RATE_INCREASE_FACTOR;
 			next_rate_increase_time +=
 					rte_get_timer_hz() * STRESS_TEST_RATE_INCREASE_GAP_SEC;
 		}

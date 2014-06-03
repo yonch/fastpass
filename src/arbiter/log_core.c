@@ -40,6 +40,12 @@ void print_comm_log(uint16_t lcore_id)
 			(s64)(now_timeslot - ccs->latest_timeslot[0]));
 
 #define D(X) (cl->X - sv->X)
+
+#if IS_STRESS_TEST
+        double gbps = D(occupied_node_tslots) * 1500 * 8 / (0.1 * 1000 * 1000 * 1000);
+        printf("\ncurrent stress test mean t btwn requests: %f, gbps: %f", cl->mean_t_btwn_requests, gbps);
+#endif
+
 	printf("\n  RX %lu pkts, %lu bytes in %lu batches (%lu non-empty batches), %lu dropped",
 			D(rx_pkts), D(rx_bytes), D(rx_batches), D(rx_non_empty_batches),
 			D(dropped_rx_due_to_deadline));

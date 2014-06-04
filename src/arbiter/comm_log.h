@@ -64,6 +64,7 @@ struct comm_log {
 	uint64_t failed_to_burst_watchdog;
         double mean_t_btwn_requests; /* used only in stress test */
         uint64_t stress_test_mode; /* used only in stress test */
+        uint64_t stress_test_max_node_tslots; /* used only in stress test */
 };
 
 extern struct comm_log comm_core_logs[RTE_MAX_LCORE];
@@ -325,6 +326,11 @@ static inline uint64_t comm_log_get_total_demand() {
 /* to track the current mode of the stress test, when automated */
 static inline void comm_log_stress_test_mode(uint64_t mode) {
         CL->stress_test_mode = mode;
+}
+
+/* to track the best throughput achieved in the stress test */
+static inline void comm_log_stress_test_max_node_tslots(uint64_t max_node_tslots) {
+        CL->stress_test_max_node_tslots = max_node_tslots;
 }
 
 #undef CL

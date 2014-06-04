@@ -257,9 +257,6 @@ int main(int argc, char **argv)
         exit(-1);
     }
 
-    /* fill bin_queue with empty bins */
-	fp_ring_enqueue(q_bin, NULL);
-
     /* allocate space to record times */
     uint16_t num_batches = (duration - warm_up_duration) / BATCH_SIZE;
     uint32_t *per_batch_times = malloc(sizeof(uint64_t) * num_batches);
@@ -311,8 +308,6 @@ int main(int argc, char **argv)
             	if (b != NULL)
                         fp_mempool_put(bin_mempool, b);
             }
-
-            fp_ring_enqueue(q_bin, NULL);
 
             // Allocate enough space for new requests
             // (this is sufficient for <= 1 request per node per timeslot)

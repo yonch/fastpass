@@ -31,7 +31,6 @@
 #define NUM_SRC_DST_PAIRS (MAX_NODES * (MAX_NODES))  // include dst == out of boundary
 
 #define BIN_MASK_SIZE		((NUM_BINS + BATCH_SIZE + 63) / 64)
-#define MAX_CARRY_OVER_BINS	2048
 
 // Data structures associated with one allocation core
 struct seq_admission_core_state {
@@ -43,8 +42,6 @@ struct seq_admission_core_state {
     struct bin *out_bin;
     struct admission_core_statistics stat;
     uint64_t current_timeslot;
-    struct bin *carry_over_bins[MAX_CARRY_OVER_BINS];
-    uint32_t num_carry_over_bins;
 }  __attribute__((aligned(64))) /* don't want sharing between cores */;
 
 // Tracks status for admissible traffic (last send time and demand for all flows, etc.)
@@ -149,8 +146,6 @@ static inline int alloc_core_init(struct seq_admissible_status *status,
 	init_bin(core->out_bin);
 
 	core->current_timeslot = timeslot;
-
-	core->num_carry_over_bins = 0;
 
 	return 0;
 }

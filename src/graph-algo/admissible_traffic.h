@@ -40,7 +40,7 @@ uint16_t bin_index_from_timeslot(uint32_t last_allocated,
 	uint32_t gap = (uint32_t)(current_timeslot + BATCH_SIZE) - (uint32_t)last_allocated;
 
 	if (gap <= NUM_BINS)
-		return NUM_BINS + BATCH_SIZE - gap;
+		return NUM_BINS + BATCH_SIZE - 1 - gap;
 
 	/**
 	 * The flow should fit into one of the bins that were folded from multiple

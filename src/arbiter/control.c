@@ -3,7 +3,6 @@
 
 #include <rte_cycles.h>
 #include <rte_errno.h>
-#include <rte_timer.h>
 #include "port_alloc.h"
 #include "main.h"
 #include "comm_core.h"
@@ -118,8 +117,6 @@ void launch_cores(void)
 	struct rte_ring *q_admitted;
 	struct rte_ring *q_path_selected;
 
-	rte_timer_subsystem_init();
-
 	benchmark_cost_of_get_time();
 
 	/* decide what the first time slot to be output is */
@@ -189,6 +186,8 @@ void launch_cores(void)
 
 	/*** LOG CORE ***/
 	log_cmd.log_gap_ticks = (uint64_t)(LOG_GAP_SECS * rte_get_timer_hz());
+	log_cmd.start_time = start_time;
+	log_cmd.end_time = end_time;
 
 	/* launch log core */
 	if (N_LOG_CORES > 0)
@@ -205,6 +204,7 @@ void launch_cores(void)
 				q_admitted);
 	}
 
+	printf("waiting for all cores..\n");
 	/** Wait for all cores */
 	rte_eal_mp_wait_lcore();
 

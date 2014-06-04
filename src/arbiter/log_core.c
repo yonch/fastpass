@@ -56,8 +56,8 @@ void print_comm_log(uint16_t lcore_id)
 			D(neg_ack_timeslots));
 	printf("\n  %lu informative acks for %lu allocations, %lu non-informative",
 			D(acks_with_alloc), D(total_acked_timeslots), D(acks_without_alloc));
-	printf("\n  processed %lu tslots (%lu non-empty ptn) with %lu node-tslots",
-			D(processed_tslots), D(non_empty_tslots), D(occupied_node_tslots));
+	printf("\n  processed %lu tslots (%lu non-empty ptn) with %lu node-tslots, diff: %lu",
+               D(processed_tslots), D(non_empty_tslots), D(occupied_node_tslots), D(total_demand) - D(occupied_node_tslots));
 	printf("\n  TX %lu pkts, %lu bytes, %lu triggers, %lu report-triggers",
 			D(tx_pkt), D(tx_bytes), D(triggered_send), D(reports_triggered));
 #undef D
@@ -74,8 +74,8 @@ void print_comm_log(uint16_t lcore_id)
 			cl->acks_with_alloc, cl->total_acked_timeslots, cl->acks_without_alloc);
 	printf("\n  handled %lu resets", cl->handle_reset);
 
-	printf("\n  processed %lu tslots (%lu non-empty ptn) with %lu node-tslots",
-			cl->processed_tslots, cl->non_empty_tslots, cl->occupied_node_tslots);
+	printf("\n  processed %lu tslots (%lu non-empty ptn) with %lu node-tslots, diff: %lu",
+               cl->processed_tslots, cl->non_empty_tslots, cl->occupied_node_tslots, cl->total_demand - cl->occupied_node_tslots);
 	printf("\n  TX %lu pkts (%lu watchdogs), %lu bytes, %lu triggers, %lu report-triggers (%lu due to neg-acks(",
 			cl->tx_pkt, cl->tx_watchdog_pkts, cl->tx_bytes, cl->triggered_send, cl->reports_triggered,
 			cl->neg_ack_triggered_reports);

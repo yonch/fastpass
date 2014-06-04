@@ -129,7 +129,8 @@ void print_global_admission_log() {
 	printf("\nadmission core (pim with %d ptns, %d nodes per ptn)", N_PARTITIONS, PARTITION_N_NODES);
 	#endif
 	#ifdef PIPELINED_ALGO
-	printf("\nadmission core (seq)");
+	printf("\nadmission core (seq with %d algo cores, %d batch size, %d nodes)",
+               ALGO_N_CORES, BATCH_SIZE, STRESS_TEST_NUM_NODES);
 	#endif
 	printf("\n  enqueue waits: %lu q_head, %lu alloc_new_demands",
 			st->wait_for_space_in_q_head, st->new_demands_bin_alloc_failed);

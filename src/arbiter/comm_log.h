@@ -328,6 +328,11 @@ static inline void comm_log_stress_test_mode(uint64_t mode) {
         CL->stress_test_mode = mode;
 }
 
+/* to track the current mode of the stress test, when automated */
+static inline uint64_t comm_log_get_stress_test_mode() {
+        return CL->stress_test_mode;
+}
+
 /* to track the best throughput achieved in the stress test */
 static inline void comm_log_stress_test_max_node_tslots(uint64_t max_node_tslots) {
         CL->stress_test_max_node_tslots = max_node_tslots;

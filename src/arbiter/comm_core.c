@@ -9,7 +9,6 @@
 #include <rte_string_fns.h>
 #include <rte_errno.h>
 #include <rte_mempool.h>
-#include <rte_timer.h>
 #include <ccan/list/list.h>
 #include "control.h"
 #include "comm_log.h"

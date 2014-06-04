@@ -229,4 +229,5 @@ void exec_stress_test_core(struct stress_test_core_cmd * cmd,
 	/* Dump some stats */
 	printf("Stress test finished; %lu processed timeslots, %lu node-tslots\n",
 			CL->processed_tslots, CL->occupied_node_tslots);
+	rte_exit(0, "Done!\n");
 }

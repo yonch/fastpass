@@ -22,9 +22,8 @@
 #define STRESS_TEST_MIN_LOOP_TIME_SEC		1e-6
 #define STRESS_TEST_TOLERANCE                   10000
 #define STRESS_TEST_MODE_NONE                   0
-#define STRESS_TEST_MODE_EXPONENTIAL            1
-#define STRESS_TEST_MODE_BINARY_INCREASE        2
-#define STRESS_TEST_MODE_BINARY_DECREASE        3
+#define STRESS_TEST_MODE_SUCCESSFUL             1
+#define STRESS_TEST_MODE_UNSUCCESSFUL           2
 
 /* logs */
 struct stress_test_log {
@@ -106,11 +105,11 @@ void exec_stress_test_core(struct stress_test_core_cmd * cmd,
 	uint64_t next_rate_increase_time;
 	double next_mean_t_btwn_requests;
         double cur_increase_factor;
-        bool binary_search_mode = false;
         uint64_t prev_total_occupied_node_tslots = 0;
         uint64_t cur_total_occupied_node_tslots = 0;
         uint64_t prev_total_demand = 0;
         uint64_t cur_total_demand = 0;
+        uint64_t last_successful_mean_t;
 
         for (i = 0; i < N_PARTITIONS; i++)
                 core->latest_timeslot[i] = first_time_slot - 1;
@@ -125,11 +124,10 @@ void exec_stress_test_core(struct stress_test_core_cmd * cmd,
 
 	/* Initialize gen */
 	next_mean_t_btwn_requests = cmd->mean_t_btwn_requests * STRESS_TEST_RATE_INCREASE_FACTOR;
+        last_successful_mean_t = next_mean_t_btwn_requests;
+        cur_increase_factor = STRESS_TEST_RATE_INCREASE_FACTOR;
 
-        if (IS_AUTOMATED_STRESS_TEST)
-                comm_log_stress_test_mode(STRESS_TEST_MODE_EXPONENTIAL);
-        else
-                comm_log_stress_test_mode(STRESS_TEST_MODE_NONE);
+        comm_log_stress_test_mode(STRESS_TEST_MODE_NONE);
 
 	while (rte_get_timer_cycles() < cmd->start_time);
 
@@ -150,28 +148,24 @@ void exec_stress_test_core(struct stress_test_core_cmd * cmd,
                                 cur_total_occupied_node_tslots = comm_log_get_occupied_node_tslots();
                                 prev_total_demand = cur_total_demand;
                                 cur_total_demand = comm_log_get_total_demand();
-
-                                if (!binary_search_mode && (cur_total_demand > 0) &&
-                                    (cur_total_occupied_node_tslots - prev_total_occupied_node_tslots) <
-                                    (cur_total_demand - prev_total_demand - STRESS_TEST_TOLERANCE)) {
-                                        binary_search_mode = true;
-                                        cur_increase_factor = (STRESS_TEST_RATE_INCREASE_FACTOR + 1) / 2;
-                                }
                         }
-
-                        /* the automated test begins with an exponential increase, then
-                         * switches to binary search once the rate decreases */
-                        if (IS_AUTOMATED_STRESS_TEST && binary_search_mode) {
+                        /* the automated test decreases the mean_t by a constant factor as long as the
+                         * timeslot allocator is able to approximately match the demand. when the
+                         * allocator fails, it increases the mean_t to the last successful value,
+                         * decreases the constant factor, and repeats */
+                        if (IS_AUTOMATED_STRESS_TEST && cur_total_demand != 0) {
                                 if ((cur_total_occupied_node_tslots - prev_total_occupied_node_tslots) <
                                     (cur_total_demand - prev_total_demand - STRESS_TEST_TOLERANCE)) {
-                                        next_mean_t_btwn_requests *= cur_increase_factor;
-                                        comm_log_stress_test_mode(STRESS_TEST_MODE_BINARY_DECREASE);
+                                        /* did not successfully allocated the offerred demand */
+                                        next_mean_t_btwn_requests = last_successful_mean_t;
+                                        comm_log_stress_test_mode(STRESS_TEST_MODE_UNSUCCESSFUL);
+                                        cur_increase_factor = (cur_increase_factor + 1) / 2;
                                 } else {
+                                        /* did successfully allocate the offerred demand */
+                                        last_successful_mean_t = next_mean_t_btwn_requests;
                                         next_mean_t_btwn_requests /= cur_increase_factor;
-                                        comm_log_stress_test_mode(STRESS_TEST_MODE_BINARY_INCREASE);
+                                        comm_log_stress_test_mode(STRESS_TEST_MODE_SUCCESSFUL);
                                 }
-
-                                cur_increase_factor = (cur_increase_factor + 1) / 2;
                         } else {
                                 next_mean_t_btwn_requests /= STRESS_TEST_RATE_INCREASE_FACTOR;
                         }

@@ -12,8 +12,12 @@
 
 #include <assert.h>
 
+#ifndef BATCH_SIZE
 #define BATCH_SIZE 16  // must be consistent with bitmaps in batch_state
+#endif
+#ifndef BATCH_SHIFT
 #define BATCH_SHIFT 4  // 2^BATCH_SHIFT = BATCH_SIZE
+#endif
 
 #define SUPPORTS_OVERSUBSCRIPTION		0
 

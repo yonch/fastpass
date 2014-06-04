@@ -105,10 +105,6 @@ void exec_stress_test_core(struct stress_test_core_cmd * cmd,
 	uint64_t next_rate_increase_time;
 	double next_mean_t_btwn_requests;
         double cur_increase_factor;
-        uint64_t prev_total_occupied_node_tslots = 0;
-        uint64_t cur_total_occupied_node_tslots = 0;
-        uint64_t prev_total_demand = 0;
-        uint64_t cur_total_demand = 0;
         uint64_t last_successful_mean_t;
 
         for (i = 0; i < N_PARTITIONS; i++)
@@ -141,21 +137,13 @@ void exec_stress_test_core(struct stress_test_core_cmd * cmd,
 
 		/* if need to change rate, do it */
 		if (now >= next_rate_increase_time) {
-
-                        if (IS_AUTOMATED_STRESS_TEST) {
-                                /* bookeeping for rate estimation */
-                                prev_total_occupied_node_tslots = cur_total_occupied_node_tslots;
-                                cur_total_occupied_node_tslots = comm_log_get_occupied_node_tslots();
-                                prev_total_demand = cur_total_demand;
-                                cur_total_demand = comm_log_get_total_demand();
-                        }
                         /* the automated test decreases the mean_t by a constant factor as long as the
                          * timeslot allocator is able to approximately match the demand. when the
                          * allocator fails, it increases the mean_t to the last successful value,
                          * decreases the constant factor, and repeats */
-                        if (IS_AUTOMATED_STRESS_TEST && cur_total_demand != 0) {
-                                if ((cur_total_occupied_node_tslots - prev_total_occupied_node_tslots) <
-                                    (cur_total_demand - prev_total_demand - STRESS_TEST_TOLERANCE)) {
+                        uint64_t total_demand = comm_log_get_total_demand();
+                        if (IS_AUTOMATED_STRESS_TEST && total_demand != 0) {
+                                if (comm_log_get_occupied_node_tslots() < total_demand - STRESS_TEST_TOLERANCE) {
                                         /* did not successfully allocated the offerred demand */
                                         next_mean_t_btwn_requests = last_successful_mean_t;
                                         comm_log_stress_test_mode(STRESS_TEST_MODE_UNSUCCESSFUL);

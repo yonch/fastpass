@@ -128,12 +128,15 @@ int exec_seq_admission_core(void *void_cmd_p)
 
 	/* do allocation loop */
 	while (1) {
-		/* decide whether to skip timeslots */
-		uint64_t actual_timeslot = (fp_get_time_ns() * TIMESLOT_MUL) >> TIMESLOT_SHIFT;
-		uint64_t earliest_logical_timeslot = actual_timeslot - ALLOWED_TIMESLOT_LAG;
-		while (time_before64((__u64)logical_timeslot, (__u64)earliest_logical_timeslot)) {
-			logical_timeslot += BATCH_SIZE * N_ADMISSION_CORES;
-			admission_log_skipped_batch();
+		if (0) {
+			/*** not a good idea in practice in its current form ***/
+			/* decide whether to skip timeslots */
+			uint64_t actual_timeslot = (fp_get_time_ns() * TIMESLOT_MUL) >> TIMESLOT_SHIFT;
+			uint64_t earliest_logical_timeslot = actual_timeslot - ALLOWED_TIMESLOT_LAG;
+			while (time_before64((__u64)logical_timeslot, (__u64)earliest_logical_timeslot)) {
+				logical_timeslot += BATCH_SIZE * N_ADMISSION_CORES;
+				admission_log_skipped_batch();
+			}
 		}
 
 		/* perform allocation */

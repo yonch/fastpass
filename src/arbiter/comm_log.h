@@ -62,6 +62,8 @@ struct comm_log {
 	uint64_t dropped_rx_due_to_deadline;
 	uint64_t failed_to_allocate_watchdog;
 	uint64_t failed_to_burst_watchdog;
+        double mean_t_btwn_requests; /* used only in stress test */
+        uint64_t stress_test_mode; /* used only in stress test */
 };
 
 extern struct comm_log comm_core_logs[RTE_MAX_LCORE];
@@ -304,6 +306,25 @@ static inline void comm_log_failed_to_burst_watchdog() {
 
 static inline void comm_log_sent_watchdog() {
 	CL->tx_watchdog_pkts++;
+}
+
+static inline void comm_log_mean_t(double mean_t) {
+	CL->mean_t_btwn_requests = mean_t;
+}
+
+/* for throughput estimations in the stress test core */
+static inline uint64_t comm_log_get_occupied_node_tslots() {
+        return CL->occupied_node_tslots;
+}
+
+/* for throughput estimations in the stress test core */
+static inline uint64_t comm_log_get_total_demand() {
+        return CL->total_demand;
+}
+
+/* to track the current mode of the stress test, when automated */
+static inline void comm_log_stress_test_mode(uint64_t mode) {
+        CL->stress_test_mode = mode;
 }
 
 #undef CL

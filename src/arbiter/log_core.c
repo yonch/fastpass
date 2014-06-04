@@ -40,6 +40,14 @@ void print_comm_log(uint16_t lcore_id)
 			(s64)(now_timeslot - ccs->latest_timeslot[0]));
 
 #define D(X) (cl->X - sv->X)
+
+#if IS_STRESS_TEST
+        double mean_t_btwn_requests_sec = cl->mean_t_btwn_requests / rte_get_timer_hz();
+        double gbps = D(occupied_node_tslots) * 1500 * 8 / (0.1 * 1000 * 1000 * 1000);
+        printf("\ncurrent stress test mean t btwn requests: %f, gbps: %f", mean_t_btwn_requests_sec, gbps);
+        printf("\nstress test mode: %d\n", cl->stress_test_mode);
+#endif
+
 	printf("\n  RX %lu pkts, %lu bytes in %lu batches (%lu non-empty batches), %lu dropped",
 			D(rx_pkts), D(rx_bytes), D(rx_batches), D(rx_non_empty_batches),
 			D(dropped_rx_due_to_deadline));
@@ -48,8 +56,8 @@ void print_comm_log(uint16_t lcore_id)
 			D(neg_ack_timeslots));
 	printf("\n  %lu informative acks for %lu allocations, %lu non-informative",
 			D(acks_with_alloc), D(total_acked_timeslots), D(acks_without_alloc));
-	printf("\n  processed %lu tslots (%lu non-empty ptn) with %lu node-tslots",
-			D(processed_tslots), D(non_empty_tslots), D(occupied_node_tslots));
+	printf("\n  processed %lu tslots (%lu non-empty ptn) with %lu node-tslots, diff: %lu",
+               D(processed_tslots), D(non_empty_tslots), D(occupied_node_tslots), D(total_demand) - D(occupied_node_tslots));
 	printf("\n  TX %lu pkts, %lu bytes, %lu triggers, %lu report-triggers",
 			D(tx_pkt), D(tx_bytes), D(triggered_send), D(reports_triggered));
 #undef D
@@ -66,8 +74,8 @@ void print_comm_log(uint16_t lcore_id)
 			cl->acks_with_alloc, cl->total_acked_timeslots, cl->acks_without_alloc);
 	printf("\n  handled %lu resets", cl->handle_reset);
 
-	printf("\n  processed %lu tslots (%lu non-empty ptn) with %lu node-tslots",
-			cl->processed_tslots, cl->non_empty_tslots, cl->occupied_node_tslots);
+	printf("\n  processed %lu tslots (%lu non-empty ptn) with %lu node-tslots, diff: %lu",
+               cl->processed_tslots, cl->non_empty_tslots, cl->occupied_node_tslots, cl->total_demand - cl->occupied_node_tslots);
 	printf("\n  TX %lu pkts (%lu watchdogs), %lu bytes, %lu triggers, %lu report-triggers (%lu due to neg-acks(",
 			cl->tx_pkt, cl->tx_watchdog_pkts, cl->tx_bytes, cl->triggered_send, cl->reports_triggered,
 			cl->neg_ack_triggered_reports);
@@ -232,7 +240,7 @@ int exec_log_core(void *void_cmd_p)
 
 		print_comm_log(enabled_lcore[FIRST_COMM_CORE]);
 		print_global_admission_log();
-		for (i = 0; i < N_ADMISSION_CORES; i++)
+		for (i = 0; i < 2; i++)
 			print_admission_core_log(enabled_lcore[FIRST_ADMISSION_CORE+i], i);
 		fflush(stdout);
 

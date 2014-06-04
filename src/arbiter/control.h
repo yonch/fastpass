@@ -11,6 +11,7 @@
 
 #define I_AM_MASTER				1
 #define IS_STRESS_TEST			1
+#define IS_AUTOMATED_STRESS_TEST        1
 
 #define STRESS_TEST_MEAN_T_BETWEEN_REQUESTS_SEC		.57e-4
 #define STRESS_TEST_NUM_NODES						256
@@ -21,6 +22,7 @@
 #define STRESS_TEST_INITIAL_SOURCES					40
 #define STRESS_TEST_INITIAL_DSTS_PER_SRC			1
 #define STRESS_TEST_INITIAL_FLOW_SIZE				(10)
+#define STRESS_TEST_START_GAP_SEC				1
 
 /* bits 1-3 occupied by other experiments */
 #define LAUNCH_CONTROLLER_EXPT 			0x8

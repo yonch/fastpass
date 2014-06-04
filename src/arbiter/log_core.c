@@ -42,8 +42,10 @@ void print_comm_log(uint16_t lcore_id)
 #define D(X) (cl->X - sv->X)
 
 #if IS_STRESS_TEST
+        double mean_t_btwn_requests_sec = cl->mean_t_btwn_requests / rte_get_timer_hz();
         double gbps = D(occupied_node_tslots) * 1500 * 8 / (0.1 * 1000 * 1000 * 1000);
-        printf("\ncurrent stress test mean t btwn requests: %f, gbps: %f", cl->mean_t_btwn_requests, gbps);
+        printf("\ncurrent stress test mean t btwn requests: %f, gbps: %f", mean_t_btwn_requests_sec, gbps);
+        printf("\nstress test mode: %d\n", cl->stress_test_mode);
 #endif
 
 	printf("\n  RX %lu pkts, %lu bytes in %lu batches (%lu non-empty batches), %lu dropped",
@@ -238,7 +240,7 @@ int exec_log_core(void *void_cmd_p)
 
 		print_comm_log(enabled_lcore[FIRST_COMM_CORE]);
 		print_global_admission_log();
-		for (i = 0; i < N_ADMISSION_CORES; i++)
+		for (i = 0; i < 2; i++)
 			print_admission_core_log(enabled_lcore[FIRST_ADMISSION_CORE+i], i);
 		fflush(stdout);
 

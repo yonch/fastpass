@@ -161,12 +161,12 @@ void print_admission_core_log(uint16_t lcore, uint16_t adm_core_index) {
 			st->admitted_traffic_alloc_failed, st->wait_for_space_in_q_admitted_out,
 			st->out_bin_alloc_failed, st->wait_for_space_in_q_bin_out,
 			st->waiting_to_pass_token);
-	printf("\n  %lu flushed q_out (%lu automatic, %lu forced); processed from q_head %lu bins, %lu demands; wrap up q_out %lu bins, %lu demands, internal %lu bins %lu demands",
+	printf("\n  %lu flushed q_out (%lu automatic, %lu forced); processed from q_head %lu bins, %lu demands; wrap up passed %lu bins, carried %lu bins, internal %lu bins %lu demands",
 			st->q_out_flush_bin_full + st->q_out_flush_batch_finished,
 			st->q_out_flush_bin_full, st->q_out_flush_batch_finished,
 			st->new_request_bins, st->new_requests,
-			st->dequeue_bin_during_wrap_up,
-			st->dequeued_demands_during_wrap_up,
+			st->passed_bins_during_wrap_up,
+			st->carried_over_bins_during_wrap_up,
 			st->wrap_up_non_empty_bin, st->wrap_up_non_empty_bin_demands);
 	#ifdef PARALLEL_ALGO
 	printf("\n    %lu phases completed, %lu not ready, %lu out of order",

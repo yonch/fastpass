@@ -235,7 +235,7 @@ int exec_log_core(void *void_cmd_p)
 		       g_admission_core_stats(i),
 				sizeof(saved_admission_core_statistics[i]));
 
-	while (rte_get_timer_cycles() < cmd->end_time) {
+	while (1) {
 		/* wait until proper time */
 		while (next_ticks > rte_get_timer_cycles())
 			rte_pause();

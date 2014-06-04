@@ -44,7 +44,8 @@ struct seq_admission_core_state {
     struct admission_core_statistics stat;
     uint64_t current_timeslot;
     struct bin *carry_over_bins[MAX_CARRY_OVER_BINS];
-    uint32_t num_carry_over_bins;
+    uint32_t carry_head;
+    uint32_t carry_tail;
 }  __attribute__((aligned(64))) /* don't want sharing between cores */;
 
 // Tracks status for admissible traffic (last send time and demand for all flows, etc.)
@@ -150,7 +151,8 @@ static inline int alloc_core_init(struct seq_admissible_status *status,
 
 	core->current_timeslot = timeslot;
 
-	core->num_carry_over_bins = 0;
+	core->carry_head = 0;
+	core->carry_tail = 0;
 
 	return 0;
 }

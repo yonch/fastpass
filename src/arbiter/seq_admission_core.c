@@ -119,10 +119,6 @@ int exec_seq_admission_core(void *void_cmd_p)
 	int rc;
 	uint64_t start_time_first_timeslot;
 
-	/* if we're first core, we should have the token */
-	if (core_ind == 0)
-		rte_ring_enqueue(q_bin[core_ind], NULL);
-
 	ADMISSION_DEBUG("core %d admission %d starting allocations\n",
 			rte_lcore_id(), core_ind);
 

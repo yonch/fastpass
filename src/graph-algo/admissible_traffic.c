@@ -326,8 +326,12 @@ void seq_get_admissible_traffic(struct seq_admissible_status *status,
     uint16_t processed_bins = 0;
 	uint32_t i;
 	int32_t n_wrap_up_bins;
-    bool queue_in_done = false;
     bool should_process_new_req = false;
+#ifdef NO_DPDK
+    uint64_t now_timeslot = first_timeslot - NUM_BINS - 1;
+#else
+    uint64_t now_timeslot;
+#endif
 
     while (fp_mempool_get_bulk(status->admitted_traffic_mempool,
     		(void **)&core->admitted[0], BATCH_SIZE) != 0)
@@ -341,11 +345,11 @@ void seq_get_admissible_traffic(struct seq_admissible_status *status,
     while (1) {
 #ifdef NO_DPDK
     	/* for benchmark */
-    	uint64_t now_timeslot = queue_in_done ? first_timeslot + BATCH_SIZE : first_timeslot - NUM_BINS - 1;
+    	now_timeslot++;
 		for (i = 0; i < 10; i++)
 			process_new_requests(status, core, processed_bins - 1);
 #else
-    	uint64_t now_timeslot = (fp_get_time_ns() * tslot_mul) >> tslot_shift;
+    	now_timeslot = (fp_get_time_ns() * tslot_mul) >> tslot_shift;
 #endif
 
     	if (likely(now_timeslot == prev_timeslot))
@@ -389,24 +393,12 @@ handle_inputs:
     	if (should_process_new_req)
 			process_new_requests(status, core, processed_bins - 1);
 
-        /* handle carry-over bins */
-    	if (unlikely(core->carry_head != core->carry_tail)) {
-    		bin_in = core->carry_over_bins[core->carry_head++ % MAX_CARRY_OVER_BINS];
-        	incoming_bin_to_core(status, core, bin_in);
-    		fp_mempool_put(bin_mp_in, bin_in);
-        }
-
     	/* try to dequeue a bin from queue_in */
-    	if (likely(   !queue_in_done
-    			   && fp_ring_dequeue(queue_in, (void **)&bin_in) == 0))
+    	if (likely(fp_ring_dequeue(queue_in, (void **)&bin_in) == 0))
     	{
-    		if (unlikely(bin_in == NULL)) {
-    			queue_in_done = true;
-    		} else {
-    			adm_log_dequeued_bin_in(&core->stat, bin_size(bin_in));
-    			incoming_bin_to_core(status, core, bin_in);
-    			fp_mempool_put(bin_mp_in, bin_in);
-    		}
+			adm_log_dequeued_bin_in(&core->stat, bin_size(bin_in));
+			incoming_bin_to_core(status, core, bin_in);
+			fp_mempool_put(bin_mp_in, bin_in);
     	}
 
 		try_allocation_core(core, queue_out, status, bin_mp_out);
@@ -422,45 +414,14 @@ wrap_up:
 	}
 
 	/* get unhandled bins, for handing off to next core */
-	if (queue_in_done)
-		goto enqueue_null;
-
 	n_wrap_up_bins = fp_ring_dequeue_burst(queue_in, (void **)wrap_up_bins,
 			MAX_WRAP_UP_BINS_PASSED);
 	if (n_wrap_up_bins > 0) {
 		adm_log_passed_bins_during_wrap_up(&core->stat, n_wrap_up_bins);
 		while (fp_ring_enqueue_bulk(queue_out, (void**)wrap_up_bins, n_wrap_up_bins) == -ENOBUFS)
 			adm_log_wait_for_space_in_q_bin_out(&core->stat);
-		if (wrap_up_bins[n_wrap_up_bins - 1] == NULL) {
-			queue_in_done = true;
-			goto finish;
-		}
 	}
 
-enqueue_null:
-	/* enqueue the NULL into the q_out so the next core can continue */
-	while(fp_ring_enqueue(queue_out, NULL) == -ENOBUFS)
-		adm_log_wait_for_q_bin_out_enqueue_token(&core->stat);
-
-	/* go through all remaining bins in q_in, put into carry_over_bins */
-	while (!queue_in_done) {
-		if(fp_ring_dequeue(queue_in, (void **)&bin_in) != 0)
-			continue;
-
-		if (unlikely(bin_in == NULL)) {
-			queue_in_done = true;
-		} else {
-			if (unlikely(core->carry_tail - core->carry_head == MAX_CARRY_OVER_BINS - 1))
-				/* really bad */
-				rte_exit(-1, "Too many carry_over bins!");
-
-			core->carry_over_bins[core->carry_tail++ % MAX_CARRY_OVER_BINS] = bin_in;
-
-			adm_log_carried_over_bins_during_wrap_up(&core->stat, 1);
-		}
-	}
-
-finish:
 	// Update current timeslot
     core->current_timeslot += ALGO_N_CORES * BATCH_SIZE;
 }

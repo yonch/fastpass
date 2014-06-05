@@ -10,6 +10,10 @@ sudo cp ~/fastpass/src/kernel-mod/vm-tools/* $VM_HD_MOUNTPOINT/root
 sudo rm $VM_HD_MOUNTPOINT/sbin/tc
 sudo rm $VM_HD_MOUNTPOINT/root/tc
 sudo cp ~/src/iproute2.git/tc/tc $VM_HD_MOUNTPOINT/sbin
+#sudo cat /dev/null > $VM_HD_MOUNTPOINT/var/log/syslog
+#sudo cat /dev/null > $VM_HD_MOUNTPOINT/var/log/kern.log
+#sudo cat /dev/null > $VM_HD_MOUNTPOINT/var/log/debug
+
 sync;
 
 ./umount_vm.sh

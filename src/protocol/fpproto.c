@@ -522,15 +522,14 @@ incomplete:
 	return -1;
 }
 
-void fpproto_handle_rx_packet(struct fpproto_conn *conn, u8 *pkt, u32 len,
-		__be32 saddr, __be32 daddr)
+bool fpproto_handle_rx_packet(struct fpproto_conn *conn, u8 *pkt, u32 len,
+		__be32 saddr, __be32 daddr, u64 *returned_in_seq)
 {
 	struct fastpass_hdr *hdr;
 	u64 in_seq, ack_seq;
 	u16 payload_type;
 	u64 rst_tstamp = 0;
 	__sum16 checksum;
-	int payload_length;
 	u8 *curp;
 	u8 *data_end;
 	u64 ack_vec;
@@ -608,7 +607,7 @@ void fpproto_handle_rx_packet(struct fpproto_conn *conn, u8 *pkt, u32 len,
 
 		if (reset_payload_handler(conn, rst_tstamp) != 0)
 			/* reset was not applied, drop packet */
-			return;
+			return false;
 		curp += 8;
 	} else {
 		conn->in_sync = 1;
@@ -616,7 +615,7 @@ void fpproto_handle_rx_packet(struct fpproto_conn *conn, u8 *pkt, u32 len,
 
 	/* check if may accept the packet */
 	if (at_most_once_may_accept(conn, in_seq) != 0)
-		return; /* drop packet to keep at-most-once semantics */
+		return false; /* drop packet to keep at-most-once semantics */
 
 	/* handle acks */
 	ack_vec16 = ntohs(hdr->ack_vec);
@@ -627,8 +626,63 @@ void fpproto_handle_rx_packet(struct fpproto_conn *conn, u8 *pkt, u32 len,
 	if (unlikely(curp == data_end)) {
 		/* no more payloads in this packet, we're done with it */
 		fp_debug("no more payloads\n");
-		return;
+		fpproto_successful_rx(conn, in_seq);
+		return false;
 	}
+
+	*returned_in_seq = in_seq;
+
+	payload_type = *curp >> 4;
+	if (payload_type != FASTPASS_PTYPE_ACK)
+		return true;
+
+	/* handle extended ACK */
+	if (curp + 6 > data_end)
+		goto incomplete_ack_payload;
+
+	ack_vec = ntohl(*(u32 *)curp) & ((1UL << 28) - 1);
+	ack_vec <<= 20;
+	ack_vec |= (u64)ntohs(*(u16 *)(curp + 4)) << 4;
+	ack_payload_handler(conn, ack_seq, ack_vec);
+
+	return true;
+
+incomplete_reset_payload:
+	conn->stat.rx_incomplete_reset++;
+	fp_debug("RESET payload incomplete, expected 8 bytes, got %d\n",
+			(int)(data_end - curp));
+	return false;
+
+incomplete_ack_payload:
+	conn->stat.rx_incomplete_ack++;
+	fp_debug("ACK payload incomplete: expected 6 bytes, got %d\n",
+			(int)(data_end - curp));
+	return false;
+
+bad_checksum:
+	conn->stat.rx_checksum_error++;
+	fp_debug("checksum error. expected 0x%04X, got 0x%04X\n",
+			expected_checksum, checksum);
+	return false;
+
+packet_too_short:
+	conn->stat.rx_too_short++;
+	fp_debug("packet less than minimal size (len=%d)\n", len);
+	return false;
+}
+
+
+bool fpproto_perform_rx_callbacks(struct fpproto_conn *conn, u8 *pkt, u32 len)
+{
+	u16 payload_type;
+	int payload_length;
+	u8 *curp;
+	u8 *data_end;
+
+
+	curp = &pkt[8];
+	data_end = &pkt[len];
+	FASTPASS_BUG_ON(curp == data_end);
 
 handle_payload:
 	/* at this point we know there is at least one byte remaining */
@@ -636,15 +690,11 @@ handle_payload:
 
 	switch (payload_type) {
 	case FASTPASS_PTYPE_ACK:
-		if (curp + 6 > data_end)
-			goto incomplete_ack_payload;
-
-		ack_vec = ntohl(*(u32 *)curp) & ((1UL << 28) - 1);
-		ack_vec <<= 20;
-		ack_vec |= (u64)ntohs(*(u16 *)(curp + 4)) << 4;
-		ack_payload_handler(conn, ack_seq, ack_vec);
-
 		curp += 6;
+		break;
+
+	case FASTPASS_PTYPE_RESET:
+		curp += 8;
 		break;
 
 	case FASTPASS_PTYPE_ALLOC:
@@ -652,7 +702,7 @@ handle_payload:
 
 		fp_debug("process_alloc returned %d\n", payload_length);
 		if (unlikely(payload_length == -1))
-			return;
+			return false;
 
 		curp += payload_length;
 		break;
@@ -662,7 +712,7 @@ handle_payload:
 
 		fp_debug("process_areq returned %d\n", payload_length);
 		if (unlikely(payload_length == -1))
-			return;
+			return false;
 
 		curp += payload_length;
 		break;
@@ -681,39 +731,37 @@ handle_payload:
 	if (curp < data_end)
 		goto handle_payload;
 
-	/* successful parsing, can ack */
-	update_inwnd(conn, in_seq);
-
-	return;
+	return true;
 
 unknown_payload_type:
 	conn->stat.rx_unknown_payload++;
 	fp_debug("got unknown payload type %d at offset %lld\n",
 			payload_type, (s64)(curp - pkt));
-	return;
+	return false;
 
-incomplete_reset_payload:
-	conn->stat.rx_incomplete_reset++;
-	fp_debug("RESET payload incomplete, expected 8 bytes, got %d\n",
-			(int)(data_end - curp));
-	return;
+}
 
-incomplete_ack_payload:
-	conn->stat.rx_incomplete_ack++;
-	fp_debug("ACK payload incomplete: expected 6 bytes, got %d\n",
-			(int)(data_end - curp));
-	return;
+void fpproto_successful_rx(struct fpproto_conn *conn, u64 in_seq)
+{
+	/* successful parsing, can ack */
+	update_inwnd(conn, in_seq);
+}
 
-bad_checksum:
-	conn->stat.rx_checksum_error++;
-	fp_debug("checksum error. expected 0x%04X, got 0x%04X\n",
-			expected_checksum, checksum);
-	return;
+void fpproto_handle_rx_complete(struct fpproto_conn *conn, u8 *pkt, u32 len,
+		__be32 saddr, __be32 daddr)
+{
+	bool ret;
+	u64 in_seq;
 
-packet_too_short:
-	conn->stat.rx_too_short++;
-	fp_debug("packet less than minimal size (len=%d)\n", len);
-	return;
+	ret = fpproto_handle_rx_packet(conn, pkt, len, saddr, daddr, &in_seq);
+	if (!ret)
+		return;
+
+	ret = fpproto_perform_rx_callbacks(conn, pkt, len);
+	if (!ret)
+		return;
+
+	fpproto_successful_rx(conn, in_seq);
 }
 
 /**

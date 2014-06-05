@@ -555,7 +555,7 @@ comm_rx(struct rte_mbuf *m, uint8_t portid)
 
 
 	if (req_src < MAX_NODES) {
-		fpproto_handle_rx_packet(&end_nodes[req_src].conn, req_pkt,
+		fpproto_handle_rx_complete(&end_nodes[req_src].conn, req_pkt,
 				ip_total_len - 4 * (ipv4_hdr->version_ihl & 0xF),
 				ipv4_hdr->src_addr, ipv4_hdr->dst_addr);
 	}

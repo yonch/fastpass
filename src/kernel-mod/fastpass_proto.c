@@ -94,6 +94,7 @@ discard_out:
 	sock_put(sk);
 discard_no_sk:
 	__kfree_skb(skb);
+	rcu_read_unlock_bh();
 	return NET_RX_SUCCESS;
 }
 

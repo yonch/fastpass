@@ -127,6 +127,7 @@ struct fp_dst {
 	u64		acked_tslots;		/* highest requested timeslots that was acked*/
 	u64		alloc_tslots;		/* total received allocations */
 	u64		used_tslots;		/* timeslots in which packets moved */
+	spinlock_t lock;
 	uint8_t state;
 };
 
@@ -164,6 +165,7 @@ struct fp_sched_data {
 	u16 unreq_flows[MAX_NODES]; 		/* flows with unscheduled packets */
 	u32 unreq_dsts_head;
 	u32 unreq_dsts_tail;
+	spinlock_t 				unreq_flows_lock;
 
 	struct fp_dst dsts[MAX_NODES];
 
@@ -187,9 +189,9 @@ struct fp_sched_data {
 	struct proc_dir_entry *proc_entry;
 
 	/* counters */
-	u64		demand_tslots;		/* total needed timeslots */
+	atomic_t demand_tslots;		/* total needed timeslots */
 	u64		requested_tslots;	/* highest requested timeslots */
-	u64		alloc_tslots;		/* total received allocations */
+	atomic_t alloc_tslots;		/* total received allocations */
 	u64		acked_tslots;		/* total acknowledged requests */
 	u64		used_tslots;
 
@@ -199,6 +201,16 @@ struct fp_sched_data {
 
 static struct tsq_qdisc_entry *fastpass_tsq_entry;
 static struct proc_dir_entry *fastpass_proc_entry;
+
+static inline struct fp_dst *get_dst(struct fp_sched_data *q, u32 index) {
+	struct fp_dst *ret = &q->dsts[index];
+	spin_lock(&ret->lock);
+	return ret;
+}
+
+static inline void release_dst(struct fp_dst *dst) {
+	spin_unlock(&dst->lock);
+}
 
 /**
  *  computes the time when next request should go out
@@ -233,22 +245,23 @@ static void set_retrans_timer(void *param, u64 when)
 	hrtimer_start(&q->retrans_timer, ns_to_ktime(when), HRTIMER_MODE_ABS);
 }
 
-static inline bool dst_is_unreq(struct fp_dst *dst)
-{
-	return (dst->state != FLOW_UNQUEUED);
-}
-
 /**
  * Enqueues flow to the request queue, if it's not already in the retransmit
  *    queue
+ * Assumes dst_id is already locked by caller.
  */
-static void unreq_dsts_enqueue(struct fp_sched_data *q, u32 dst_id)
+static void unreq_dsts_enqueue_if_not_queued(struct fp_sched_data *q, u32 dst_id,
+		struct fp_dst *dst)
 {
-	FASTPASS_BUG_ON(q->dsts[dst_id].state == FLOW_REQUEST_QUEUE);
+	if (dst->state == FLOW_UNQUEUED) {
+		return;
+	}
 
 	/* enqueue */
+	spin_lock(&q->unreq_flows_lock);
 	q->unreq_flows[q->unreq_dsts_tail++ % MAX_NODES] = dst_id;
-	q->dsts[dst_id].state = FLOW_REQUEST_QUEUE;
+	spin_unlock(&q->unreq_flows_lock);
+	dst->state = FLOW_REQUEST_QUEUE;
 
 	/* update request timer if necessary */
 	if (trigger_tx(q))
@@ -260,15 +273,18 @@ static bool unreq_dsts_is_empty(struct fp_sched_data* q)
 	return q->unreq_dsts_head == q->unreq_dsts_tail;
 }
 
-static u32 unreq_dsts_dequeue(struct fp_sched_data* q)
+static struct fp_dst *unreq_dsts_dequeue_and_get(struct fp_sched_data* q, u32 *dst_id)
 {
-	u32 res;
+	struct fp_dst *res;
 
 	FASTPASS_BUG_ON(unreq_dsts_is_empty(q));
 
 	/* get entry and remove from queue */
-	res = q->unreq_flows[q->unreq_dsts_head++ % MAX_NODES];
-	q->dsts[res].state = FLOW_UNQUEUED;
+	spin_lock(&q->unreq_flows_lock);
+	*dst_id = q->unreq_flows[q->unreq_dsts_head++ % MAX_NODES];
+	spin_unlock(&q->unreq_flows_lock);
+	res = get_dst(q, *dst_id);
+	res->state = FLOW_UNQUEUED;
 
 	return res;
 }
@@ -278,8 +294,8 @@ static inline u32 n_unreq_dsts(struct fp_sched_data *q)
 	return q->unreq_dsts_tail - q->unreq_dsts_head;
 }
 
-void flow_inc_used(struct fp_sched_data *q, struct fp_dst* f, u64 amount) {
-	f->used_tslots += amount;
+void flow_inc_used(struct fp_sched_data *q, struct fp_dst* dst, u64 amount) {
+	dst->used_tslots += amount;
 	q->used_tslots += amount;
 }
 
@@ -290,13 +306,16 @@ void flow_inc_used(struct fp_sched_data *q, struct fp_dst* f, u64 amount) {
  */
 static void flow_inc_demand(struct fp_sched_data *q, u32 dst_id, u64 amount)
 {
-	struct fp_dst *dst = &q->dsts[dst_id];
-	dst->demand_tslots += amount;
-	q->demand_tslots += amount;
+	struct fp_dst *dst = get_dst(q, dst_id);
 
-	if (!dst_is_unreq(dst))
-		/* flow not on scheduling queue yet, enqueue */
-		unreq_dsts_enqueue(q, dst_id);
+	dst->demand_tslots += amount;
+
+	/* if flow not on scheduling queue yet, enqueue */
+	unreq_dsts_enqueue_if_not_queued(q, dst_id, dst);
+
+	release_dst(dst);
+
+	atomic_add(amount, &q->demand_tslots);
 }
 
 /**
@@ -317,9 +336,9 @@ static void handle_reset(void *param)
 	/* reset future allocations */
 	wnd_reset(&q->alloc_wnd, q->current_timeslot);
 
-	q->demand_tslots = 0;
+	atomic_set(&q->demand_tslots, 0);
 	q->requested_tslots = 0;	/* will remain 0 when we're done */
-	q->alloc_tslots = 0;		/* will remain 0 when we're done */
+	atomic_set(&q->alloc_tslots, 0);		/* will remain 0 when we're done */
 	q->acked_tslots = 0; 		/* will remain 0 when we're done */
 	q->used_tslots = 0; 		/* will remain 0 when we're done */
 
@@ -329,11 +348,11 @@ static void handle_reset(void *param)
 		 * discrimination towards the lower idx in unreq_dsts_enqueue, however
 		 * this is not a perfectly fair scheme */
 		dst_id = (idx + base_idx) & mask;
-		dst = &q->dsts[dst_id];
+		dst = get_dst(q, dst_id);
 
 		/* if flow was empty anyway, nothing more to do */
 		if (likely(dst->demand_tslots == dst->used_tslots))
-			continue;
+			goto release;
 
 		/* has timeslots pending, rebase counters to 0 */
 		dst->demand_tslots -= dst->used_tslots;
@@ -342,14 +361,15 @@ static void handle_reset(void *param)
 		dst->requested_tslots = 0;
 		dst->used_tslots = 0;
 
-		q->demand_tslots += dst->demand_tslots;
+		atomic_add(dst->demand_tslots, &q->demand_tslots);
 
 		fp_debug("rebased flow 0x%04X, new demand %llu timeslots\n",
 				dst_id, dst->demand_tslots);
 
 		/* add flow to request queue if it's not already there */
-		if (dst->state == FLOW_UNQUEUED)
-			unreq_dsts_enqueue(q, dst_id);
+		unreq_dsts_enqueue_if_not_queued(q, dst_id, dst);
+release:
+		release_dst(dst);
 	}
 }
 
@@ -432,17 +452,19 @@ static void handle_alloc(void *param, u32 base_tslot, u16 *dst_ids,
 //		}
 
 		dst_id = dst_ids[dst_id_idx - 1];
-		dst = &q->dsts[dst_id];
+		dst = get_dst(q, dst_id);
 		/* okay, allocate */
 //		wnd_mark(&q->alloc_wnd, full_tslot);
 //		q->schedule[wnd_pos(full_tslot)] = dst[dst_ind - 1];
 		if (dst->used_tslots != dst->demand_tslots) {
 
-			tsq_admit_now(q, dst_id);
 			flow_inc_used(q, dst, 1);
-
 			dst->alloc_tslots++;
-			q->alloc_tslots++;
+			release_dst(dst);
+
+			tsq_admit_now(q, dst_id);
+
+			atomic_inc(&q->alloc_tslots);
 			q->stat.admitted_timeslots++;
 			if (full_tslot > current_timeslot) {
 				q->stat.early_enqueue++;
@@ -462,9 +484,7 @@ static void handle_alloc(void *param, u32 base_tslot, u16 *dst_ids,
 			}
 
 		} else {
-			/* alloc arrived that was considered dead, we keep it in
-			 *  q->schedule so it might at least reduce latency if demand
-			 *  increases later */
+			release_dst(dst);
 			q->stat.unwanted_alloc++;
 			fp_debug("got an allocation over demand, flow 0x%04X, demand %llu\n",
 					dst_id, dst->demand_tslots);
@@ -490,7 +510,7 @@ static void handle_areq(void *param, u16 *dst_and_count, int n)
 		dst_id = ntohs(dst_and_count[2*i]);
 		count_low = ntohs(dst_and_count[2*i + 1]);
 
-		dst = &q->dsts[dst_id];
+		dst = get_dst(q, dst_id);
 
 		/* get full count */
 		/* TODO: This is not perfectly safe. For example, if there is a big
@@ -504,11 +524,14 @@ static void handle_areq(void *param, u16 *dst_and_count, int n)
 			u64 n_lost = count - dst->alloc_tslots;
 
 			if (unlikely((s64)(count - dst->requested_tslots) > 0)) {
+				release_dst(dst);
 				FASTPASS_WARN("got an alloc report for dst %d larger than requested (%llu > %llu), will reset\n",
 						dst_id, count, dst->requested_tslots);
 				q->stat.alloc_report_larger_than_requested++;
 				/* This corrupts the status; will force a reset */
+				spin_lock(&q->conn_lock);
 				fpproto_force_reset(&q->conn);
+				spin_unlock(&q->conn_lock);
 				handle_reset((void *)q); /* manually call callback since fpproto won't call it */
 				return;
 			}
@@ -516,12 +539,13 @@ static void handle_areq(void *param, u16 *dst_and_count, int n)
 			fp_debug("controller allocated %llu our allocated %llu, will increase demand by %llu\n",
 					count, dst->alloc_tslots, n_lost);
 
-			q->alloc_tslots += n_lost;
 			dst->alloc_tslots += n_lost;
-			q->stat.timeslots_assumed_lost += n_lost;
-
 			flow_inc_used(q, dst, n_lost);
 			flow_inc_demand(q, dst_id, n_lost);
+			release_dst(dst);
+
+			atomic_add(n_lost, &q->alloc_tslots);
+			q->stat.timeslots_assumed_lost += n_lost;
 		}
 	}
 }
@@ -536,7 +560,7 @@ static void handle_ack(void *param, struct fpproto_pktdesc *pd)
 	for (i = 0; i < pd->n_areq; i++) {
 		u32 dst_id = pd->areq[i].src_dst_key;
 		/* this node made pd, so no need to check bounds */
-		struct fp_dst *dst = &q->dsts[dst_id];
+		struct fp_dst *dst = get_dst(q, dst_id);
 
 		new_acked = pd->areq[i].tslots;
 		if (dst->acked_tslots < new_acked) {
@@ -548,10 +572,11 @@ static void handle_ack(void *param, struct fpproto_pktdesc *pd)
 					delta, dst_id, new_acked);
 
 			/* the demand-limiting window might be in effect, re-enqueue flow */
-			if (unlikely((!dst_is_unreq(dst))
-					&& (dst->requested_tslots != dst->demand_tslots)))
-				unreq_dsts_enqueue(q, dst_id);
+			if (unlikely(dst->requested_tslots != dst->demand_tslots))
+				unreq_dsts_enqueue_if_not_queued(q, dst_id, dst);
 		}
+
+		release_dst(dst);
 	}
 }
 
@@ -564,22 +589,23 @@ static void handle_neg_ack(void *param, struct fpproto_pktdesc *pd)
 	for (i = 0; i < pd->n_areq; i++) {
 		u32 dst_id = pd->areq[i].src_dst_key;
 		/* this node made pd, so no need to check bounds */
-		struct fp_dst *dst = &q->dsts[dst_id];
+		struct fp_dst *dst = get_dst(q, dst_id);
 
 		req_tslots = pd->areq[i].tslots;
 		/* don't need to resend if got ack >= req_tslots */
 		if (req_tslots <= dst->acked_tslots) {
 			fp_debug("nack for request of %llu for flow 0x%04X, but already acked %llu\n",
 							req_tslots, dst_id, dst->acked_tslots);
-			continue;
+			goto release;
 		}
 
 		/* add to retransmit queue */
-		if (!dst_is_unreq(dst))
-			unreq_dsts_enqueue(q, dst_id);
+		unreq_dsts_enqueue_if_not_queued(q, dst_id, dst);
 
 		fp_debug("nack for request of %llu for flow 0x%04X (%llu acked), added to retransmit queue\n",
 						req_tslots, dst_id, dst->acked_tslots);
+release:
+		release_dst(dst);
 	}
 }
 
@@ -593,10 +619,10 @@ static void send_request(struct fp_sched_data *q)
 	struct fp_kernel_pktdesc *kern_pd;
 	struct fpproto_pktdesc *pd;
 	u64 new_requested;
-	bool should_trigger;
+	int q_alloc_tslots;
 
 	fp_debug("start: unreq_flows=%u, unreq_tslots=%llu, now_mono=%llu, scheduled=%llu, diff=%lld, next_seq=%08llX\n",
-			n_unreq_dsts(q), q->demand_tslots - q->requested_tslots, now_monotonic,
+			n_unreq_dsts(q), atomic_read(&q->demand_tslots) - q->requested_tslots, now_monotonic,
 			pacer_next_event(&q->request_pacer),
 			(s64 )now_monotonic - (s64 )pacer_next_event(&q->request_pacer),
 			q->conn.next_seqno);
@@ -619,11 +645,12 @@ static void send_request(struct fp_sched_data *q)
 		goto out_conn_destroyed;
 	/* nack the tail of the outwnd if it has not been nacked or acked */
 	fpproto_prepare_to_send(&q->conn);
+	spin_unlock_irq(&q->conn_lock);
 
 	while ((pd->n_areq < FASTPASS_PKT_MAX_AREQ) && !unreq_dsts_is_empty(q)) {
 		/* get entry */
-		u32 dst_id = unreq_dsts_dequeue(q);
-		struct fp_dst *dst = &q->dsts[dst_id];
+		u32 dst_id;
+		struct fp_dst *dst = unreq_dsts_dequeue_and_get(q, &dst_id);
 
 		new_requested = min_t(u64, dst->demand_tslots,
 				dst->acked_tslots + FASTPASS_REQUEST_WINDOW_SIZE - 1);
@@ -631,32 +658,37 @@ static void send_request(struct fp_sched_data *q)
 			q->stat.queued_flow_already_acked++;
 			fp_debug("flow 0x%04X was in queue, but already fully acked\n",
 					dst_id);
+			release_dst(dst);
 			continue;
 		}
 
-		pd->areq[pd->n_areq].src_dst_key = dst_id;
-		pd->areq[pd->n_areq].tslots = new_requested;
-
 		q->requested_tslots += (new_requested - dst->requested_tslots);
 		dst->requested_tslots = new_requested;
+		release_dst(dst);
+
+		pd->areq[pd->n_areq].src_dst_key = dst_id;
+		pd->areq[pd->n_areq].tslots = new_requested;
 
 		pd->n_areq++;
 	}
 
 	fp_debug("end: unreq_flows=%u, unreq_tslots=%llu\n",
-			n_unreq_dsts(q), q->demand_tslots - q->requested_tslots);
+			n_unreq_dsts(q), atomic_read(&q->demand_tslots) - q->requested_tslots);
 
+	spin_lock_irq(&q->conn_lock);
+	if (unlikely(q->is_destroyed == true))
+		goto out_conn_destroyed;
 	fpproto_commit_packet(&q->conn, pd, now_monotonic);
-
-	should_trigger = (q->demand_tslots != q->alloc_tslots);
-
 	spin_unlock_irq(&q->conn_lock);
 
 	/* let fpproto send the pktdesc */
 	fpproto_send_pktdesc(q->ctrl_sock->sk, kern_pd);
 
 	/* set timer for next request, if a request would be required */
-	if (should_trigger)
+	/* demand_tslots only increases and is larger than alloc_tslots, so read it
+	 *   second to be on safe side */
+	q_alloc_tslots = atomic_read(&q->alloc_tslots);
+	if (q_alloc_tslots != atomic_read(&q->demand_tslots))
 		/* have more requests to send */
 		trigger_tx(q);
 
@@ -737,10 +769,23 @@ static enum hrtimer_restart retrans_timer_func(struct hrtimer *timer)
 void ctrl_rcv_handler(void *priv, u8 *pkt, u32 len, __be32 saddr, __be32 daddr)
 {
 	struct fp_sched_data *q = (struct fp_sched_data *)priv;
+	bool ret = false;
+	u64 in_seq;
 
 	spin_lock_irq(&q->conn_lock);
 	if (likely(q->is_destroyed == false))
-		fpproto_handle_rx_packet(&q->conn, pkt, len, saddr, daddr);
+		ret = fpproto_handle_rx_packet(&q->conn, pkt, len, saddr, daddr, &in_seq);
+	spin_unlock_irq(&q->conn_lock);
+	if (!ret)
+		return;
+
+	ret = fpproto_perform_rx_callbacks(&q->conn, pkt, len);
+	if (!ret)
+		return;
+
+	spin_lock_irq(&q->conn_lock);
+	if (likely(q->is_destroyed == false))
+		fpproto_successful_rx(&q->conn, in_seq);
 	spin_unlock_irq(&q->conn_lock);
 }
 
@@ -862,11 +907,11 @@ static int fastpass_proc_show(struct seq_file *seq, void *v)
 
 	/* total since reset */
 	seq_printf(seq, "\n  since reset: ");
-	seq_printf(seq, " demand %llu", q->demand_tslots);
+	seq_printf(seq, " demand %u", atomic_read(&q->demand_tslots));
 	seq_printf(seq, ", requested %llu", q->requested_tslots);
-	seq_printf(seq, " (%llu yet unrequested)", q->demand_tslots - q->requested_tslots);
+	seq_printf(seq, " (%u yet unrequested)", (u32)(atomic_read(&q->demand_tslots) - q->requested_tslots));
 	seq_printf(seq, ", acked %llu", q->acked_tslots);
-	seq_printf(seq, ", allocs %llu", q->alloc_tslots);
+	seq_printf(seq, ", allocs %u", atomic_read(&q->alloc_tslots));
 	seq_printf(seq, ", used %llu", q->used_tslots);
 	seq_printf(seq, ", admitted %llu", scs->admitted_timeslots);
 
@@ -945,6 +990,7 @@ static int fpq_new_qdisc(void *priv, struct net *qdisc_net, u32 tslot_mul,
 	u64 now_real = fp_get_time_ns();
 	u64 now_monotonic = fp_monotonic_time_ns();
 	int err;
+	int i;
 
 	q->unreq_dsts_head = q->unreq_dsts_tail = 0;
 	q->tslot_mul		= tslot_mul;
@@ -953,6 +999,11 @@ static int fpq_new_qdisc(void *priv, struct net *qdisc_net, u32 tslot_mul,
 	/* calculate timeslot from beginning of Epoch */
 	q->current_timeslot = (now_real * q->tslot_mul) >> q->tslot_shift;
 	wnd_reset(&q->alloc_wnd, q->current_timeslot);
+
+	spin_lock_init(&q->unreq_flows_lock);
+
+	for (i = 0; i < MAX_NODES; i++)
+		spin_lock_init(&q->dsts[i].lock);
 
 	spin_lock_init(&q->pacer_lock);
 	pacer_init_full(&q->request_pacer, now_monotonic, req_cost,

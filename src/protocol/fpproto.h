@@ -274,8 +274,19 @@ void fpproto_force_reset(struct fpproto_conn *conn);
 void fpproto_handle_timeout(struct fpproto_conn *conn, u64 now);
 
 /*** RX ***/
-/* parses payloads and performs appropriate callbacks to ops */
-void fpproto_handle_rx_packet(struct fpproto_conn *conn, u8 *data, u32 len,
+/* parses payloads and manipulates ack state. returns true if packet should
+ *   be processed further for payloads, false otherwise. If returned true
+ *   and parsing was successful, in_seq should be passed to
+ *   fpproto_successful_rx()*/
+bool fpproto_handle_rx_packet(struct fpproto_conn *conn, u8 *pkt, u32 len,
+		__be32 saddr, __be32 daddr, u64 *in_seq);
+/* performs appropriate callbacks to ops */
+bool fpproto_perform_rx_callbacks(struct fpproto_conn *conn, u8 *pkt, u32 len);
+/* marks packet as successfully received */
+void fpproto_successful_rx(struct fpproto_conn *conn, u64 in_seq);
+
+/* performs all RX functions in sequence */
+void fpproto_handle_rx_complete(struct fpproto_conn *conn, u8 *pkt, u32 len,
 		__be32 saddr, __be32 daddr);
 
 /*** TX ***/

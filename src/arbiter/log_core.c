@@ -47,7 +47,8 @@ void print_comm_log(uint16_t lcore_id)
         double best_gbps = cl->stress_test_max_node_tslots * 1500 * 8 / (STRESS_TEST_RATE_INCREASE_GAP_SEC * 1000 * 1000 * 1000.0);
         printf("\ncurrent stress test mean t btwn requests: %f, current gbps: %f, best gbps: %f",
                mean_t_btwn_requests_sec, gbps, best_gbps);
-        printf("\nstress test rate status (1:increase, 2:maintain, 3:decrease): %lu\n", cl->stress_test_mode);
+        printf("\nstress test rate status (1:increase, 2:maintain, 3:decrease): %lu, increase factor: %f\n",
+               cl->stress_test_mode, cl->stress_test_increase_factor);
 #endif
 
 	printf("\n  RX %lu pkts, %lu bytes in %lu batches (%lu non-empty batches), %lu dropped",

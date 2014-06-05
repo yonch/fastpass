@@ -126,6 +126,7 @@ void exec_stress_test_core(struct stress_test_core_cmd * cmd,
 	next_mean_t_btwn_requests = cmd->mean_t_btwn_requests * STRESS_TEST_RATE_INCREASE_FACTOR;
         last_successful_mean_t = next_mean_t_btwn_requests;
         cur_increase_factor = STRESS_TEST_RATE_INCREASE_FACTOR;
+        comm_log_stress_test_increase_factor(cur_increase_factor);
 
         if (IS_AUTOMATED_STRESS_TEST)
                 comm_log_stress_test_mode(STRESS_TEST_RATE_MAINTAIN);
@@ -151,8 +152,10 @@ void exec_stress_test_core(struct stress_test_core_cmd * cmd,
                     (comm_log_get_total_demand() > comm_log_get_occupied_node_tslots() +
                      STRESS_TEST_MAX_ALLOWED_BACKLOG)) {
                         next_mean_t_btwn_requests = last_successful_mean_t;
-                        if (comm_log_get_stress_test_mode() == STRESS_TEST_RATE_INCREASE)
+                        if (comm_log_get_stress_test_mode() == STRESS_TEST_RATE_INCREASE) {
                                 cur_increase_factor = (cur_increase_factor + 1) / 2;
+                                comm_log_stress_test_increase_factor(cur_increase_factor);
+                        }
                         comm_log_stress_test_mode(STRESS_TEST_RATE_DECREASE);
                         re_init_gen = true;
                 }

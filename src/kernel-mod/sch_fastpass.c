@@ -253,7 +253,7 @@ static void set_retrans_timer(void *param, u64 when)
 static void unreq_dsts_enqueue_if_not_queued(struct fp_sched_data *q, u32 dst_id,
 		struct fp_dst *dst)
 {
-	if (dst->state == FLOW_UNQUEUED) {
+	if (dst->state != FLOW_UNQUEUED) {
 		return;
 	}
 
@@ -268,11 +268,7 @@ static void unreq_dsts_enqueue_if_not_queued(struct fp_sched_data *q, u32 dst_id
 		fp_debug("set request timer to %llu\n", pacer_next_event(&q->request_pacer));
 }
 
-static bool unreq_dsts_is_empty(struct fp_sched_data* q)
-{
-	return q->unreq_dsts_head == q->unreq_dsts_tail;
-}
-
+/* returns NULL if the dst queue is empty */
 static struct fp_dst *unreq_dsts_dequeue_and_get(struct fp_sched_data* q, u32 *dst_id)
 {
 	struct fp_dst *res;
@@ -281,6 +277,10 @@ static struct fp_dst *unreq_dsts_dequeue_and_get(struct fp_sched_data* q, u32 *d
 
 	/* get entry and remove from queue */
 	spin_lock(&q->unreq_flows_lock);
+	if (unlikely(q->unreq_dsts_head == q->unreq_dsts_tail)) {
+		spin_unlock(&q->unreq_flows_lock);
+		return NULL;
+	}
 	*dst_id = q->unreq_flows[q->unreq_dsts_head++ % MAX_NODES];
 	spin_unlock(&q->unreq_flows_lock);
 	res = get_dst(q, *dst_id);
@@ -626,10 +626,6 @@ static void send_request(struct fp_sched_data *q)
 			pacer_next_event(&q->request_pacer),
 			(s64 )now_monotonic - (s64 )pacer_next_event(&q->request_pacer),
 			q->conn.next_seqno);
-	if(unreq_dsts_is_empty(q)) {
-		q->stat.request_with_empty_flowqueue++;
-		fp_debug("was called with no flows pending (could be due to bad packets?)\n");
-	}
 	FASTPASS_BUG_ON(!q->ctrl_sock);
 
 	/* allocate packet descriptor */
@@ -647,7 +643,7 @@ static void send_request(struct fp_sched_data *q)
 	fpproto_prepare_to_send(&q->conn);
 	spin_unlock_irq(&q->conn_lock);
 
-	while ((pd->n_areq < FASTPASS_PKT_MAX_AREQ) && !unreq_dsts_is_empty(q)) {
+	while (pd->n_areq < FASTPASS_PKT_MAX_AREQ) {
 		/* get entry */
 		u32 dst_id;
 		struct fp_dst *dst = unreq_dsts_dequeue_and_get(q, &dst_id);
@@ -672,6 +668,10 @@ static void send_request(struct fp_sched_data *q)
 		pd->n_areq++;
 	}
 
+	if(pd->n_areq == 0) {
+		q->stat.request_with_empty_flowqueue++;
+		fp_debug("was called with no flows pending (could be due to bad packets?)\n");
+	}
 	fp_debug("end: unreq_flows=%u, unreq_tslots=%llu\n",
 			n_unreq_dsts(q), atomic_read(&q->demand_tslots) - q->requested_tslots);
 
@@ -1088,9 +1088,7 @@ static void fpq_stop_qdisc(void *priv) {
 static void fpq_add_timeslot(void *priv, u64 dst_id)
 {
 	struct fp_sched_data *q = (struct fp_sched_data *)priv;
-	spin_lock_irq(&q->conn_lock);
 	flow_inc_demand(priv, dst_id, 1);
-	spin_unlock_irq(&q->conn_lock);
 }
 
 static struct tsq_ops fastpass_tsq_ops __read_mostly = {

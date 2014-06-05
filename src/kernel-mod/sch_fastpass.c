@@ -273,8 +273,6 @@ static struct fp_dst *unreq_dsts_dequeue_and_get(struct fp_sched_data* q, u32 *d
 {
 	struct fp_dst *res;
 
-	FASTPASS_BUG_ON(unreq_dsts_is_empty(q));
-
 	/* get entry and remove from queue */
 	spin_lock(&q->unreq_flows_lock);
 	if (unlikely(q->unreq_dsts_head == q->unreq_dsts_tail)) {
@@ -647,6 +645,8 @@ static void send_request(struct fp_sched_data *q)
 		/* get entry */
 		u32 dst_id;
 		struct fp_dst *dst = unreq_dsts_dequeue_and_get(q, &dst_id);
+		if (dst == NULL)
+			continue;
 
 		new_requested = min_t(u64, dst->demand_tslots,
 				dst->acked_tslots + FASTPASS_REQUEST_WINDOW_SIZE - 1);
@@ -1088,7 +1088,7 @@ static void fpq_stop_qdisc(void *priv) {
 static void fpq_add_timeslot(void *priv, u64 dst_id)
 {
 	struct fp_sched_data *q = (struct fp_sched_data *)priv;
-	flow_inc_demand(priv, dst_id, 1);
+	flow_inc_demand(q, dst_id, 1);
 }
 
 static struct tsq_ops fastpass_tsq_ops __read_mostly = {

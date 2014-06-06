@@ -143,7 +143,7 @@ int exec_pim_admission_core(void *void_cmd_p)
 
                 pim_complete_timeslot(&g_pim_state, core_ind);
 
-		admission_log_allocation_end();
+		admission_log_allocation_end(logical_timeslot);
 
 		logical_timeslot += 1;
 	}

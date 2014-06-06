@@ -138,9 +138,8 @@ int exec_seq_admission_core(void *void_cmd_p)
 		admission_log_allocation_begin(logical_timeslot,
 				start_time_first_timeslot);
 		seq_get_admissible_traffic(&g_seq_admissible_status, core_ind,
-					   logical_timeslot - PREALLOC_DURATION_TIMESLOTS,
-					   TIMESLOT_MUL, TIMESLOT_SHIFT);
-		admission_log_allocation_end();
+					   logical_timeslot, TIMESLOT_MUL, TIMESLOT_SHIFT);
+		admission_log_allocation_end(logical_timeslot);
 
 		logical_timeslot += BATCH_SIZE * N_ADMISSION_CORES;
 	}

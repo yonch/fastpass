@@ -192,13 +192,13 @@ void print_admission_core_log(uint16_t lcore, uint16_t adm_core_index) {
 	printf ("\n");
 
 	#ifdef PIPELINED_ALGO
-	printf("  bin_index >> %d: ", BIN_SIZE_HISTOGRAM_SHIFT);
+	printf("  bin_size >> %d: ", BIN_SIZE_HISTOGRAM_SHIFT);
 	for (i = 0; i < BIN_SIZE_HISTOGRAM_NUM_BINS; i++)
 		printf("%lu ", st->bin_size_histogram[i]);
 	printf ("\n");
 
 	if (MAINTAIN_CORE_BIN_HISTOGRAM) {
-		printf("  core_bin >> %d: ", CORE_BIN_HISTOGRAM_SHIFT);
+		printf("  #demands in internal_bin >> %d: ", CORE_BIN_HISTOGRAM_SHIFT);
 		for (i = 0; i < CORE_BIN_HISTOGRAM_NUM_BINS; i++)
 			printf("%lu ", st->core_bins_histogram[i]);
 		printf ("\n");

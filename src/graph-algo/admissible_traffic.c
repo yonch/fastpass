@@ -21,7 +21,7 @@
 
 #define Q_IN_Q_OUT_BURST_SIZE			16
 
-#define MAX_Q_IN_DEMANDS_PER_BATCH		(MAX_NODES * BATCH_SIZE / 2)
+#define MAX_DEMANDS_PER_BATCH		(MAX_NODES * BATCH_SIZE / 2)
 
 #define TIMESLOT_SHIFT_PER_PRIORITY		0
 #define TIMESLOTS_START_BEFORE			((BATCH_SIZE + NUM_BINS) << TIMESLOT_SHIFT_PER_PRIORITY)
@@ -276,7 +276,7 @@ void try_allocation_core(struct seq_admission_core_state *core,
 
 // Sets the last send time for new requests based on the contents of status
 // and sorts them
-static inline void process_new_requests(struct seq_admissible_status *status,
+static inline uint32_t process_new_requests(struct seq_admissible_status *status,
                           struct seq_admission_core_state *core,
                           uint16_t current_bin)
 {
@@ -298,6 +298,7 @@ static inline void process_new_requests(struct seq_admissible_status *status,
 		fp_mempool_put(status->bin_mempool, bins[i]);
     }
     adm_log_processed_new_requests(&core->stat, num_bins, num_entries);
+    return num_entries;
 }
 
 int32_t burst_q_in_to_q_out(struct seq_admission_core_state* core,
@@ -347,7 +348,7 @@ void seq_get_admissible_traffic(struct seq_admissible_status *status,
     uint16_t processed_bins = 0;
 	uint32_t i;
     bool should_process_new_req = false;
-    uint64_t q_in_n_processed = 0;
+    uint64_t n_processed = 0;
 #ifdef NO_DPDK
     uint64_t now_timeslot = first_timeslot - NUM_BINS - 1;
 #else
@@ -358,7 +359,7 @@ void seq_get_admissible_traffic(struct seq_admissible_status *status,
     		(void **)&core->admitted[0], BATCH_SIZE) != 0)
     {
     	adm_log_admitted_traffic_alloc_failed(&core->stat);
-    	process_new_requests(status, core, processed_bins - 1);
+    	n_processed += process_new_requests(status, core, processed_bins - 1);
     }
     for (i = 0; i < BATCH_SIZE; i++)
         init_admitted_traffic(core->admitted[i]);
@@ -411,24 +412,26 @@ void seq_get_admissible_traffic(struct seq_admissible_status *status,
 			goto wrap_up;
 
 handle_inputs:
-    	/* process new requests if this core is responsible for them */
-    	if (should_process_new_req)
-			process_new_requests(status, core, processed_bins - 1);
-
-		if (likely(q_in_n_processed < MAX_Q_IN_DEMANDS_PER_BATCH)) {
-			/* try to dequeue a bin from queue_in */
-			if (likely(fp_ring_dequeue(queue_in, (void **)&bin_in) == 0))
-			{
-				adm_log_dequeued_bin_in(&core->stat, bin_size(bin_in));
-				q_in_n_processed += bin_size(bin_in);
-				incoming_bin_to_core(status, core, bin_in);
-				fp_mempool_put(bin_mp_in, bin_in);
-			}
-		} else {
+		if (unlikely(n_processed >= MAX_DEMANDS_PER_BATCH)) {
 			n = burst_q_in_to_q_out(core, queue_in, queue_out);
 			adm_log_passed_bins_during_run(&core->stat, n);
+			goto try_alloc;
 		}
 
+		/* process new requests if this core is responsible for them */
+		if (should_process_new_req)
+			n_processed += process_new_requests(status, core, processed_bins - 1);
+
+		/* try to dequeue a bin from queue_in */
+		if (likely(fp_ring_dequeue(queue_in, (void **)&bin_in) == 0))
+		{
+			adm_log_dequeued_bin_in(&core->stat, bin_size(bin_in));
+			n_processed += bin_size(bin_in);
+			incoming_bin_to_core(status, core, bin_in);
+			fp_mempool_put(bin_mp_in, bin_in);
+		}
+
+try_alloc:
 		try_allocation_core(core, queue_out, status, bin_mp_out);
     }
 

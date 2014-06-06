@@ -12,16 +12,18 @@
 #include <stdio.h>
 #include <stdlib.h>
 
+#include "algo_config.h"
+
 #define MAX(a,b) (((a) > (b)) ? (a) : (b))
 
-#define RING_DEQUEUE_BURST_SIZE		256
+#define RING_DEQUEUE_BURST_SIZE		8
 
 #define URGENT_NUM_TIMESLOTS_START		BATCH_SIZE
 #define URGENT_NUM_TIMESLOTS_END		1
 
 #define Q_IN_Q_OUT_BURST_SIZE			16
 
-#define MAX_DEMANDS_PER_BATCH		(MAX_NODES * BATCH_SIZE / 2)
+#define MAX_DEMANDS_PER_BATCH		(MAX_NODES * BATCH_SIZE * ALGO_N_CORES)
 
 #define TIMESLOT_SHIFT_PER_PRIORITY		1
 #define TIMESLOTS_START_BEFORE			((BATCH_SIZE + NUM_BINS) << TIMESLOT_SHIFT_PER_PRIORITY)

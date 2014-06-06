@@ -24,7 +24,7 @@
 #include "bin.h"
 #include "admitted.h"
 
-#define SMALL_BIN_SIZE (10*MAX_NODES) // TODO: try smaller values
+#define SMALL_BIN_SIZE (32) // TODO: try smaller values
 #define LARGE_BIN_SIZE (MAX_NODES * MAX_NODES) // TODO: try smaller values
 #define NUM_BINS_SHIFT 5
 #define NUM_BINS 32 // 2^NUM_BINS_SHIFT

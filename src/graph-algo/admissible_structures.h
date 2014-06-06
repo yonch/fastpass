@@ -107,7 +107,11 @@ void alloc_core_reset(struct seq_admission_core_state *core,
 	for (i = 0; i < NUM_BINS + BATCH_SIZE; i++)
 		init_bin(core->new_request_bins[i]);
 
-    batch_state_init(&core->batch_state, status->oversubscribed,
+	core->allowed_bins[0] = 0x1;
+	for (i = 1; i < BIN_MASK_SIZE; i++)
+		core->allowed_bins[i] = 0;
+
+	batch_state_init(&core->batch_state, status->oversubscribed,
                      status->inter_rack_capacity, status->out_of_boundary_capacity,
                      status->num_nodes);
 
@@ -135,10 +139,6 @@ static inline int alloc_core_init(struct seq_admissible_status *status,
 		if (core->new_request_bins[j] == NULL)
 			return -1;
 	}
-
-	core->allowed_bins[0] = 0x1;
-	for (j = 1; j < BIN_MASK_SIZE; j++)
-		core->allowed_bins[j] = 0;
 
 	 if (fp_mempool_get(status->bin_mempool,
 			 (void**)&core->out_bin) != 0)

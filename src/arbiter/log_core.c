@@ -205,7 +205,7 @@ void print_admission_core_log(uint16_t lcore, uint16_t adm_core_index) {
 	}
 
 	if (MAINTAIN_AFTER_TSLOTS_HISTOGRAM) {
-		printf("  core_bin >> %d: ", AFTER_TSLOTS_HISTOGRAM_SHIFT);
+		printf("  after_tslots >> %d: ", AFTER_TSLOTS_HISTOGRAM_SHIFT);
 		for (i = 0; i < AFTER_TSLOTS_HISTOGRAM_NUM_BINS; i++)
 			printf("%lu ", al->after_tslots_histogram[i]);
 		printf ("\n");

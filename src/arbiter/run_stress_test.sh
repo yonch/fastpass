@@ -3,6 +3,14 @@
 # this script builds and runs the stress test with the
 # specified arguments. it also shields CPUs appropriately.
 
+if [ x`which pls` == x ]; then
+    echo no_pls
+    MAKE=make
+else
+    echo pls
+    MAKE="pls make"
+fi
+
 # check arguments
 if [ "$#" -ne 2 ]; then
     echo "Usage: $0 <num_algo_cores> <batch_size>"
@@ -40,8 +48,8 @@ else
 fi
 
 # build
-make clean
-pls make CMD_LINE_CFLAGS+=-DALGO_N_CORES=$ALGO_N_CORES CMD_LINE_CFLAGS+=-DBATCH_SIZE=$BATCH_SIZE CMD_LINE_CFLAGS+=-DBATCH_SHIFT=$BATCH_SHIFT -j9
+$MAKE clean
+$MAKE CMD_LINE_CFLAGS+=-DALGO_N_CORES=$ALGO_N_CORES CMD_LINE_CFLAGS+=-DBATCH_SIZE=$BATCH_SIZE CMD_LINE_CFLAGS+=-DBATCH_SHIFT=$BATCH_SHIFT -j9
 
 # shield cpus appropriately
 if [ "$TOTAL_NUM_CORES" -eq 3 ]; then

@@ -19,7 +19,9 @@
 #define URGENT_NUM_TIMESLOTS_START		BATCH_SIZE
 #define URGENT_NUM_TIMESLOTS_END		1
 
-#define MAX_WRAP_UP_BINS_PASSED			16
+#define Q_IN_Q_OUT_BURST_SIZE			16
+
+#define MAX_Q_IN_DEMANDS_PER_BATCH		(MAX_NODES * BATCH_SIZE / 2)
 
 /**
  * Flushes bin to queue, and allocates a new bin
@@ -295,6 +297,22 @@ static inline void process_new_requests(struct seq_admissible_status *status,
     adm_log_processed_new_requests(&core->stat, num_bins, num_entries);
 }
 
+int32_t burst_q_in_to_q_out(struct seq_admission_core_state* core,
+		struct fp_ring* queue_in, struct fp_ring* queue_out)
+{
+	int32_t n;
+    struct bin *bins[Q_IN_Q_OUT_BURST_SIZE];
+
+    /* get unhandled bins, for handing off to next core */
+	n = fp_ring_dequeue_burst(queue_in, (void **) bins, Q_IN_Q_OUT_BURST_SIZE);
+	if (n > 0) {
+		while (fp_ring_enqueue_bulk(queue_out, (void**) bins, n) == -ENOBUFS)
+			adm_log_wait_for_space_in_q_bin_out(&core->stat);
+	}
+
+	return n;
+}
+
 // Determine admissible traffic for one timeslot from queue_in
 // Puts unallocated traffic in queue_out
 // Allocate BATCH_SIZE timeslots at once
@@ -310,7 +328,7 @@ void seq_get_admissible_traffic(struct seq_admissible_status *status,
     struct fp_ring *queue_out = status->q_bin[(core_index + 1) % ALGO_N_CORES];
     struct fp_mempool *bin_mp_in = status->bin_mempool;
     struct fp_mempool *bin_mp_out = status->bin_mempool;
-    struct bin *wrap_up_bins[MAX_WRAP_UP_BINS_PASSED];
+    int32_t n;
 
     // Initialize this core for a new batch of processing
     alloc_core_reset(core, status);
@@ -325,8 +343,8 @@ void seq_get_admissible_traffic(struct seq_admissible_status *status,
     uint64_t prev_timeslot = ((fp_get_time_ns() * tslot_mul) >> tslot_shift) - 1;
     uint16_t processed_bins = 0;
 	uint32_t i;
-	int32_t n_wrap_up_bins;
     bool should_process_new_req = false;
+    uint64_t q_in_n_processed = 0;
 #ifdef NO_DPDK
     uint64_t now_timeslot = first_timeslot - NUM_BINS - 1;
 #else
@@ -393,13 +411,19 @@ handle_inputs:
     	if (should_process_new_req)
 			process_new_requests(status, core, processed_bins - 1);
 
-    	/* try to dequeue a bin from queue_in */
-    	if (likely(fp_ring_dequeue(queue_in, (void **)&bin_in) == 0))
-    	{
-			adm_log_dequeued_bin_in(&core->stat, bin_size(bin_in));
-			incoming_bin_to_core(status, core, bin_in);
-			fp_mempool_put(bin_mp_in, bin_in);
-    	}
+		if (likely(q_in_n_processed < MAX_Q_IN_DEMANDS_PER_BATCH)) {
+			/* try to dequeue a bin from queue_in */
+			if (likely(fp_ring_dequeue(queue_in, (void **)&bin_in) == 0))
+			{
+				adm_log_dequeued_bin_in(&core->stat, bin_size(bin_in));
+				q_in_n_processed += bin_size(bin_in);
+				incoming_bin_to_core(status, core, bin_in);
+				fp_mempool_put(bin_mp_in, bin_in);
+			}
+		} else {
+			n = burst_q_in_to_q_out(core, queue_in, queue_out);
+			adm_log_passed_bins_during_run(&core->stat, n);
+		}
 
 		try_allocation_core(core, queue_out, status, bin_mp_out);
     }
@@ -414,14 +438,8 @@ wrap_up:
 	}
 
 	/* get unhandled bins, for handing off to next core */
-	n_wrap_up_bins = fp_ring_dequeue_burst(queue_in, (void **)wrap_up_bins,
-			MAX_WRAP_UP_BINS_PASSED);
-	if (n_wrap_up_bins > 0) {
-		adm_log_passed_bins_during_wrap_up(&core->stat, n_wrap_up_bins);
-		while (fp_ring_enqueue_bulk(queue_out, (void**)wrap_up_bins, n_wrap_up_bins) == -ENOBUFS)
-			adm_log_wait_for_space_in_q_bin_out(&core->stat);
-	}
-
+	n = burst_q_in_to_q_out(core, queue_in, queue_out);
+	adm_log_passed_bins_during_wrap_up(&core->stat, n);
 	// Update current timeslot
     core->current_timeslot += ALGO_N_CORES * BATCH_SIZE;
 }

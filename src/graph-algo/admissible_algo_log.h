@@ -44,6 +44,7 @@ struct admission_core_statistics {
 	uint64_t new_requests;
 	uint64_t waiting_to_pass_token;
 	uint64_t passed_bins_during_wrap_up;
+	uint64_t passed_bins_during_run;
 	uint64_t wrap_up_non_empty_bin;
 	uint64_t wrap_up_non_empty_bin_demands;
 
@@ -194,6 +195,14 @@ void adm_log_passed_bins_during_wrap_up(
 		struct admission_core_statistics *st, uint32_t n_bins) {
 	if (MAINTAIN_ADM_LOG_COUNTERS) {
 		st->passed_bins_during_wrap_up += n_bins;
+	}
+}
+
+static inline __attribute__((always_inline))
+void adm_log_passed_bins_during_run(
+		struct admission_core_statistics *st, uint32_t n_bins) {
+	if (MAINTAIN_ADM_LOG_COUNTERS) {
+		st->passed_bins_during_run += n_bins;
 	}
 }
 

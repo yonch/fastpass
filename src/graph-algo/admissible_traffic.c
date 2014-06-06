@@ -21,6 +21,9 @@
 
 #define MAX_WRAP_UP_BINS_PASSED			16
 
+#define TIMESLOT_SHIFT_PER_PRIORITY		0
+#define TIMESLOTS_START_BEFORE			((BATCH_SIZE + NUM_BINS) << TIMESLOT_SHIFT_PER_PRIORITY)
+
 /**
  * Flushes bin to queue, and allocates a new bin
  */
@@ -365,9 +368,9 @@ void seq_get_admissible_traffic(struct seq_admissible_status *status,
 		if (likely(time_before64((__u64)now_timeslot, (__u64)(first_timeslot - NUM_BINS))))
 			goto handle_inputs;
 
-		uint64_t slot_gap = now_timeslot - first_timeslot + NUM_BINS + 1;
+		uint64_t slot_gap = now_timeslot - (first_timeslot + BATCH_SIZE - 1) + TIMESLOTS_START_BEFORE;
 		uint16_t new_processed_bins =
-				(slot_gap > BATCH_SIZE + NUM_BINS) ? BATCH_SIZE + NUM_BINS : slot_gap;
+				(slot_gap > TIMESLOTS_START_BEFORE) ? (BATCH_SIZE + NUM_BINS) : (slot_gap >> TIMESLOT_SHIFT_PER_PRIORITY);
 
 		for (bin = processed_bins; bin < new_processed_bins; bin++) {
 			/* allow more bins to be processed */

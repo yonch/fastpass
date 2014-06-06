@@ -346,9 +346,11 @@ void seq_get_admissible_traffic(struct seq_admissible_status *status,
     uint16_t bin = 0;
     uint64_t prev_timeslot = ((fp_get_time_ns() * tslot_mul) >> tslot_shift) - 1;
     uint16_t processed_bins = 0;
+    uint16_t admitted_bins = 0;
 	uint32_t i;
     bool should_process_new_req = false;
     uint64_t n_processed = 0;
+	int64_t slot_gap;
 #ifdef NO_DPDK
     uint64_t now_timeslot = first_timeslot - NUM_BINS - 1;
 #else
@@ -379,11 +381,33 @@ void seq_get_admissible_traffic(struct seq_admissible_status *status,
 
     	prev_timeslot = now_timeslot;
 
-    	should_process_new_req =
-    			(first_timeslot - now_timeslot > URGENT_NUM_TIMESLOTS_END)
-    		 && (first_timeslot - now_timeslot <= URGENT_NUM_TIMESLOTS_START);
+		should_process_new_req =
+				(first_timeslot - now_timeslot > URGENT_NUM_TIMESLOTS_END)
+			 && (first_timeslot - now_timeslot <= URGENT_NUM_TIMESLOTS_START);
 
-		int64_t slot_gap = now_timeslot - (first_timeslot + BATCH_SIZE - 1) + TIMESLOTS_START_BEFORE;
+    	/* send out admitted_traffic, if need to */
+		int64_t admit_gap = now_timeslot - first_timeslot + 1;
+		if (admit_gap <= 0)
+			goto update_allowed;
+		if (admit_gap > BATCH_SIZE)
+			admit_gap = BATCH_SIZE;
+
+		for (bin = admitted_bins; bin < admit_gap; bin++) {
+			/* send out the admitted traffic */
+			while(fp_ring_enqueue(status->q_admitted_out,
+					core->admitted[bin]) == -ENOBUFS)
+				adm_log_wait_for_space_in_q_admitted_traffic(&core->stat);
+
+			/* disallow that timeslot */
+			batch_state_disallow_lsb_timeslot(&core->batch_state);
+		}
+		admitted_bins = admit_gap;
+
+		if (unlikely(admitted_bins == BATCH_SIZE))
+			goto wrap_up;
+
+update_allowed:
+		slot_gap = now_timeslot - (first_timeslot + BATCH_SIZE - 1) + TIMESLOTS_START_BEFORE;
 
 		/* if time is not close enough to process bins, continue */
 		if (slot_gap < 0)
@@ -392,24 +416,10 @@ void seq_get_admissible_traffic(struct seq_admissible_status *status,
 		uint16_t new_processed_bins =
 				(slot_gap > TIMESLOTS_START_BEFORE) ? (BATCH_SIZE + NUM_BINS) : (slot_gap >> TIMESLOT_SHIFT_PER_PRIORITY);
 
-		for (bin = processed_bins; bin < new_processed_bins; bin++) {
-			/* allow more bins to be processed */
+		/* allow more bins to be processed */
+		for (bin = processed_bins; bin < new_processed_bins; bin++)
 			asm("bts %1,%0" : "+m" (*(uint64_t *)&core->allowed_bins[0]) : "r" (bin));
-
-			if (likely(bin >= NUM_BINS)) {
-				/* send out the admitted traffic */
-				while(fp_ring_enqueue(status->q_admitted_out,
-						core->admitted[bin - NUM_BINS]) == -ENOBUFS)
-					adm_log_wait_for_space_in_q_admitted_traffic(&core->stat);
-
-				/* disallow that timeslot */
-				batch_state_disallow_lsb_timeslot(&core->batch_state);
-			}
-		}
 		processed_bins = new_processed_bins;
-
-		if (unlikely(processed_bins == BATCH_SIZE + NUM_BINS))
-			goto wrap_up;
 
 handle_inputs:
 		if (unlikely(n_processed >= MAX_DEMANDS_PER_BATCH)) {

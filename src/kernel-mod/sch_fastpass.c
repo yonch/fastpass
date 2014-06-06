@@ -204,11 +204,13 @@ static struct proc_dir_entry *fastpass_proc_entry;
 
 static inline struct fp_dst *get_dst(struct fp_sched_data *q, u32 index) {
 	struct fp_dst *ret = &q->dsts[index];
+	fp_debug("get dst %u\n", index);
 	spin_lock(&ret->lock);
 	return ret;
 }
 
-static inline void release_dst(struct fp_dst *dst) {
+static inline void release_dst(struct fp_sched_data *q, struct fp_dst *dst) {
+	fp_debug("put dst %u\n", (u32)(dst - &q->dsts[0]));
 	spin_unlock(&dst->lock);
 }
 
@@ -273,8 +275,6 @@ static struct fp_dst *unreq_dsts_dequeue_and_get(struct fp_sched_data* q, u32 *d
 {
 	struct fp_dst *res;
 
-	FASTPASS_BUG_ON(unreq_dsts_is_empty(q));
-
 	/* get entry and remove from queue */
 	spin_lock(&q->unreq_flows_lock);
 	if (unlikely(q->unreq_dsts_head == q->unreq_dsts_tail)) {
@@ -304,16 +304,13 @@ void flow_inc_used(struct fp_sched_data *q, struct fp_dst* dst, u64 amount) {
  *   Maintains the necessary invariants, e.g. adds the flow to the unreq_flows
  *   list if necessary
  */
-static void flow_inc_demand(struct fp_sched_data *q, u32 dst_id, u64 amount)
+static void flow_inc_demand(struct fp_sched_data *q, u32 dst_id,
+		struct fp_dst *dst, u64 amount)
 {
-	struct fp_dst *dst = get_dst(q, dst_id);
-
 	dst->demand_tslots += amount;
 
 	/* if flow not on scheduling queue yet, enqueue */
 	unreq_dsts_enqueue_if_not_queued(q, dst_id, dst);
-
-	release_dst(dst);
 
 	atomic_add(amount, &q->demand_tslots);
 }
@@ -369,7 +366,7 @@ static void handle_reset(void *param)
 		/* add flow to request queue if it's not already there */
 		unreq_dsts_enqueue_if_not_queued(q, dst_id, dst);
 release:
-		release_dst(dst);
+		release_dst(q, dst);
 	}
 }
 
@@ -460,7 +457,7 @@ static void handle_alloc(void *param, u32 base_tslot, u16 *dst_ids,
 
 			flow_inc_used(q, dst, 1);
 			dst->alloc_tslots++;
-			release_dst(dst);
+			release_dst(q, dst);
 
 			tsq_admit_now(q, dst_id);
 
@@ -484,7 +481,7 @@ static void handle_alloc(void *param, u32 base_tslot, u16 *dst_ids,
 			}
 
 		} else {
-			release_dst(dst);
+			release_dst(q, dst);
 			q->stat.unwanted_alloc++;
 			fp_debug("got an allocation over demand, flow 0x%04X, demand %llu\n",
 					dst_id, dst->demand_tslots);
@@ -524,7 +521,7 @@ static void handle_areq(void *param, u16 *dst_and_count, int n)
 			u64 n_lost = count - dst->alloc_tslots;
 
 			if (unlikely((s64)(count - dst->requested_tslots) > 0)) {
-				release_dst(dst);
+				release_dst(q, dst);
 				FASTPASS_WARN("got an alloc report for dst %d larger than requested (%llu > %llu), will reset\n",
 						dst_id, count, dst->requested_tslots);
 				q->stat.alloc_report_larger_than_requested++;
@@ -541,12 +538,13 @@ static void handle_areq(void *param, u16 *dst_and_count, int n)
 
 			dst->alloc_tslots += n_lost;
 			flow_inc_used(q, dst, n_lost);
-			flow_inc_demand(q, dst_id, n_lost);
-			release_dst(dst);
+			flow_inc_demand(q, dst_id, dst, n_lost);
 
 			atomic_add(n_lost, &q->alloc_tslots);
 			q->stat.timeslots_assumed_lost += n_lost;
 		}
+
+		release_dst(q, dst);
 	}
 }
 
@@ -576,7 +574,7 @@ static void handle_ack(void *param, struct fpproto_pktdesc *pd)
 				unreq_dsts_enqueue_if_not_queued(q, dst_id, dst);
 		}
 
-		release_dst(dst);
+		release_dst(q, dst);
 	}
 }
 
@@ -605,7 +603,7 @@ static void handle_neg_ack(void *param, struct fpproto_pktdesc *pd)
 		fp_debug("nack for request of %llu for flow 0x%04X (%llu acked), added to retransmit queue\n",
 						req_tslots, dst_id, dst->acked_tslots);
 release:
-		release_dst(dst);
+		release_dst(q, dst);
 	}
 }
 
@@ -647,6 +645,8 @@ static void send_request(struct fp_sched_data *q)
 		/* get entry */
 		u32 dst_id;
 		struct fp_dst *dst = unreq_dsts_dequeue_and_get(q, &dst_id);
+		if (dst == NULL)
+			break;
 
 		new_requested = min_t(u64, dst->demand_tslots,
 				dst->acked_tslots + FASTPASS_REQUEST_WINDOW_SIZE - 1);
@@ -654,13 +654,13 @@ static void send_request(struct fp_sched_data *q)
 			q->stat.queued_flow_already_acked++;
 			fp_debug("flow 0x%04X was in queue, but already fully acked\n",
 					dst_id);
-			release_dst(dst);
+			release_dst(q, dst);
 			continue;
 		}
 
 		q->requested_tslots += (new_requested - dst->requested_tslots);
 		dst->requested_tslots = new_requested;
-		release_dst(dst);
+		release_dst(q, dst);
 
 		pd->areq[pd->n_areq].src_dst_key = dst_id;
 		pd->areq[pd->n_areq].tslots = new_requested;
@@ -1088,7 +1088,9 @@ static void fpq_stop_qdisc(void *priv) {
 static void fpq_add_timeslot(void *priv, u64 dst_id)
 {
 	struct fp_sched_data *q = (struct fp_sched_data *)priv;
-	flow_inc_demand(priv, dst_id, 1);
+	struct fp_dst *dst = get_dst(q, dst_id);
+	flow_inc_demand(q, dst_id, dst, 1);
+	release_dst(q, dst);
 }
 
 static struct tsq_ops fastpass_tsq_ops __read_mostly = {

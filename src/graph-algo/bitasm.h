@@ -21,8 +21,13 @@ void arr_unset_bit(uint64_t *arr, uint64_t index) {
 	asm("btr %1,%0" : "+m" (*(uint64_t *)arr) : "r" (index) : "cc", "memory");
 }
 
+/* when updating memory, make sure that index is within the allowed values
+ * not to overflow "word", or the optimizer could produce incorrect programs
+ * (i.e., the instruction does not clobber memory; use arr_unset_bit when index
+ *  can point outside "word")
+ */
 #define word_unset_bit(word, index) \
-	asm("btr %1,%0" : "+m" (word) : "r" (index) : "cc")
+	asm("btr %1,%0" : "+rm" (word) : "ir" (index) : "cc")
 
 
 #endif /* BITASM_H_ */

@@ -5,6 +5,7 @@
 #include <rte_errno.h>
 #include <rte_string_fns.h>
 #include <string.h>
+#include <math.h>
 
 #include "main.h"
 #include "admission_core_common.h"
@@ -22,6 +23,10 @@ struct admission_log admission_core_logs[RTE_MAX_LCORE];
 
 struct rte_ring *q_head;
 struct rte_ring *q_bin[2 * N_ADMISSION_CORES];
+
+#ifndef NSEC_PER_SEC
+#define NSEC_PER_SEC (1000*1000*1000)
+#endif
 
 void seq_admission_init_global(struct rte_ring *q_admitted_out)
 {
@@ -124,28 +129,32 @@ int exec_seq_admission_core(void *void_cmd_p)
 	int traffic_pool_socketid = 0;
 	int rc;
 	uint64_t start_time_first_timeslot;
+	/* calculate shift and mul for the rdtsc */
+	double tslot_len_seconds = ((double)(1 << TIMESLOT_SHIFT)) / ((double)TIMESLOT_MUL * NSEC_PER_SEC);
+    double tslot_len_rdtsc_cycles = tslot_len_seconds * rte_get_timer_hz();
+    uint32_t rdtsc_shift = (uint32_t)log(tslot_len_rdtsc_cycles) + 12;
+    uint32_t rdtsc_mul = ((double)(1 << rdtsc_shift)) / tslot_len_rdtsc_cycles;
+
+	printf("core %d rdtsc mul %u shift %u timer_hz %lu\n",
+			rte_lcore_id(), rdtsc_mul, rdtsc_shift, rte_get_timer_hz());
 
 	ADMISSION_DEBUG("core %d admission %d starting allocations\n",
 			rte_lcore_id(), core_ind);
 
 	/* do allocation loop */
 	while (1) {
-		if (0) {
-			/*** not a good idea in practice in its current form ***/
-			/* decide whether to skip timeslots */
-			uint64_t actual_timeslot = (fp_get_time_ns() * TIMESLOT_MUL) >> TIMESLOT_SHIFT;
-			uint64_t earliest_logical_timeslot = actual_timeslot - ALLOWED_TIMESLOT_LAG;
-			while (time_before64((__u64)logical_timeslot, (__u64)earliest_logical_timeslot)) {
-				logical_timeslot += BATCH_SIZE * N_ADMISSION_CORES;
-				admission_log_skipped_batch();
-			}
-		}
+		/* re-calibrate clock */
+		uint64_t real_time = fp_get_time_ns();
+		uint64_t rdtsc_time = rte_get_timer_cycles();
+		uint64_t real_tslot = (real_time * TIMESLOT_MUL) >> TIMESLOT_SHIFT;
+		uint64_t rdtsc_tslot = (rdtsc_time * rdtsc_mul) >> rdtsc_shift;
 
 		/* perform allocation */
 		admission_log_allocation_begin(logical_timeslot,
 				start_time_first_timeslot);
 		seq_get_admissible_traffic(&g_seq_admissible_status, core_ind,
-					   logical_timeslot, TIMESLOT_MUL, TIMESLOT_SHIFT);
+					   logical_timeslot + (rdtsc_tslot - real_tslot),
+					   rdtsc_mul, rdtsc_shift);
 		admission_log_allocation_end(logical_timeslot);
 
 		logical_timeslot += BATCH_SIZE * N_ADMISSION_CORES;

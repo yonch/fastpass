@@ -426,7 +426,6 @@ void seq_get_admissible_traffic(struct seq_admissible_status *status,
     // residual backlog from traffic admitted in this batch
     struct bin *bin_in, *bin_out;
     uint16_t bin = 0;
-    uint64_t prev_timeslot = ((fp_get_time_ns() * tslot_mul) >> tslot_shift) - 1;
     uint16_t processed_bins = 0;
     uint16_t admitted_bins = 0;
 	uint32_t i;
@@ -434,8 +433,10 @@ void seq_get_admissible_traffic(struct seq_admissible_status *status,
     uint64_t n_processed = 0;
 	int64_t slot_gap;
 #ifdef NO_DPDK
+    uint64_t prev_timeslot = first_timeslot - NUM_BINS - 2;
     uint64_t now_timeslot = first_timeslot - NUM_BINS - 1;
 #else
+    uint64_t prev_timeslot = ((fp_monotonic_time_ns() * tslot_mul) >> tslot_shift) - 1;
     uint64_t now_timeslot;
 #endif
 
@@ -455,7 +456,7 @@ void seq_get_admissible_traffic(struct seq_admissible_status *status,
 		for (i = 0; i < 10; i++)
 			process_new_requests(status, core, processed_bins - 1);
 #else
-    	now_timeslot = (fp_get_time_ns() * tslot_mul) >> tslot_shift;
+    	now_timeslot = (fp_monotonic_time_ns() * tslot_mul) >> tslot_shift;
 #endif
 
     	if (likely(now_timeslot == prev_timeslot))

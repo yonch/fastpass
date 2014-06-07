@@ -11,6 +11,7 @@
 #include "atomic.h"
 #include "admissible_algo_log.h"
 #include "../protocol/topology.h"
+#include "bitasm.h"
 
 #include <assert.h>
 
@@ -19,13 +20,14 @@
  *    n: the backlog for each pair
  */
 struct backlog {
-	atomic32_t n[MAX_NODES * MAX_NODES];
+	uint32_t n[MAX_NODES * MAX_NODES];
+	uint64_t is_active[(MAX_NODES * MAX_NODES + 63) / 64];
 };
 
 static void backlog_init(struct backlog *backlog) {
 	int i;
-    for (i = 0; i < MAX_NODES * MAX_NODES; i++)
-        atomic32_init(&backlog->n[i]);
+	memset(backlog->n, 0 , sizeof(backlog->n));
+	memset(backlog->is_active, 0, sizeof(backlog->is_active));
 }
 
 // Internal. Get the index of this flow in the status data structure
@@ -37,16 +39,16 @@ uint32_t _backlog_index(uint16_t src, uint16_t dst) {
 static inline __attribute__((always_inline))
 uint32_t backlog_get(struct backlog *backlog, uint16_t src, uint16_t dst) {
 	uint32_t index = _backlog_index(src, dst);
-	return atomic32_read(&backlog->n[index]);
+	return backlog->n[index];
 }
 
 /**
  * Decreases backlog for the (src,dst) pair by 1
  */
 static inline __attribute__((always_inline))
-uint32_t backlog_decrease(struct backlog *backlog, uint16_t src, uint16_t dst) {
+void backlog_non_active(struct backlog *backlog, uint16_t src, uint16_t dst) {
 	uint32_t index = _backlog_index(src, dst);
-	return atomic32_sub_return(&backlog->n[index], 1);
+	arr_unset_bit(backlog->is_active, index);
 }
 
 // Resets the flow for this src/dst pair
@@ -56,28 +58,7 @@ void backlog_reset_pair(struct backlog *backlog, uint16_t src,
 {
     assert(backlog != NULL);
 
-    atomic32_t *pair_backlog_ptr = &backlog->n[_backlog_index(src, dst)];
-
-    int32_t n = atomic32_read(pair_backlog_ptr);
-
-    if (n != 0) {
-        /*
-         * There is pending backlog. We want to reduce the backlog, but want to
-         *    keep the invariant that a flow is in a bin iff backlog != 0.
-         *
-         * This invariant can be broken if the allocator races to eliminate the
-         *    backlog completely while we are executing this code. So we test for
-         *    the race.
-         */
-    	if (atomic32_sub_return(pair_backlog_ptr, n + 1) == -(n+1))
-    		/* race happened, (backlog was 0 before sub) */
-    		atomic32_clear(pair_backlog_ptr);
-    	else
-    		/* now backlog is <=-1, it's so large that a race is unlikely */
-    		atomic32_set(pair_backlog_ptr, 1);
-    }
-
-    /* if backlog was 0, nothing to be done */
+    backlog->n[_backlog_index(src, dst)] = 0;
 }
 
 /**
@@ -93,19 +74,22 @@ static inline
 bool backlog_increase(struct backlog *backlog, uint16_t src,
         uint16_t dst, uint32_t amount, struct admission_statistics *stat)
 {
-	int32_t new_amount;
     assert(backlog != NULL);
+    assert(amount != 0);
 
     // Get full quantity from 16-bit LSB
     uint32_t index = _backlog_index(src, dst);
 
-    new_amount = atomic32_add_return(&backlog->n[index], amount);
-	if (new_amount == amount) {
-		adm_log_increased_backlog_to_queue(stat, amount, new_amount);
-		return true;
-	}
+    set_and_jmp_if_was_set(backlog->is_active, index, already_active);
 
-	adm_log_increased_backlog_atomically(stat, amount, new_amount);
+    assert(backlog->n[index] == 0);
+    adm_log_increased_backlog_to_queue(stat, amount, amount);
+	return true;
+
+already_active:
+	/* the new backlog will get enqueued as the current one is spent */
+	backlog->n[index] += amount;
+	adm_log_increased_backlog_atomically(stat, amount, backlog->n[index]);
 	return false;
 }
 

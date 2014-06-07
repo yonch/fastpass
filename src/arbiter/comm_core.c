@@ -1004,6 +1004,10 @@ void exec_comm_core(struct comm_core_cmd * cmd)
 		/* Process newly allocated timeslots */
 		process_allocated_traffic(core, cmd->q_allocated);
 
+		/* Process the spent demands, launching a new demand for demands where
+		 * backlog increased while the original demand was being allocated */
+		handle_spent_demands(g_admissible_status());
+
 		/* RX, retrans timers, and new traffic might push traffic into the
 		 * q_head buffer; flush it now. */
 		flush_backlog(g_admissible_status());

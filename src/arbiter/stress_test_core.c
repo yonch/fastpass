@@ -218,6 +218,10 @@ void exec_stress_test_core(struct stress_test_core_cmd * cmd,
 		/* Process newly allocated timeslots */
 		process_allocated_traffic(core, cmd->q_allocated);
 
+		/* Process the spent demands, launching a new demand for demands where
+		 * backlog increased while the original demand was being allocated */
+		handle_spent_demands(g_admissible_status());
+
 		/* flush q_head's buffer into q_head */
 		flush_backlog(g_admissible_status());
 

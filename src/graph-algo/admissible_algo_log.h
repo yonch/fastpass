@@ -36,10 +36,13 @@ struct admission_core_statistics {
 
 	uint64_t admitted_traffic_alloc_failed;
 	uint64_t wait_for_space_in_q_bin_out;
+	uint64_t wait_for_space_in_q_spent;
 	uint64_t wait_for_space_in_q_admitted_out;
 	uint64_t out_bin_alloc_failed;
 	uint64_t q_out_flush_bin_full;
 	uint64_t q_out_flush_batch_finished;
+	uint64_t q_spent_flush_bin_full;
+	uint64_t q_spent_flush_batch_finished;
 	uint64_t new_request_bins;
 	uint64_t new_requests;
 	uint64_t waiting_to_pass_token;
@@ -70,6 +73,9 @@ struct admission_statistics {
 	uint64_t backlog_sum_inc_to_queue;
 	uint64_t backlog_flush_forced;
 	uint64_t backlog_flush_bin_full;
+	/* spent demand handling */
+	uint64_t spent_bins;
+	uint64_t spent_demands;
 };
 
 /* GLOBAL STATS (in admissible_status) */
@@ -120,6 +126,15 @@ void adm_log_backlog_flush_bin_full(
 		struct admission_statistics *st) {
 	if (MAINTAIN_ADM_LOG_COUNTERS)
 		st->backlog_flush_bin_full++;
+}
+
+static inline __attribute__((always_inline))
+void adm_log_processed_spent_demands(
+		struct admission_statistics *st, int num_bins, uint32_t num_demands) {
+	if (MAINTAIN_ADM_LOG_COUNTERS) {
+		st->spent_bins += num_bins;
+		st->spent_demands += num_demands;
+	}
 }
 
 /* PER CORE STATS */
@@ -223,6 +238,13 @@ void adm_log_wait_for_space_in_q_bin_out(
 }
 
 static inline __attribute__((always_inline))
+void adm_log_wait_for_space_in_q_spent(
+		struct admission_core_statistics *st) {
+	if (MAINTAIN_ADM_LOG_COUNTERS)
+		st->wait_for_space_in_q_spent++;
+}
+
+static inline __attribute__((always_inline))
 void adm_log_wait_for_space_in_q_admitted_traffic(
 		struct admission_core_statistics *st) {
 	if (MAINTAIN_ADM_LOG_COUNTERS)
@@ -251,10 +273,24 @@ void adm_log_q_out_flush_bin_full(
 }
 
 static inline __attribute__((always_inline))
+void adm_log_q_spent_flush_bin_full(
+		struct admission_core_statistics *st) {
+	if (MAINTAIN_ADM_LOG_COUNTERS)
+		st->q_spent_flush_bin_full++;
+}
+
+static inline __attribute__((always_inline))
 void adm_log_q_out_flush_batch_finished(
 		struct admission_core_statistics *st) {
 	if (MAINTAIN_ADM_LOG_COUNTERS)
 		st->q_out_flush_batch_finished++;
+}
+
+static inline __attribute__((always_inline))
+void adm_log_q_spent_flush_batch_finished(
+		struct admission_core_statistics *st) {
+	if (MAINTAIN_ADM_LOG_COUNTERS)
+		st->q_spent_flush_batch_finished++;
 }
 
 static inline __attribute__((always_inline))

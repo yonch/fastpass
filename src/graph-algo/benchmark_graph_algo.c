@@ -69,7 +69,7 @@ uint32_t run_experiment(struct request_info *requests, uint32_t start_time, uint
         // Issue all new requests for this batch
         while ((current_request->timeslot >> BATCH_SHIFT) == (b % (65536 >> BATCH_SHIFT)) &&
                current_request < requests + num_requests) {
-            add_backlog(status, current_request->src, current_request->dst,
+        	add_backlog(status, current_request->src, current_request->dst,
                         current_request->backlog);
             current_request++;
         }
@@ -77,6 +77,7 @@ uint32_t run_experiment(struct request_info *requests, uint32_t start_time, uint
  
         // Get admissible traffic
         get_admissible_traffic(status, 0, 0, 1, 0);
+        handle_spent_demands(status);
 
         for (i = 0; i < ADMITTED_PER_BATCH; i++) {
         	/* get admitted traffic */
@@ -114,7 +115,6 @@ void run_admissible(struct request_info *requests, uint32_t start_time, uint32_t
     uint32_t admitted_index = BATCH_SIZE;  // already BATCH_SIZE admitted structs in admitted_batch
 
     assert(requests != NULL);
-    assert(status->q_bin[0]->tail == status->q_bin[0]->head + NUM_BINS);
 
     for (b = (start_time >> BATCH_SHIFT); b < (end_time >> BATCH_SHIFT); b++) {
         // Issue all new requests for this batch
@@ -128,11 +128,10 @@ void run_admissible(struct request_info *requests, uint32_t start_time, uint32_t
 
         // Get admissible traffic
         get_admissible_traffic(status, 0, 0, 1, 0);
+        handle_spent_demands(status);
     }
 
     *next_request = current_request;
-
-    assert(status->q_bin[0]->tail == status->q_bin[0]->head + NUM_BINS);
 }
 
 void print_usage(char **argv) {
@@ -223,15 +222,17 @@ int main(int argc, char **argv)
     struct fp_ring *q_bin;
     struct fp_ring *q_head;
     struct fp_ring *q_admitted_out;
+    struct fp_ring *q_spent;
     struct fp_mempool *bin_mempool;
     struct fp_mempool *admitted_traffic_mempool;
     struct fp_ring *q_new_demands[NUM_BIN_RINGS];
     struct fp_ring *q_ready_partitions[NUM_BIN_RINGS];
 
     /* init queues */
-    q_bin = fp_ring_create(2 * NUM_BINS_SHIFT);
+    q_bin = fp_ring_create(2 * FP_NODES_SHIFT);
     q_head = fp_ring_create(2 * FP_NODES_SHIFT);
     q_admitted_out = fp_ring_create(ADMITTED_OUT_RING_LOG_SIZE);
+    q_spent = fp_ring_create(2 * FP_NODES_SHIFT);
     bin_mempool = fp_mempool_create(BIN_MEMPOOL_SIZE, bin_num_bytes(SMALL_BIN_SIZE));
     admitted_traffic_mempool = fp_mempool_create(ADMITTED_TRAFFIC_MEMPOOL_SIZE,
     		sizeof(struct admitted_traffic));
@@ -244,12 +245,14 @@ int main(int argc, char **argv)
     if (!q_bin) exit(-1);
     if (!q_head) exit(-1);
     if (!q_admitted_out) exit(-1);
+    if (!q_spent) exit(-1);
     if (!bin_mempool) exit(-1);
     if (!admitted_traffic_mempool) exit(-1);
 
     /* init global status */
     status = create_admissible_state(false, 0, 0, 0, q_head, q_admitted_out,
-                                     bin_mempool, admitted_traffic_mempool,
+                                     q_spent, bin_mempool,
+                                     admitted_traffic_mempool,
                                      &q_bin, &q_new_demands[0],
                                      &q_ready_partitions[0]);
     if (status == NULL) {

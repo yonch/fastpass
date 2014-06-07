@@ -40,6 +40,7 @@ struct seq_admission_core_state {
 	struct batch_state batch_state;
     struct admitted_traffic *admitted[BATCH_SIZE];
     struct bin *out_bin;
+    struct bin *spent_bin;
     struct admission_core_statistics stat;
     uint64_t current_timeslot;
 }  __attribute__((aligned(64))) /* don't want sharing between cores */;
@@ -56,6 +57,7 @@ struct seq_admissible_status {
     struct bin *new_demands;
     struct fp_ring *q_head;
     struct fp_ring *q_admitted_out;
+    struct fp_ring *q_spent;
     struct fp_mempool *bin_mempool;
     struct fp_mempool *core_bin_mempool;
     struct fp_mempool *admitted_traffic_mempool;
@@ -120,6 +122,8 @@ void alloc_core_reset(struct seq_admission_core_state *core,
     /* out_demands should have been flushed out */
     assert(core->out_bin != NULL);
     assert(is_empty_bin(core->out_bin));
+    assert(core->spent_bin != NULL);
+    assert(is_empty_bin(core->spent_bin));
 }
 
 
@@ -145,6 +149,11 @@ static inline int alloc_core_init(struct seq_admissible_status *status,
 		 return -1;
 	init_bin(core->out_bin);
 
+	 if (fp_mempool_get(status->bin_mempool,
+			 (void**)&core->spent_bin) != 0)
+		 return -1;
+	init_bin(core->spent_bin);
+
 	core->current_timeslot = timeslot;
 
 	return 0;
@@ -158,6 +167,7 @@ int seq_init_admissible_status(struct seq_admissible_status *status,
                                bool oversubscribed, uint16_t inter_rack_capacity,
                                uint16_t out_of_boundary_capacity, uint16_t num_nodes,
                                struct fp_ring *q_head, struct fp_ring *q_admitted_out,
+                               struct fp_ring *q_spent,
                                struct fp_mempool *bin_mempool,
                                struct fp_mempool *admitted_traffic_mempool,
                                struct fp_ring **q_bin)
@@ -171,6 +181,7 @@ int seq_init_admissible_status(struct seq_admissible_status *status,
 
     status->q_head = q_head;
     status->q_admitted_out = q_admitted_out;
+    status->q_spent = q_spent;
     status->bin_mempool = bin_mempool;
     status->admitted_traffic_mempool = admitted_traffic_mempool;
 
@@ -195,6 +206,7 @@ struct seq_admissible_status *
 seq_create_admissible_status(bool oversubscribed, uint16_t inter_rack_capacity,
                              uint16_t out_of_boundary_capacity, uint16_t num_nodes,
                              struct fp_ring *q_head, struct fp_ring *q_admitted_out,
+                             struct fp_ring *q_spent,
                              struct fp_mempool *head_bin_mempool,
                              struct fp_mempool *admitted_traffic_mempool,
                              struct fp_ring **q_bin)
@@ -207,7 +219,7 @@ seq_create_admissible_status(bool oversubscribed, uint16_t inter_rack_capacity,
 
     seq_init_admissible_status(status, oversubscribed, inter_rack_capacity,
                                out_of_boundary_capacity, num_nodes, q_head,
-                               q_admitted_out, head_bin_mempool,
+                               q_admitted_out, q_spent, head_bin_mempool,
                                admitted_traffic_mempool, q_bin);
 
     return status;

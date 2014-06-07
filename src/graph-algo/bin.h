@@ -14,6 +14,7 @@
 struct backlog_edge {
     uint16_t src;
     uint16_t dst;
+    uint16_t backlog;
     uint32_t metric;
 };
 
@@ -38,11 +39,13 @@ bool is_empty_bin(struct bin *bin) {
 
 // Insert new edge to the back of this bin
 static inline __attribute__((always_inline))
-void enqueue_bin(struct bin *bin, uint16_t src, uint16_t dst, uint32_t metric) {
+void enqueue_bin(struct bin *bin, uint16_t src, uint16_t dst, uint16_t backlog,
+		uint32_t metric) {
     assert(bin != NULL);
     uint32_t n = bin->size++;
     bin->edges[n].src = src;
     bin->edges[n].dst = dst;
+    bin->edges[n].backlog = backlog;
     bin->edges[n].metric = metric;
 }
 

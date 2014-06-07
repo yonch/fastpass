@@ -29,6 +29,9 @@ void seq_get_admissible_traffic(struct seq_admissible_status *status,
 // Reset state of all flows for which src is the sender
 void seq_reset_sender(struct seq_admissible_status *status, uint16_t src);
 
+// Handles spent demands reported by get_admissible_traffic
+void seq_handle_spent(struct seq_admissible_status *status);
+
 /**
  * Returns the bin index a flow last allocated at timeslot @last_allocated
  *   should fit in, when allocating a batch that starts with @current_timeslot

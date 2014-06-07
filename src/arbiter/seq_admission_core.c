@@ -28,6 +28,7 @@ void seq_admission_init_global(struct rte_ring *q_admitted_out)
 	int i;
 	char s[64];
 	struct rte_ring *q_head;
+    struct fp_ring *q_spent;
 	struct rte_mempool *bin_mempool;
 
 	/* init q_head */
@@ -35,6 +36,12 @@ void seq_admission_init_global(struct rte_ring *q_admitted_out)
 	if (q_head == NULL)
 		rte_exit(EXIT_FAILURE,
 				"Cannot init q_head: %s\n", rte_strerror(rte_errno));
+
+	/* init q_spent */
+	q_spent = rte_ring_create("q_spent", Q_SPENT_RING_SIZE, 0, 0);
+	if (q_spent == NULL)
+		rte_exit(EXIT_FAILURE,
+				"Cannot init q_spent: %s\n", rte_strerror(rte_errno));
 
 	/* allocate head_bin_mempool */
 	uint32_t pool_index = 0;
@@ -92,7 +99,7 @@ void seq_admission_init_global(struct rte_ring *q_admitted_out)
 	/* init admissible_status */
 	seq_init_admissible_status(&g_seq_admissible_status, OVERSUBSCRIBED,
 				   INTER_RACK_CAPACITY, OUT_OF_BOUNDARY_CAPACITY,
-				   NUM_NODES, q_head, q_admitted_out, bin_mempool,
+				   NUM_NODES, q_head, q_admitted_out, q_spent, bin_mempool,
 				   admitted_traffic_pool[0], &q_bin[0]);
 
 }

@@ -28,6 +28,40 @@
 #define TIMESLOT_SHIFT_PER_PRIORITY		1
 #define TIMESLOTS_START_BEFORE			((BATCH_SIZE + NUM_BINS) << TIMESLOT_SHIFT_PER_PRIORITY)
 
+#define SPENT_RING_DEQUEUE_SIZE		256
+
+/**
+ * Flushes bin to queue, and allocates a new bin
+ */
+static inline __attribute__((always_inline))
+void core_flush_q_spent(struct seq_admission_core_state *core,
+		struct fp_ring *queue, struct fp_mempool *bin_mempool)
+{
+	/* enqueue status->new_backlogs */
+	while(fp_ring_enqueue(queue, core->spent_bin) == -ENOBUFS)
+		adm_log_wait_for_space_in_q_spent(&core->stat);
+
+	/* get a fresh bin for status->new_backlogs */
+	while(fp_mempool_get(bin_mempool, (void**)&core->spent_bin) == -ENOENT)
+		adm_log_out_bin_alloc_failed(&core->stat);
+
+	init_bin(core->spent_bin);
+}
+
+static inline __attribute__((always_inline))
+void core_enqueue_to_q_spent(struct seq_admission_core_state *core,
+		struct fp_ring *queue_spent, struct fp_mempool *bin_mempool,
+		uint16_t src, uint16_t dst, uint32_t metric)
+{
+	/* add to status->new_demands */
+	enqueue_bin(core->spent_bin, src, dst, 0, metric);
+
+	if (unlikely(bin_size(core->spent_bin) == SMALL_BIN_SIZE)) {
+		adm_log_q_spent_flush_bin_full(&core->stat);
+		core_flush_q_spent(core, queue_spent, bin_mempool);
+	}
+}
+
 /**
  * Flushes bin to queue, and allocates a new bin
  */
@@ -49,10 +83,10 @@ void core_flush_q_out(struct seq_admission_core_state *core,
 static inline __attribute__((always_inline))
 void core_enqueue_to_q_out(struct seq_admission_core_state *core,
 		struct fp_ring *queue_out, struct fp_mempool *bin_mempool,
-		uint16_t src, uint16_t dst, uint32_t metric)
+		uint16_t src, uint16_t dst, uint16_t backlog, uint32_t metric)
 {
 	/* add to status->new_demands */
-	enqueue_bin(core->out_bin, src, dst, metric);
+	enqueue_bin(core->out_bin, src, dst, backlog, metric);
 
 	if (unlikely(bin_size(core->out_bin) == SMALL_BIN_SIZE)) {
 		adm_log_q_out_flush_bin_full(&core->stat);
@@ -100,6 +134,19 @@ void seq_flush_backlog(struct seq_admissible_status *status) {
 	_flush_backlog_now(status);
 }
 
+void enqueue_new_demand(struct seq_admissible_status* status, uint16_t src,
+		uint16_t dst, uint32_t amount)
+{
+	/* add to status->new_demands */
+	enqueue_bin(status->new_demands, src, dst, amount,
+			status->last_alloc_tslot[get_status_index(src, dst)]);
+
+	if (unlikely(bin_size(status->new_demands) == SMALL_BIN_SIZE)) {
+		adm_log_backlog_flush_bin_full(&status->stat);
+		_flush_backlog_now(status);
+	}
+}
+
 void seq_add_backlog(struct seq_admissible_status *status,
 		uint16_t src, uint16_t dst, uint32_t amount)
 {
@@ -108,14 +155,41 @@ void seq_add_backlog(struct seq_admissible_status *status,
 		return; /* no need to enqueue */
 
 	/* add to status->new_demands */
-	enqueue_bin(status->new_demands, src, dst,
-			status->last_alloc_tslot[get_status_index(src,dst)]);
+	enqueue_new_demand(status, src, dst, amount);
+}
 
-	if (unlikely(bin_size(status->new_demands) == SMALL_BIN_SIZE)) {
-		adm_log_backlog_flush_bin_full(&status->stat);
-		_flush_backlog_now(status);
-	}
+void seq_handle_spent(struct seq_admissible_status *status)
+{
+    assert(status != NULL);
 
+    struct bin *bins[SPENT_RING_DEQUEUE_SIZE];
+    int n, bin, i;
+    uint32_t num_entries = 0;
+    uint32_t num_bins = 0;
+
+    n = fp_ring_dequeue_burst(status->q_spent, (void **)&bins[0],
+    		SPENT_RING_DEQUEUE_SIZE);
+
+    for (bin = 0; bin < n; bin++) {
+    	num_entries += bin_size(bins[bin]);
+    	num_bins++;
+    	for (i = 0; i < bin_size(bins[bin]); i++) {
+    		struct backlog_edge *edge = bin_get(bins[bin], i);
+    		uint16_t src = edge->src;
+    		uint16_t dst = edge->dst;
+    		uint32_t backlog = backlog_get(&status->backlog, src, dst);
+
+    		if (backlog == 0) {
+    			status->last_alloc_tslot[get_status_index(src, dst)] = edge->metric;
+    			backlog_non_active(&status->backlog, src, dst);
+    		} else {
+    			backlog_reset_pair(&status->backlog, src, dst);
+    			enqueue_new_demand(status, src, dst, backlog);
+    		}
+    	}
+		fp_mempool_put(status->bin_mempool, bins[bin]);
+    }
+    adm_log_processed_spent_demands(&status->stat, num_bins, num_entries);
 }
 
 static inline __attribute__((always_inline))
@@ -181,11 +255,11 @@ void move_core_to_q_out(struct seq_admissible_status *status,
  * 		   true, if more backlog remains and should be handled by the caller
  */
 static inline __attribute__((always_inline))
-bool try_allocation(uint16_t src, uint16_t dst, uint32_t metric,
-		struct seq_admission_core_state *core,
+bool try_allocation(uint16_t src, uint16_t dst, uint16_t backlog,
+		uint32_t metric, struct seq_admission_core_state *core,
 		struct seq_admissible_status *status)
 {
-	int32_t backlog;
+
     assert(core != NULL);
     assert(status != NULL);
 
@@ -202,21 +276,22 @@ bool try_allocation(uint16_t src, uint16_t dst, uint32_t metric,
 	asm("bsfq %1,%0" : "=r"(batch_timeslot) : "r"(timeslot_bitmap));
 
 	// We can allocate this edge now
+	backlog--;
 	batch_state_set_occupied(&core->batch_state, src, dst, batch_timeslot);
 	metric = new_metric_after_alloc(src, dst, metric, batch_timeslot, core, status);
 
 	insert_admitted_edge(core->admitted[batch_timeslot], src, dst);
 
-	backlog = backlog_decrease(&status->backlog, src, dst);
 	if (backlog != 0) {
     	adm_log_allocated_backlog_remaining(&core->stat, src, dst, backlog);
     	uint16_t bin_index = bin_after_alloc(src, dst, metric, batch_timeslot,
     			core, status);
-		enqueue_bin(core->new_request_bins[bin_index], src, dst, metric);
+		enqueue_bin(core->new_request_bins[bin_index], src, dst, backlog, metric);
 		set_bin_non_empty(core, bin_index);
 	} else {
 		adm_log_allocator_no_backlog(&core->stat, src, dst);
-		status->last_alloc_tslot[get_status_index(src, dst)] = metric;
+		core_enqueue_to_q_spent(core, status->q_spent, status->bin_mempool,
+				src, dst, metric);
 	}
 
 	return false;
@@ -235,13 +310,14 @@ void try_allocation_bin(struct seq_admission_core_state *core, uint64_t bin_inde
     for (i = 0; i < n_elem; i++) {
 		uint16_t src = bin_get(bin,i)->src;
 		uint16_t dst = bin_get(bin,i)->dst;
+		uint32_t backlog = bin_get(bin, i)->backlog;
 		uint32_t metric = bin_get(bin, i)->metric;
 
-        rc = try_allocation(src, dst, metric, core, status);
+        rc = try_allocation(src, dst, backlog, metric, core, status);
         if (rc == true) {
 			// We cannot allocate this edge now - copy to queue_out
 			core_enqueue_to_q_out(core, queue_out, bin_mp_out,
-					src, dst, metric);
+					src, dst, backlog, metric);
         }
     }
 }
@@ -332,8 +408,10 @@ void seq_get_admissible_traffic(struct seq_admissible_status *status,
 
     struct fp_ring *queue_in = status->q_bin[core_index];
     struct fp_ring *queue_out = status->q_bin[(core_index + 1) % ALGO_N_CORES];
+    struct fp_ring *queue_spent = status->q_spent;
     struct fp_mempool *bin_mp_in = status->bin_mempool;
     struct fp_mempool *bin_mp_out = status->bin_mempool;
+    struct fp_mempool *bin_mp_spent = status->bin_mempool;
     int32_t n;
 
     // Initialize this core for a new batch of processing
@@ -341,6 +419,8 @@ void seq_get_admissible_traffic(struct seq_admissible_status *status,
 
     assert(core->out_bin != NULL);
     assert(is_empty_bin(core->out_bin));
+    assert(core->spent_bin != NULL);
+    assert(is_empty_bin(core->spent_bin));
 
     // Process all bins from previous core, then process all bins from
     // residual backlog from traffic admitted in this batch
@@ -454,6 +534,11 @@ wrap_up:
 	if (!is_empty_bin(core->out_bin)) {
 		adm_log_q_out_flush_batch_finished(&core->stat);
 		core_flush_q_out(core, queue_out, bin_mp_out);
+	}
+	/* flush q_spent if there is more there */
+	if (!is_empty_bin(core->spent_bin)) {
+		adm_log_q_spent_flush_batch_finished(&core->stat);
+		core_flush_q_spent(core, queue_spent, bin_mp_spent);
 	}
 
 	/* get unhandled bins, for handing off to next core */

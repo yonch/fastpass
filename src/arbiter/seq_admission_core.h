@@ -19,6 +19,7 @@
 
 #define		Q_BIN_RING_SIZE						(32 * NUM_BINS)
 #define		Q_HEAD_RING_SIZE		(64 * 1024)
+#define		Q_SPENT_RING_SIZE		(64 * 1024)
 #define		URGENT_RING_SIZE		(64 * 1024)
 
 /* admissible status */

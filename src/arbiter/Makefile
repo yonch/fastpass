@@ -8,7 +8,6 @@ APP = fast
 SRCS-y := main.c \
           control.c \
           comm_core.c \
-          pim_admission_core.c \
           seq_admission_core.c \
           path_sel_core.c \
           log_core.c \
@@ -17,7 +16,9 @@ SRCS-y := main.c \
           ../graph-algo/admissible_traffic.c \
           ../graph-algo/path_selection.c \
           ../graph-algo/euler_split.c \
-          ../grant-accept/pim.c
+
+#          pim_admission_core.c \
+#          ../grant-accept/pim.c
 
 CFLAGS += -O3 
 #CFLAGS += $(WERROR_FLAGS)

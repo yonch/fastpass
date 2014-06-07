@@ -137,6 +137,9 @@ void exec_stress_test_core(struct stress_test_core_cmd * cmd,
 	now = rte_get_timer_cycles();
 	next_rate_increase_time = now;
 
+	init_request_generator(&gen, next_mean_t_btwn_requests,
+						now, cmd->num_nodes);
+
 	/* MAIN LOOP */
 	while (now < cmd->end_time) {
 		uint32_t n_processed_requests = 0;
@@ -185,7 +188,7 @@ void exec_stress_test_core(struct stress_test_core_cmd * cmd,
                 if (re_init_gen) {
                         /* reinitialize the request generator */
                         comm_log_mean_t(next_mean_t_btwn_requests);
-			init_request_generator(&gen, next_mean_t_btwn_requests,
+			reinit_request_generator(&gen, next_mean_t_btwn_requests,
 					now, cmd->num_nodes);
 			get_next_request(&gen, &next_request);
 

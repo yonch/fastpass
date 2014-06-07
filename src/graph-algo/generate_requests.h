@@ -12,11 +12,22 @@
 #include <math.h>
 #include <stdlib.h>
 
+/**
+ * Used Numerical Recipes
+ * http://en.wikipedia.org/wiki/Linear_congruential_generator
+ */
+#define REQ_GEN_RAND_A		1664525
+#define REQ_GEN_RAND_C		1013904223
+
+#define REQ_GEN_LOG_TABLE_SIZE		(1 << 12)
+
 // Stores info needed to generate a stream of requests on demand
 struct request_generator {
     double mean_t_btwn_requests;  // mean t for all requests
     double last_request_t;
     uint16_t num_nodes;
+    uint32_t rand_state;
+    double exp_dist_table[REQ_GEN_LOG_TABLE_SIZE];
 };
 
 // Info about a request generated as part of a stream on demand
@@ -34,6 +45,16 @@ struct request_info {
     uint16_t timeslot;
 };
 
+static inline
+void reinit_request_generator(struct request_generator* gen,
+		double mean_t_btwn_requests, double start_time, uint16_t num_nodes)
+{
+	assert(gen != NULL);
+
+	gen->mean_t_btwn_requests = mean_t_btwn_requests / num_nodes;
+	gen->last_request_t = start_time;
+	gen->num_nodes = num_nodes;
+}
 
 // Initialize a request_generator, to enable generation of a stream
 // of requests. Each sender generates a new request with a mean inter-arrival
@@ -42,22 +63,31 @@ static inline
 void init_request_generator(struct request_generator *gen,
                             double mean_t_btwn_requests,
                             double start_time, uint16_t num_nodes) {
-    assert(gen != NULL);
+    int i;
 
-    gen->mean_t_btwn_requests = mean_t_btwn_requests / num_nodes;
-    gen->last_request_t = start_time;
-    gen->num_nodes = num_nodes;
+	reinit_request_generator(gen, mean_t_btwn_requests, start_time, num_nodes);
+
+	gen->rand_state = rand();
+
+	// Based on a method suggested by wikipedia
+	// http://en.wikipedia.org/wiki/Exponential_distribution
+	for (i = 0; i < REQ_GEN_LOG_TABLE_SIZE; i++) {
+    	  double u = rand() / ((double) RAND_MAX);
+    	  gen->exp_dist_table[i] =  -log(u);
+    }
 }
 
-// Based on a method suggested by wikipedia
-// http://en.wikipedia.org/wiki/Exponential_distribution
 static inline
-double generate_exponential_variate(double mean_t_btwn_requests)
+double generate_exponential_variate(struct request_generator *gen,
+		double mean_t_btwn_requests)
 {
+	uint32_t table_index;
   assert(mean_t_btwn_requests > 0);
 
-  double u = rand() / ((double) RAND_MAX);
-  return -log(u) * mean_t_btwn_requests;
+  table_index = ((gen->rand_state >> 16) * REQ_GEN_LOG_TABLE_SIZE) >> 16;
+  gen->rand_state = gen->rand_state * REQ_GEN_RAND_A + REQ_GEN_RAND_C;
+
+  return gen->exp_dist_table[table_index] * mean_t_btwn_requests;
 }
 
 // Populate a request with info about the next request
@@ -66,12 +96,14 @@ void get_next_request(struct request_generator *gen, struct request *req) {
     assert(gen != NULL);
     assert(req != NULL);
 
-    double inter_arrival_t = generate_exponential_variate(gen->mean_t_btwn_requests);
+    double inter_arrival_t = generate_exponential_variate(gen, gen->mean_t_btwn_requests);
     req->time = gen->last_request_t + inter_arrival_t;
     gen->last_request_t = req->time;
 
-    req->src = rand() / ((double) RAND_MAX) * gen->num_nodes;
-    req->dst = rand() / ((double) RAND_MAX) * (gen->num_nodes - 1);
+    req->src = ((gen->rand_state >> 16) * gen->num_nodes) >> 16;
+    gen->rand_state = gen->rand_state * REQ_GEN_RAND_A + REQ_GEN_RAND_C;
+    req->dst = ((gen->rand_state >> 16) * (gen->num_nodes - 1)) >> 16;
+    gen->rand_state = gen->rand_state * REQ_GEN_RAND_A + REQ_GEN_RAND_C;
     if (req->dst >= req->src)
         req->dst++;  // Don't send to self
 }
@@ -136,7 +168,7 @@ uint32_t generate_requests_poisson(struct request_info *edges, uint32_t size,
     double fractional_demand = 0;
     while (current_time < duration) {
         get_next_request(&gen, &req);
-        double new_demand = generate_exponential_variate(mean);
+        double new_demand = generate_exponential_variate(&gen, mean);
         current_time = req.time;
         if (new_demand + fractional_demand < 1) {
             fractional_demand += new_demand;

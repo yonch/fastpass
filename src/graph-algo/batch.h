@@ -12,6 +12,8 @@
 
 #include <assert.h>
 
+#include "bitasm.h"
+
 #ifndef BATCH_SIZE
 #define BATCH_SIZE 16  // must be consistent with bitmaps in batch_state
 #endif
@@ -120,8 +122,7 @@ void batch_state_set_occupied(struct batch_state *state, uint16_t src,
     assert(dst < MAX_DSTS);
     assert(timeslot <= BATCH_SIZE);
 
-    state->src_endnodes[BITMASK_WORD(src)] &=
-    		~(0x1ULL << (timeslot + BITMASK_SHIFT(src)));
+    word_unset_bit(state->src_endnodes[BITMASK_WORD(src)], (timeslot + BITMASK_SHIFT(src)));
 
     if (dst == OUT_OF_BOUNDARY_NODE_ID) {
         // destination is outside of scheduling boundary

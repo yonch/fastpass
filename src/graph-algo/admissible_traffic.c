@@ -272,12 +272,19 @@ bool try_allocation(uint16_t src, uint16_t dst, uint16_t backlog,
     	return true;
     }
 
-	uint64_t batch_timeslot;
+	/* batch_timeslot will contain the index of the first set bit in
+	 * timeslot_bitmap, or its value is undefined if timeslot_bitmap == 0 */
+    uint64_t batch_timeslot;
 	asm("bsfq %1,%0" : "=r"(batch_timeslot) : "r"(timeslot_bitmap));
+	batch_timeslot &= ((1 << BATCH_SHIFT) - 1); /* make sure batch_timeslot is in a sane range */
+
+	/* set_bit will contain the first set bit in timeslot_bitmap if one exists,
+	 * or 0 if timeslot_bitmap == 0 */
+	uint64_t set_bit = timeslot_bitmap & (-timeslot_bitmap);
 
 	// We can allocate this edge now
 	backlog--;
-	batch_state_set_occupied(&core->batch_state, src, dst, batch_timeslot);
+	batch_state_set_occupied_conditional(&core->batch_state, src, dst, batch_timeslot, set_bit);
 	metric = new_metric_after_alloc(src, dst, metric, batch_timeslot, core, status);
 
 	insert_admitted_edge(core->admitted[batch_timeslot], src, dst);

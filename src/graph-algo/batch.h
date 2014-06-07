@@ -113,28 +113,34 @@ uint64_t batch_state_get_avail_bitmap(struct batch_state *state,
     return endnode_bitmap;
 }
 
-// Sets a timeslot as occupied for src and dst
+// Sets a timeslot as occupied for src and dst, only if set_bit != 0.
+// assumes if set_bit != 0 then set_bit = (1 << timeslot).
 static inline __attribute__((always_inline))
-void batch_state_set_occupied(struct batch_state *state, uint16_t src,
-                           uint16_t dst, uint8_t timeslot) {
+void batch_state_set_occupied_conditional(struct batch_state *state, uint16_t src,
+                           uint16_t dst, uint8_t timeslot, uint64_t set_bitmask)
+{
     assert(state != NULL);
     assert(src < MAX_SRCS);
     assert(dst < MAX_DSTS);
     assert(timeslot <= BATCH_SIZE);
 
-    word_unset_bit(state->src_endnodes[BITMASK_WORD(src)], (timeslot + BITMASK_SHIFT(src)));
+	uint64_t is_out_of_boundary = -(dst == OUT_OF_BOUNDARY_NODE_ID);
+	uint64_t is_set = -(set_bitmask != 0);
 
-    if (dst == OUT_OF_BOUNDARY_NODE_ID) {
-        // destination is outside of scheduling boundary
-        state->out_of_boundary_counts[timeslot]--;
-        if (state->out_of_boundary_counts[timeslot] == 0)
-            state->dst_endnodes[dst] = state->dst_endnodes[dst] & ~(0x1ULL << timeslot);
-    }
-    else
-        state->dst_endnodes[BITMASK_WORD(dst)] &=
-        		~(0x1ULL << (timeslot + BITMASK_SHIFT(dst)));
+    state->src_endnodes[BITMASK_WORD(src)] ^= (set_bitmask << BITMASK_SHIFT(src));
 
-    if (SUPPORTS_OVERSUBSCRIPTION && state->oversubscribed) {
+    /* if out of boundary, decrease the boundary count */
+    state->out_of_boundary_counts[timeslot] += (is_out_of_boundary & is_set);
+
+    /* should the destination bitmask be flipped? */
+    /* flip_mask will be ~0uLL if destination bit should be flipped */
+    uint64_t flip_mask = (   is_out_of_boundary
+    					 | -(state->out_of_boundary_counts[timeslot] == 0));
+
+    state->dst_endnodes[BITMASK_WORD(dst)] ^=
+    		((set_bitmask & flip_mask) << BITMASK_SHIFT(dst));
+
+    if (SUPPORTS_OVERSUBSCRIPTION && state->oversubscribed && is_set) {
         uint16_t src_rack = fp_rack_from_node_id(src);
         state->src_rack_counts[BATCH_SIZE * src_rack + timeslot] -= 1;
         if (state->src_rack_counts[BATCH_SIZE * src_rack + timeslot] == 0)

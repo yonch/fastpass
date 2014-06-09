@@ -6,7 +6,7 @@
 # portions of the fairness experiment.
 #
 # This script can be run using:
-# R < ./graph_fairness_std_dev.R --save
+# R < ./graph_fairness_throughput_cdf.R --save
 
 ## Based on: http://www.cookbook-r.com/Manipulating_data/Summarizing_data/
 ## Summarizes data.
@@ -65,9 +65,9 @@ library(ggplot2)
 args <- commandArgs()
 bin_size_ns = as.integer(args[2])
 
-data_fp <- read.csv("fairness_properties_fastpass.csv", sep=",")
+data_fp <- read.csv("fairness_throughput_fastpass.csv", sep=",")
 data_fp$experiment = "fastpass"
-data_baseline <- read.csv("fairness_properties_baseline.csv", sep=",")
+data_baseline <- read.csv("fairness_throughput_baseline.csv", sep=",")
 data_baseline$experiment = "baseline"
 
 theme_set(theme_bw(base_size=12))
@@ -79,22 +79,7 @@ data_baseline$gbps = data_baseline$bytes * BITS_PER_BYTE / ( bin_size_ns )
 df <- rbind(data_fp, data_baseline)
 
 # call device driver
-pdf(file="bytes_per_bin_cdf.pdf", width=10, height=5)
+pdf(file="fairness_throughput_cdf.pdf", width=10, height=5)
 
 # plot
 ggplot(df, aes(gbps, color=active_flows, linetype=experiment)) + stat_ecdf()
-
-
-# call device driver
-pdf(file="bytes_per_bin_std_dev.pdf", width=10, height=5)
-
-summary_fp <- summarySE(data_fp, measurevar="gbps", groupvars=c("active_flows", "experiment"))
-summary_baseline <- summarySE(data_baseline, measurevar="gbps", groupvars=c("active_flows", "experiment"))
-summary_all <- summarySE(df, measurevar="gbps", groupvars=c("active_flows", "experiment"))
-
-summary_both = data.frame(summary_fp, summary_baseline)
-summary_both$factor = summary_both$sd.1 / summary_both$sd
-
-summary_both
-
-ggplot(summary_all, aes(x=active_flows, y=sd, color=active_flows, shape=experiment)) + geom_point()

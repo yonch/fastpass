@@ -29,6 +29,8 @@ elif [ "$TOTAL_NUM_CORES" -eq 6 ]; then
     CPU_MASK=7e
 elif [ "$TOTAL_NUM_CORES" -eq 10 ]; then
     CPU_MASK=7fe
+elif [ "$TOTAL_NUM_CORES" -eq 18 ]; then
+    CPU_MASK=7fffe
 else
     echo "num cores $TOTAL_NUM_CORES ($ALGO_N_CORES algo cores) not supported"
     exit 0
@@ -52,15 +54,7 @@ $MAKE clean
 $MAKE CMD_LINE_CFLAGS+=-DALGO_N_CORES=$ALGO_N_CORES CMD_LINE_CFLAGS+=-DBATCH_SIZE=$BATCH_SIZE CMD_LINE_CFLAGS+=-DBATCH_SHIFT=$BATCH_SHIFT -j9
 
 # shield cpus appropriately
-if [ "$TOTAL_NUM_CORES" -eq 3 ]; then
-    sudo cset shield -c 1-3
-elif [ "$TOTAL_NUM_CORES" -eq 4 ]; then
-    sudo cset shield -c 1-4
-elif [ "$TOTAL_NUM_CORES" -eq 6 ]; then
-    sudo cset shield -c 1-6
-elif [ "$TOTAL_NUM_CORES" -eq 10 ]; then
-    sudo cset shield -c 1-10
-fi
+sudo cset shield -c 1-$TOTAL_NUM_CORES
 
 # run
 sudo cset shield -e -- ./run.sh $CPU_MASK

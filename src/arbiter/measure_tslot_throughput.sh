@@ -16,8 +16,8 @@ mkdir $DIR
 echo `git rev-list --max-count=1 HEAD` > $DIR/info.txt
 
 # run the experiment for different sets of parameters
-algo_n_cores=( 8 2 4 1 )
-batch_size=( 32 8 16 )
+algo_n_cores=( 8 2 4 1 6 )
+batch_size=( 8 16 4 1 2 32 )
 
 for batch in "${batch_size[@]}"
 do

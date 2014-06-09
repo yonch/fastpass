@@ -27,6 +27,8 @@ struct request_generator {
     double last_request_t;
     uint16_t num_nodes;
     uint32_t rand_state;
+    double fractional_demand;
+    double mean_request_size;
     double exp_dist_table[REQ_GEN_LOG_TABLE_SIZE];
 };
 
@@ -34,6 +36,7 @@ struct request_generator {
 struct request {
     uint16_t src;
     uint16_t dst;
+    uint16_t backlog;
     double time;
 };
 
@@ -47,13 +50,16 @@ struct request_info {
 
 static inline
 void reinit_request_generator(struct request_generator* gen,
-		double mean_t_btwn_requests, double start_time, uint16_t num_nodes)
+		double mean_t_btwn_requests, double start_time, uint16_t num_nodes,
+		double mean_request_size)
 {
 	assert(gen != NULL);
 
 	gen->mean_t_btwn_requests = mean_t_btwn_requests / num_nodes;
 	gen->last_request_t = start_time;
 	gen->num_nodes = num_nodes;
+	gen->fractional_demand = 0.0;
+	gen->mean_request_size = mean_request_size;
 }
 
 // Initialize a request_generator, to enable generation of a stream
@@ -62,10 +68,12 @@ void reinit_request_generator(struct request_generator* gen,
 static inline
 void init_request_generator(struct request_generator *gen,
                             double mean_t_btwn_requests,
-                            double start_time, uint16_t num_nodes) {
+                            double start_time, uint16_t num_nodes,
+                            double mean_request_size) {
     int i;
 
-	reinit_request_generator(gen, mean_t_btwn_requests, start_time, num_nodes);
+	reinit_request_generator(gen, mean_t_btwn_requests, start_time, num_nodes,
+			mean_request_size);
 
 	gen->rand_state = rand();
 
@@ -96,9 +104,18 @@ void get_next_request(struct request_generator *gen, struct request *req) {
     assert(gen != NULL);
     assert(req != NULL);
 
-    double inter_arrival_t = generate_exponential_variate(gen, gen->mean_t_btwn_requests);
+    double inter_arrival_t = 0.0;
+    double new_demand = gen->fractional_demand;
+
+    do {
+    	inter_arrival_t += generate_exponential_variate(gen, gen->mean_t_btwn_requests);
+    	new_demand += generate_exponential_variate(gen, gen->mean_request_size);
+    } while ((uint16_t)new_demand < 1);
+
     req->time = gen->last_request_t + inter_arrival_t;
     gen->last_request_t = req->time;
+    req->backlog = (uint16_t)new_demand;
+    gen->fractional_demand = new_demand - (uint16_t)new_demand;
 
     req->src = ((gen->rand_state >> 16) * gen->num_nodes) >> 16;
     gen->rand_state = gen->rand_state * REQ_GEN_RAND_A + REQ_GEN_RAND_C;
@@ -134,12 +151,14 @@ void destroy_request(struct request *req) {
 static inline
 struct request_generator *create_request_generator(double mean_t_btwn_requests,
                                                    double start_time,
-                                                   uint16_t num_nodes) {
+                                                   uint16_t num_nodes,
+                                                   double mean_request_size) {
     struct request_generator *gen = malloc(sizeof(struct request_generator));
     if (gen == NULL)
         return NULL;
 
-    init_request_generator(gen, mean_t_btwn_requests, start_time, num_nodes);
+    init_request_generator(gen, mean_t_btwn_requests, start_time, num_nodes,
+    		mean_request_size);
 
     return gen;
 }
@@ -160,31 +179,23 @@ uint32_t generate_requests_poisson(struct request_info *edges, uint32_t size,
     // Convert mean from micros to nanos
     struct request_generator gen;
     struct request req;
-    init_request_generator(&gen, mean / fraction, 0, num_nodes);
+    init_request_generator(&gen, mean / fraction, 0, num_nodes, mean);
 
     struct request_info *current_edge = edges;
     uint32_t num_generated = 0;
-    double current_time = 0;
-    double fractional_demand = 0;
+    double current_time = 0.0;
     while (current_time < duration) {
         get_next_request(&gen, &req);
-        double new_demand = generate_exponential_variate(&gen, mean);
-        current_time = req.time;
-        if (new_demand + fractional_demand < 1) {
-            fractional_demand += new_demand;
-            continue;
-        }
         current_edge->src = req.src;
         current_edge->dst = req.dst;
-        new_demand += fractional_demand;
-        current_edge->backlog = (uint16_t)new_demand;
-        fractional_demand = new_demand - (uint16_t)new_demand;
+        current_edge->backlog = req.backlog;
+        current_edge->timeslot = (uint16_t) req.time;
         if (current_edge->backlog == 0) {
             printf("oops\n");
         }
-        current_edge->timeslot = (uint16_t) current_time;
         num_generated++;
         current_edge++;
+        current_time = req.time;
     }
 
     assert(num_generated <= size);

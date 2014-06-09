@@ -138,7 +138,7 @@ void exec_stress_test_core(struct stress_test_core_cmd * cmd,
 	next_rate_increase_time = now;
 
 	init_request_generator(&gen, next_mean_t_btwn_requests,
-						now, cmd->num_nodes);
+						now, cmd->num_nodes, cmd->demand_tslots);
 
 	/* MAIN LOOP */
 	while (now < cmd->end_time) {
@@ -189,7 +189,7 @@ void exec_stress_test_core(struct stress_test_core_cmd * cmd,
                         /* reinitialize the request generator */
                         comm_log_mean_t(next_mean_t_btwn_requests);
 			reinit_request_generator(&gen, next_mean_t_btwn_requests,
-					now, cmd->num_nodes);
+					now, cmd->num_nodes, cmd->demand_tslots);
 			get_next_request(&gen, &next_request);
 
 			next_rate_increase_time = rte_get_timer_cycles() +
@@ -206,9 +206,9 @@ void exec_stress_test_core(struct stress_test_core_cmd * cmd,
 
 			/* enqueue the request */
 			add_backlog(g_admissible_status(),
-					next_request.src, next_request.dst, cmd->demand_tslots);
+					next_request.src, next_request.dst, next_request.backlog);
 			comm_log_demand_increased(next_request.src, next_request.dst, 0,
-					cmd->demand_tslots, cmd->demand_tslots);
+					next_request.backlog, next_request.backlog);
 
 			n_processed_requests++;
 

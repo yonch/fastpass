@@ -3,13 +3,7 @@
 # this script builds and runs the stress test with the
 # specified arguments. it also shields CPUs appropriately.
 
-if [ x`which pls` == x ]; then
-    echo no_pls
-    MAKE=make
-else
-    echo pls
-    MAKE="pls make"
-fi
+MY_USER=`whoami`
 
 # check arguments
 if [ "$#" -ne 2 ]; then
@@ -58,8 +52,10 @@ else
 fi
 
 # build
-$MAKE clean
-$MAKE CMD_LINE_CFLAGS+=-DALGO_N_CORES=$ALGO_N_CORES CMD_LINE_CFLAGS+=-DBATCH_SIZE=$BATCH_SIZE CMD_LINE_CFLAGS+=-DBATCH_SHIFT=$BATCH_SHIFT -j9
+sudo cset shield -c 1-6
+set -x
+sudo -E cset shield -e -- sudo -E -u $MY_USER make clean
+sudo -E cset shield -e -- sudo -E -u $MY_USER make CMD_LINE_CFLAGS+=-DALGO_N_CORES=$ALGO_N_CORES CMD_LINE_CFLAGS+=-DBATCH_SIZE=$BATCH_SIZE CMD_LINE_CFLAGS+=-DBATCH_SHIFT=$BATCH_SHIFT -j9
 
 # shield cpus appropriately
 sudo cset shield -c 1-$TOTAL_NUM_CORES

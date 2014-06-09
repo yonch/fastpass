@@ -27,6 +27,8 @@ elif [ "$TOTAL_NUM_CORES" -eq 4 ]; then
     CPU_MASK=1e
 elif [ "$TOTAL_NUM_CORES" -eq 6 ]; then
     CPU_MASK=7e
+elif [ "$TOTAL_NUM_CORES" -eq 8 ]; then
+    CPU_MASK=1fe
 elif [ "$TOTAL_NUM_CORES" -eq 10 ]; then
     CPU_MASK=7fe
 elif [ "$TOTAL_NUM_CORES" -eq 18 ]; then
@@ -38,7 +40,13 @@ fi
 
 # parse batch size and determine batch shift
 BATCH_SIZE="$2"
-if [ "$BATCH_SIZE" -eq 8 ]; then
+if [ "$BATCH_SIZE" -eq 1 ]; then
+    BATCH_SHIFT=0
+elif [ "$BATCH_SIZE" -eq 2 ]; then
+    BATCH_SHIFT=1
+elif [ "$BATCH_SIZE" -eq 4 ]; then
+    BATCH_SHIFT=2
+elif [ "$BATCH_SIZE" -eq 8 ]; then
     BATCH_SHIFT=3
 elif [ "$BATCH_SIZE" -eq 16 ]; then
     BATCH_SHIFT=4

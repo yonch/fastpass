@@ -36,4 +36,4 @@ ggplot(data, aes(x=cores, y=gbps, color=as.factor(batch_size), shape=as.factor(b
              scale_color_discrete(name="Batch size", guide = guide_legend(reverse = TRUE)) +
              scale_shape_discrete(name="Batch size", guide = guide_legend(reverse = TRUE)) +
              scale_x_continuous(breaks=c(2, 4, 6, 8)) +
-             coord_cartesian(xlim=c(0, 9), ylim=c(0, 750))
+             coord_cartesian(xlim=c(0, 9), ylim=c(0, 2500))

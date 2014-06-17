@@ -7,4 +7,5 @@ rdtsc
 Rplots*
 *.csv
 *.pdf
+*.tar
 microbench

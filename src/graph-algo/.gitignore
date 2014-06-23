@@ -8,4 +8,5 @@ Rplots*
 *.csv
 *.pdf
 *.tar
+throughput_results_*
 microbench

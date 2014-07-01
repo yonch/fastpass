@@ -12,7 +12,7 @@
 #include <rte_mempool.h>
 #include <rte_branch_prediction.h>
 #include "../protocol/platform/generic.h"
-#include "../controller/dpdk-time.h"
+#include "../arbiter/dpdk-time.h"
 #define fp_free(ptr)                            rte_free(ptr)
 #define fp_calloc(typestr, num, size)           rte_calloc(typestr, num, size, 0)
 #define fp_malloc(typestr, size)		rte_malloc(typestr, size, 0)

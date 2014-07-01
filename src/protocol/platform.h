@@ -11,7 +11,7 @@
 #ifdef __KERNEL__
 #include "../kernel-mod/linux-platform.h"
 #else
-#include "../controller/dpdk-platform.h"
+#include "../arbiter/dpdk-platform.h"
 #endif
 
 /** FUNCTIONS IN PLATFORM.H **/

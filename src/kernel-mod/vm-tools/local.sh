@@ -45,7 +45,7 @@ cd /tmp
 	rm -f .echo_tmp
 
 # bind DPDK port (eth11)
-cd ~/fastpass/src/controller
+cd ~/fastpass/src/arbiter
 sudo ./pci_bind.py +2
 
 # start passive shell (eth6)

@@ -1,7 +1,7 @@
 #!/bin/bash
 
 # this script parses the output of a throughput experiment, generated
-# by running ./measure_tslot_throughput.sh in fastpass/src/controller.
+# by running ./measure_tslot_throughput.sh in fastpass/src/arbiter.
 # it generates a csv output file and a graph of throughput vs. number
 # of cores.
 

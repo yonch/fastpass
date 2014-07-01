@@ -1157,4 +1157,4 @@ static void __exit fastpass_module_exit(void)
 module_init(fastpass_module_init)
 module_exit(fastpass_module_exit)
 MODULE_AUTHOR("Jonathan Perry");
-MODULE_LICENSE("GPL");
+MODULE_LICENSE("Dual MIT/GPL");

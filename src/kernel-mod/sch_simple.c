@@ -74,4 +74,4 @@ static void __exit simple_module_exit(void)
 module_init(simple_module_init)
 module_exit(simple_module_exit)
 MODULE_AUTHOR("Jonathan Perry");
-MODULE_LICENSE("GPL");
+MODULE_LICENSE("Dual MIT/GPL");

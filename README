@@ -1,0 +1,35 @@
+This is a code release of Fastpass:
+  "a datacenter network framework that aims for high utilization with 
+   zero queueing. It provides low median and tail latencies for packets,
+   high data rates between machines, and flexible network resource 
+   allocation policies. The key idea in Fastpass is fine-grained control 
+   over packet transmission times and network paths.
+
+   A logically centralized arbiter controls and orchestrates all network 
+   transfers."
+
+
+DIRECTORY STRUCTURE
+
+  src/
+    - arbiter/       main arbiter loop and multi-core communications
+    - grant-accept/  PIM allocator
+    - graph-algo/    path selection, and max-min fair and SJF allocators
+    - kernel-mod/    Linux kernel module
+    - protocol/      FCP (Fastpass Control Protocol) implementation
+    - tcp-benchmark/ fine-grained socket throughput measurement for Linux
+
+  bindings/
+    - graph-algo/    SWIG bindings for graph-algo, for testing.
+
+  tests/
+    - graph-algo/    Some tests for allocators and path selection
+    - protocol/      Protocol-related tests
+
+Note that tests were sporadically maintained after modification to src/, so 
+   some might not pass.
+
+
+COMPILING, AND MORE INFORMATION
+  
+  Please see http://fastpass.mit.edu

@@ -8,7 +8,6 @@ simple-y := sch_timeslot.o sch_simple.o
 
 else
 # normal makefile
-KDIR ?= /home/yonch/huge/linux-build/
 
 default:
 #	$(MAKE) -C $(KDIR) M=$$PWD KCPPFLAGS="-DFASTPASS_ENDPOINT"

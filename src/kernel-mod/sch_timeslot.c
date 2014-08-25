@@ -109,10 +109,6 @@ struct tsq_sched_data {
 	u8		hash_tbl_log;				/* log number of hash buckets */
 	u32		tslot_mul;					/* mul to calculate timeslot from nsec */
 	u32		tslot_shift;				/* shift to calculate timeslot from nsec */
-	u32		miss_threshold;				/* #timeslots that alloc is considered missed */
-	u32		max_dev_backlog_ns;			/* max ns that allow a tslot to be enqueued to internal */
-	u32		max_preload;				/* how early (#timeslots) can enqueueing be */
-	u32		update_timeslot_timer_ns;	/* every how many ns to update queues */
 
 	struct psched_ratecfg data_rate;	/* rate of payload packets */
 	u32		tslot_len_approx;					/* duration of a timeslot, in nanosecs */
@@ -1015,19 +1011,23 @@ static int tsq_tc_change(struct Qdisc *sch, struct nlattr *opt) {
 	}
 
 	if (tb[TCA_FASTPASS_MISS_THRESHOLD]) {
-		q->miss_threshold = nla_get_u32(tb[TCA_FASTPASS_MISS_THRESHOLD]);
+		FASTPASS_WARN("should use kernel module parameter for miss threshold rather than tc\n");
+		err = -EINVAL;
 	}
 
 	if (tb[TCA_FASTPASS_DEV_BACKLOG_NS]) {
-		q->max_dev_backlog_ns = nla_get_u32(tb[TCA_FASTPASS_DEV_BACKLOG_NS]);
+		FASTPASS_WARN("got deprecated max dev backlog paramter\n");
+		err = -EINVAL;
 	}
 
 	if (tb[TCA_FASTPASS_MAX_PRELOAD]) {
-		q->max_preload = nla_get_u32(tb[TCA_FASTPASS_MAX_PRELOAD]);
+		FASTPASS_WARN("should use kernel module parameter for max preload rather than tc\n");
+		err = -EINVAL;
 	}
 
 	if (tb[TCA_FASTPASS_UPDATE_TIMESLOT_TIMER_NS]) {
-		q->update_timeslot_timer_ns = nla_get_u32(tb[TCA_FASTPASS_UPDATE_TIMESLOT_TIMER_NS]);
+		FASTPASS_WARN("got deprecated update timeslot timer paramter\n");
+		err = -EINVAL;
 	}
 
 	err = tsq_tc_resize(q, fp_log);
@@ -1095,10 +1095,6 @@ static int tsq_tc_init(struct Qdisc *sch, struct nlattr *opt)
 	q->hash_tbl_log		= ilog2(1024);
 	q->tslot_mul		= 1;
 	q->tslot_shift		= 20;
-	q->miss_threshold	= 5;
-	q->max_dev_backlog_ns = (2 << 20);
-	q->max_preload		= 5;
-	q->update_timeslot_timer_ns = 2048;
 
 
 	psched_ratecfg_precompute(&q->data_rate, &data_rate_spec);
@@ -1171,11 +1167,7 @@ static int tsq_tc_dump(struct Qdisc *sch, struct sk_buff *skb)
 	    nla_put_u32(skb, TCA_FASTPASS_DATA_RATE, (u32)(q->data_rate.rate_bps >> 3)) ||
 	    nla_put_u32(skb, TCA_FASTPASS_TIMESLOT_NSEC, q->tslot_len_approx) ||
 	    nla_put_u32(skb, TCA_FASTPASS_TIMESLOT_MUL, q->tslot_mul) ||
-	    nla_put_u32(skb, TCA_FASTPASS_TIMESLOT_SHIFT, q->tslot_shift) ||
-		nla_put_u32(skb, TCA_FASTPASS_MISS_THRESHOLD, q->miss_threshold) ||
-		nla_put_u32(skb, TCA_FASTPASS_DEV_BACKLOG_NS, q->max_dev_backlog_ns) ||
-		nla_put_u32(skb, TCA_FASTPASS_MAX_PRELOAD, q->max_preload) ||
-		nla_put_u32(skb, TCA_FASTPASS_UPDATE_TIMESLOT_TIMER_NS, q->update_timeslot_timer_ns))
+	    nla_put_u32(skb, TCA_FASTPASS_TIMESLOT_SHIFT, q->tslot_shift))
 		goto nla_put_failure;
 
 	nla_nest_end(skb, opts);
@@ -1195,6 +1187,13 @@ static int tsq_proc_show(struct seq_file *seq, void *v)
 	seq_printf(seq, "  tsq_sched_data *p = %p ", q);
 	seq_printf(seq, ", timestamp 0x%llX ", now_real);
 	seq_printf(seq, ", timeslot 0x%llX", q->current_timeslot);
+
+	/* configuration */
+	seq_printf(seq, "\n  buckets_log %u", q->hash_tbl_log);
+	seq_printf(seq, ", rate %u", (u32)(q->data_rate.rate_bps >> 3));
+	seq_printf(seq, ", timeslot_ns %u", q->tslot_len_approx);
+	seq_printf(seq, ", timeslot_mul %u", q->tslot_mul);
+	seq_printf(seq, ", timeslot_shift %u", q->tslot_shift);
 
 	/* flow statistics */
 	seq_printf(seq, "\n  %u flows (%u inactive)",

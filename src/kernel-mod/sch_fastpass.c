@@ -895,6 +895,18 @@ static int fastpass_proc_show(struct seq_file *seq, void *v)
 	seq_printf(seq, ", timestamp 0x%llX ", now_real);
 	seq_printf(seq, ", timeslot 0x%llX", q->current_timeslot);
 
+	/* configuration */
+	seq_printf(seq, "\n  req_cost %u ", req_cost);
+	seq_printf(seq, ", req_bucketlen %u", req_bucketlen);
+	seq_printf(seq, ", req_min_gap %u", req_min_gap);
+	seq_printf(seq, ", ctrl_addr %s", ctrl_addr);
+	seq_printf(seq, ", reset_window_us %u", reset_window_us);
+	seq_printf(seq, ", retrans_timeout_ns %u", retrans_timeout_ns);
+	seq_printf(seq, ", update_timer_ns %u", update_timer_ns);
+	seq_printf(seq, ", proc_dump_dst %u", proc_dump_dst);
+	seq_printf(seq, ", miss_threshold %u", miss_threshold);
+	seq_printf(seq, ", max_preload %u", max_preload);
+
 	/* timeslot statistics */
 	seq_printf(seq, "\n  horizon mask 0x%016llx",
 			wnd_get_mask(&q->alloc_wnd, q->current_timeslot+63));

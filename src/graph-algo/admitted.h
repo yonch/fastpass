@@ -103,4 +103,16 @@ struct admitted_traffic *get_admitted_struct(struct admitted_traffic *admitted,
     return &admitted[index];
 }
 
+// Get the size of an admitted traffic struct
+static inline
+uint16_t get_admitted_struct_size() {
+	return sizeof(struct admitted_traffic);
+}
+
+// Get the number of edge admitted
+static inline
+uint16_t get_num_admitted(struct admitted_traffic *admitted) {
+	return admitted->size;
+}
+
 #endif /* ADMITTED_H_ */

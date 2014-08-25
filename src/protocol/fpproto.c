@@ -924,18 +924,21 @@ int fpproto_encode_packet(struct fpproto_pktdesc *pd, u8 *pkt, u32 max_len,
 void fpproto_dump_stats(struct fpproto_conn *conn, struct fp_proto_stat *stat)
 {
 	memcpy(stat, &conn->stat, sizeof(conn->stat));
+}
 
-	stat->version				= FASTPASS_PROTOCOL_STATS_VERSION;
-	stat->last_reset_time		= conn->last_reset_time;
-	stat->out_max_seqno			= wnd_head(&conn->outwnd);
-	stat->in_max_seqno			= conn->in_max_seqno;
-	stat->in_sync				= conn->in_sync;
-	stat->consecutive_bad_pkts	= (__u16)conn->consecutive_bad_pkts;
-	stat->tx_num_unacked		= (__u16)wnd_num_marked(&conn->outwnd);
-	stat->earliest_unacked		=
+void fpproto_update_internal_stats(struct fpproto_conn *conn)
+{
+	conn->stat.version				= FASTPASS_PROTOCOL_STATS_VERSION;
+	conn->stat.last_reset_time		= conn->last_reset_time;
+	conn->stat.out_max_seqno		= wnd_head(&conn->outwnd);
+	conn->stat.in_max_seqno			= conn->in_max_seqno;
+	conn->stat.in_sync				= conn->in_sync;
+	conn->stat.consecutive_bad_pkts	= (__u16)conn->consecutive_bad_pkts;
+	conn->stat.tx_num_unacked		= (__u16)wnd_num_marked(&conn->outwnd);
+	conn->stat.earliest_unacked		=
 			wnd_empty(&conn->outwnd) ? 0 : wnd_earliest_marked(&conn->outwnd);
-	stat->inwnd					= conn->inwnd;
-	stat->next_timeout_seqno	= conn->next_timeout_seqno;
+	conn->stat.inwnd					= conn->inwnd;
+	conn->stat.next_timeout_seqno	= conn->next_timeout_seqno;
 }
 
 void fpproto_init_conn(struct fpproto_conn *conn, struct fpproto_ops *ops,

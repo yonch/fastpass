@@ -260,8 +260,11 @@ void fpproto_init_conn(struct fpproto_conn *conn, struct fpproto_ops *ops,
 /* destroys conn */
 void fpproto_destroy_conn(struct fpproto_conn *conn);
 
-/* dumps statistics to @stat */
+/* dumps statistics to @stat, run fpproto_update_internal_stats first */
 void fpproto_dump_stats(struct fpproto_conn *conn, struct fp_proto_stat *stat);
+
+/* updates internal statistics struct conn->stat with up-to-date statistics */
+void fpproto_update_internal_stats(struct fpproto_conn *conn);
 
 /**
  * Forces a reset (maybe a reset needed due to application failure).

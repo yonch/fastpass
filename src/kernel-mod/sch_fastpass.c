@@ -930,6 +930,7 @@ static int fastpass_proc_show(struct seq_file *seq, void *v)
 	seq_printf(seq, "\n  %llu requests w/no a-req", scs->request_with_empty_flowqueue);
 
 	/* protocol state */
+	fpproto_update_internal_stats(&q->conn);
 	fpproto_print_stats(&q->conn.stat, seq);
 	/* socket state */
 	fpproto_print_socket_stats(q->ctrl_sock->sk, seq);

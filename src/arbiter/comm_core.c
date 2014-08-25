@@ -647,12 +647,18 @@ static inline void process_allocated_traffic(struct comm_core_state *core,
 	for (i = 0; i < rc; i++) {
                 partition = get_admitted_partition(admitted[i]);
 		current_timeslot = ++core->latest_timeslot[partition];
-		comm_log_got_admitted_tslot(admitted[i]->size, current_timeslot,
-                                            partition);
-		for (j = 0; j < admitted[i]->size; j++) {
+		comm_log_got_admitted_tslot(get_num_admitted(admitted[i]),
+					    current_timeslot, partition);
+		for (j = 0; j < get_num_admitted(admitted[i]); j++) {
 			/* process this node's allocation */
+#if defined(EMULATION_ALGO)
+			/* TODO: implement this for emulation */
+			src = 0;
+			dst = 0;
+#else
 			src = admitted[i]->edges[j].src;
 			dst = admitted[i]->edges[j].dst;
+#endif
 
 			/* get the node's structure */
 			en = &end_nodes[src];
@@ -1050,6 +1056,7 @@ void comm_dump_stat(uint16_t node_id, struct conn_log_struct *conn_log)
 	struct end_node_state *en = &end_nodes[node_id];
 
 	uint64_t now = rte_get_timer_cycles();
+	fpproto_update_internal_stats(&en->conn);
 	fpproto_dump_stats(&en->conn, &conn_log->stat);
 	conn_log->next_retrans_gap = en->timeout_timer.time * TIMER_GRANULARITY - now;
 	conn_log->next_tx_gap = en->tx_timer.time * TIMER_GRANULARITY - now;

@@ -90,8 +90,8 @@ make_igmp(uint8_t src_port, uint32_t controller_ip)
 
 	// Activate IP checksum offload for packet
 	m->ol_flags |= PKT_TX_IP_CKSUM;
-	m->pkt.vlan_macip.f.l2_len = sizeof(struct ether_hdr);
-	m->pkt.vlan_macip.f.l3_len = sizeof(struct ipv4_hdr);
+	m->l2_len = sizeof(struct ether_hdr);
+	m->l3_len = sizeof(struct ipv4_hdr);
 	ipv4_hdr->hdr_checksum = 0;
 
 	/* IGMP header */

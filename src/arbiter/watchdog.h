@@ -84,8 +84,8 @@ make_watchdog(uint8_t port, uint32_t our_ip)
 
 	// Activate IP checksum offload for packet
 	m->ol_flags |= PKT_TX_IP_CKSUM;
-	m->pkt.vlan_macip.f.l2_len = sizeof(struct ether_hdr);
-	m->pkt.vlan_macip.f.l3_len = sizeof(struct ipv4_hdr);
+	m->l2_len = sizeof(struct ether_hdr);
+	m->l3_len = sizeof(struct ipv4_hdr);
 	ipv4_hdr->hdr_checksum = 0;
 
 	/* Watchdog header */

@@ -548,7 +548,7 @@ out:
 	return err;
 }
 
-void __exit fpproto_unregister(void)
+void fpproto_unregister(void)
 {
 	pr_info("%s: unregistering protocol\n", __func__);
 	inet_unregister_protosw(&fastpass4_protosw);

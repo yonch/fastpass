@@ -1093,8 +1093,8 @@ static int tsq_tc_init(struct Qdisc *sch, struct nlattr *opt)
 	/* defaults */
 	sch->limit			= 10000;
 	q->hash_tbl_log		= ilog2(1024);
-	q->tslot_mul		= 1;
-	q->tslot_shift		= 20;
+	q->tslot_mul		= 419;
+	q->tslot_shift		= 19;
 
 
 	psched_ratecfg_precompute(&q->data_rate, &data_rate_spec, 0);

@@ -55,7 +55,7 @@ struct fp_kernel_pktdesc {
 };
 
 extern int __init fpproto_register(void);
-void __exit fpproto_unregister(void);
+void fpproto_unregister(void);
 
 void fpproto_set_priv(struct sock *sk, void *priv);
 

@@ -140,7 +140,7 @@ int fpproto_connect(struct sock *sk, struct sockaddr *uaddr, int addr_len)
 	rt = ip_route_connect(fl4, usin->sin_addr.s_addr, saddr,
 			      RT_CONN_FLAGS(sk), oif,
 			      sk->sk_protocol,
-			      inet->inet_sport, usin->sin_port, sk, true);
+			      inet->inet_sport, usin->sin_port, sk);
 	if (IS_ERR(rt)) {
 		err = PTR_ERR(rt);
 		if (err == -ENETUNREACH)
@@ -275,7 +275,7 @@ static void fpproto_send_skb(struct sock *sk, struct sk_buff *skb)
 	/* don't need the lock because the tasklet guarantees mutual exclusion */
 
 	/* send onwards */
-	err = ip_queue_xmit(skb, &inet->cork.fl);
+	err = ip_queue_xmit(sk, skb, &inet->cork.fl);
 	err = net_xmit_eval(err);
 	if (unlikely(err != 0)) {
 		fp->stat.xmit_errors++;
@@ -337,14 +337,14 @@ static int fpproto_sk_init(struct sock *sk)
 	return 0;
 }
 
-static int fpproto_userspace_sendmsg(struct kiocb *iocb, struct sock *sk,
+static int fpproto_userspace_sendmsg(struct sock *sk,
 		struct msghdr *msg, size_t len)
 {
 	return -ENOTSUPP;
 }
 
 /* implementation of userspace recv() - unsupported */
-static int fpproto_userspace_recvmsg(struct kiocb *iocb, struct sock *sk,
+static int fpproto_userspace_recvmsg(struct sock *sk,
 		struct msghdr *msg, size_t len, int noblock, int flags, int *addr_len)
 {
 	return -ENOTSUPP;
@@ -456,7 +456,6 @@ static struct inet_protosw fastpass4_protosw = {
 	.protocol	=  IPPROTO_FASTPASS,
 	.prot		=  &fastpass_prot,
 	.ops		=  &inet_dgram_ops,
-	.no_check	=  0,		/* must checksum (RFC 3828) */
 	.flags		=  0,
 };
 
@@ -491,7 +490,6 @@ static int init_hashinfo(void)
 
 	for (i = 0; i <= fastpass_hashinfo.ehash_mask; i++) {
 			INIT_HLIST_NULLS_HEAD(&fastpass_hashinfo.ehash[i].chain, i);
-			INIT_HLIST_NULLS_HEAD(&fastpass_hashinfo.ehash[i].twchain, i);
 	}
 	return 0;
 }
@@ -548,7 +546,7 @@ out:
 	return err;
 }
 
-void __exit fpproto_unregister(void)
+void fpproto_unregister(void)
 {
 	pr_info("%s: unregistering protocol\n", __func__);
 	inet_unregister_protosw(&fastpass4_protosw);

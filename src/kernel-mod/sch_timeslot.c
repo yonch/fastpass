@@ -993,7 +993,7 @@ static int tsq_tc_change(struct Qdisc *sch, struct nlattr *opt) {
 		if (data_rate_spec.rate == 0)
 			err = -EINVAL;
 		else
-			psched_ratecfg_precompute(&q->data_rate, &data_rate_spec);
+			psched_ratecfg_precompute(&q->data_rate, &data_rate_spec, 0);
 	}
 	if (tb[TCA_FASTPASS_TIMESLOT_NSEC]) {
 		FASTPASS_WARN("got deprecated timeslot length paramter\n");
@@ -1093,11 +1093,11 @@ static int tsq_tc_init(struct Qdisc *sch, struct nlattr *opt)
 	/* defaults */
 	sch->limit			= 10000;
 	q->hash_tbl_log		= ilog2(1024);
-	q->tslot_mul		= 1;
-	q->tslot_shift		= 20;
+	q->tslot_mul		= 419;
+	q->tslot_shift		= 19;
 
 
-	psched_ratecfg_precompute(&q->data_rate, &data_rate_spec);
+	psched_ratecfg_precompute(&q->data_rate, &data_rate_spec, 0);
 	q->dst_hash_tbl	= NULL;
 	skb_q_init(&q->enqueue_skb_q);
 	skb_q_init(&q->reg_prio);
@@ -1164,7 +1164,7 @@ static int tsq_tc_dump(struct Qdisc *sch, struct sk_buff *skb)
 
 	if (nla_put_u32(skb, TCA_FASTPASS_PLIMIT, sch->limit) ||
 	    nla_put_u32(skb, TCA_FASTPASS_BUCKETS_LOG, q->hash_tbl_log) ||
-	    nla_put_u32(skb, TCA_FASTPASS_DATA_RATE, (u32)(q->data_rate.rate_bps >> 3)) ||
+	    nla_put_u32(skb, TCA_FASTPASS_DATA_RATE, (u32)q->data_rate.rate_bytes_ps) ||
 	    nla_put_u32(skb, TCA_FASTPASS_TIMESLOT_NSEC, q->tslot_len_approx) ||
 	    nla_put_u32(skb, TCA_FASTPASS_TIMESLOT_MUL, q->tslot_mul) ||
 	    nla_put_u32(skb, TCA_FASTPASS_TIMESLOT_SHIFT, q->tslot_shift))
@@ -1190,7 +1190,7 @@ static int tsq_proc_show(struct seq_file *seq, void *v)
 
 	/* configuration */
 	seq_printf(seq, "\n  buckets_log %u", q->hash_tbl_log);
-	seq_printf(seq, ", rate %u", (u32)(q->data_rate.rate_bps >> 3));
+	seq_printf(seq, ", rate %u", (u32)q->data_rate.rate_bytes_ps);
 	seq_printf(seq, ", timeslot_ns %u", q->tslot_len_approx);
 	seq_printf(seq, ", timeslot_mul %u", q->tslot_mul);
 	seq_printf(seq, ", timeslot_shift %u", q->tslot_shift);

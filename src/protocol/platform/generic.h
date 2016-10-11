@@ -53,6 +53,8 @@ typedef uint16_t __sum16;
 
 #ifdef _RTE_IP_H_
 #include <rte_byteorder.h>
+#undef ntohs
+#undef ntohl
 #define ntohs(x) rte_be_to_cpu_16(x)
 #define ntohl(x) rte_be_to_cpu_32(x)
 #else
@@ -169,18 +171,23 @@ typedef uint8_t u8;
   c ^= b; c -= fp_rot(b,24); \
 }
 
-static inline u32 fp_jhash_3words(u32 a, u32 b, u32 c, u32 initval)
+static inline u32 fp_jhash_nwords(u32 a, u32 b, u32 c, u32 initval)
 {
-	a += 0xDEADBEEF;
-	b += 0xDEADBEEF;
+	a += initval;
+	b += initval;
 	c += initval;
 	fp_jhash_final(a,b,c);
 	return c;
 }
 
+static inline u32 fp_jhash_3words(u32 a, u32 b, u32 c, u32 initval)
+{
+	return fp_jhash_nwords(a, b, c, initval + 0xdeadbeef + (3 << 2));
+}
+
 static inline u32 fp_jhash_1word(u32 a, u32 initval)
 {
-	return jhash_3words(a, 0, 0, initval);
+	return fp_jhash_nwords(a, 0, 0, initval + 0xdeadbeef + (1 << 2));
 }
 
 /* based on rte_hash_crc from DPDK's rte_hash_crc.h, but does checksum */

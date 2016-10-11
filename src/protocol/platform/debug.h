@@ -12,7 +12,7 @@
 /*
  * 	Warning and debugging macros, (originally taken from DCCP)
  */
-#define FASTPASS_WARN(fmt, a...) LIMIT_NETDEBUG(KERN_WARNING "%s: " fmt,       \
+#define FASTPASS_WARN(fmt, a...) net_warn_ratelimited("%s: " fmt,       \
 							__func__, ##a)
 #define FASTPASS_CRIT(fmt, a...) printk(KERN_CRIT fmt " at %s:%d/%s()\n", ##a, \
 					 __FILE__, __LINE__, __func__)

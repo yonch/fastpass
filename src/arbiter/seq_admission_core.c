@@ -51,7 +51,7 @@ void seq_admission_init_global(struct rte_ring *q_admitted_out)
 	/* allocate head_bin_mempool */
 	uint32_t pool_index = 0;
 	uint32_t socketid = 0;
-	rte_snprintf(s, sizeof(s), "bin_pool_%d", pool_index);
+	snprintf(s, sizeof(s), "bin_pool_%d", pool_index);
 	bin_mempool =
 		rte_mempool_create(s,
 			BIN_MEMPOOL_SIZE, /* num elements */
@@ -70,7 +70,7 @@ void seq_admission_init_global(struct rte_ring *q_admitted_out)
 	/* allocate admitted_traffic_pool */
 	pool_index = 0;
 	if (admitted_traffic_pool[pool_index] == NULL) {
-		rte_snprintf(s, sizeof(s), "admitted_traffic_pool_%d", pool_index);
+		snprintf(s, sizeof(s), "admitted_traffic_pool_%d", pool_index);
 		admitted_traffic_pool[pool_index] =
 			rte_mempool_create(s,
 				ADMITTED_TRAFFIC_MEMPOOL_SIZE, /* num elements */
@@ -93,7 +93,7 @@ void seq_admission_init_global(struct rte_ring *q_admitted_out)
 
 	/* init q_bin */
 	for (i = 0; i < 2 * N_ADMISSION_CORES; i++) {
-		rte_snprintf(s, sizeof(s), "q_bin_%d", i);
+		snprintf(s, sizeof(s), "q_bin_%d", i);
 		q_bin[i] = rte_ring_create(s, Q_BIN_RING_SIZE, 0,
 									RING_F_SP_ENQ | RING_F_SC_DEQ);
 		if (q_bin[i] == NULL)

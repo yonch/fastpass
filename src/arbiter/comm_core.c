@@ -167,7 +167,7 @@ void comm_init_core(uint16_t lcore_id, uint64_t first_time_slot)
 
 	/* initialize mempool for pktdescs */
 	if (pktdesc_pool[socketid] == NULL) {
-		rte_snprintf(s, sizeof(s), "pktdesc_pool_%d", socketid);
+		snprintf(s, sizeof(s), "pktdesc_pool_%d", socketid);
 		pktdesc_pool[socketid] =
 			rte_mempool_create(s,
 				PKTDESC_MEMPOOL_SIZE, /* num elements */
@@ -455,8 +455,8 @@ make_packet(struct end_node_state *en, struct fpproto_pktdesc *pd)
 
 	// Activate IP checksum offload for packet
 	m->ol_flags |= PKT_TX_IP_CKSUM;
-	m->pkt.vlan_macip.f.l2_len = sizeof(struct ether_hdr);
-	m->pkt.vlan_macip.f.l3_len = sizeof(struct ipv4_hdr);
+	m->l2_len = sizeof(struct ether_hdr);
+	m->l3_len = sizeof(struct ipv4_hdr);
 	ipv4_hdr->hdr_checksum = 0;
 
 	return m;
